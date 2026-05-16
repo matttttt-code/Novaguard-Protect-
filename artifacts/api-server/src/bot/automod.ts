@@ -121,6 +121,7 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
   client.on(Events.MessageCreate, async (message: Message) => {
     if (!message.guild || message.author.bot) return;
     if (message.channelId === LOG_CHANNEL_ID) return;
+    if (message.content.startsWith("&")) return;
 
     const member = message.member as GuildMember | null;
     if (!member) return;

@@ -5,8 +5,9 @@ import {
   ActivityType,
   type ApplicationCommandDataResolvable,
 } from "discord.js";
-import { commands } from "./commands/index.js";
+import { commands, prefixCommands } from "./commands/index.js";
 import { registerAutoMod } from "./automod.js";
+import { registerPrefixHandler } from "./prefix-handler.js";
 import { logger } from "../lib/logger.js";
 
 export function startBot(): void {
@@ -72,6 +73,7 @@ export function startBot(): void {
   });
 
   registerAutoMod(client, hasMessageContent);
+  registerPrefixHandler(client, prefixCommands);
 
   client.on(Events.GuildMemberAdd, (member) => {
     logger.info(

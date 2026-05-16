@@ -13,7 +13,13 @@ import * as lock from "./lock.js";
 import * as unlock from "./unlock.js";
 import * as role from "./role.js";
 import * as nickname from "./nickname.js";
+import * as sanctioninfo from "./sanctioninfo.js";
+import * as infome from "./infome.js";
+import * as getid from "./getid.js";
+import * as botinfo from "./botinfo.js";
 import type { ChatInputCommandInteraction } from "discord.js";
+import type { PrefixCommand } from "../prefix-handler.js";
+import type { Message } from "discord.js";
 
 export interface Command {
   data: { toJSON: () => object; name: string };
@@ -36,4 +42,22 @@ export const commands: Command[] = [
   unlock,
   role,
   nickname,
+  sanctioninfo,
+  infome,
+  getid,
+  botinfo,
 ];
+
+type PrefixModule = {
+  prefixName: string;
+  prefixAliases?: string[];
+  executeMessage: (message: Message, args: string[]) => Promise<void>;
+};
+
+const prefixModules: PrefixModule[] = [sanctioninfo, infome, getid, botinfo];
+
+export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({
+  name: mod.prefixName,
+  aliases: mod.prefixAliases,
+  execute: (message, args) => mod.executeMessage(message, args),
+}));
