@@ -6,6 +6,7 @@ import {
   Message,
 } from "discord.js";
 import { getWarnings } from "../warnings-store.js";
+import { sendLog, logEmbed } from "../log.js";
 
 async function buildSanctionEmbed(
   member: GuildMember,
@@ -48,15 +49,8 @@ async function buildSanctionEmbed(
           : "✅ Aucun",
         inline: true,
       },
-      {
-        name: "Statut ban",
-        value: isBanned ? "🔨 Banni" : "✅ Non banni",
-        inline: true,
-      },
-      {
-        name: `⚠️ Avertissements (${warnings.length})`,
-        value: warningList,
-      }
+      { name: "Statut ban", value: isBanned ? "🔨 Banni" : "✅ Non banni", inline: true },
+      { name: `⚠️ Avertissements (${warnings.length})`, value: warningList }
     )
     .setTimestamp();
 }
@@ -76,7 +70,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.deferReply();
   const embed = await buildSanctionEmbed(member, interaction.guildId);
-  return interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(0x8b5cf6, "🗂️ Consultation sanctions", [
+      { name: "Cible", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Via", value: "Commande slash", inline: true },
+    ], { tag: interaction.user.tag, id: interaction.user.id })
+  );
 }
 
 export const prefixName = "sanctioninfo";
@@ -102,4 +104,13 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const embed = await buildSanctionEmbed(member, message.guild.id);
   await message.reply({ embeds: [embed] });
+
+  await sendLog(
+    message.client,
+    logEmbed(0x8b5cf6, "🗂️ Consultation sanctions", [
+      { name: "Cible", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Via", value: "Commande préfixe `&sanctioninfo`", inline: true },
+      { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+    ], { tag: message.author.tag, id: message.author.id })
+  );
 }

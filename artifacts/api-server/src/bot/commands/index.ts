@@ -17,9 +17,9 @@ import * as sanctioninfo from "./sanctioninfo.js";
 import * as infome from "./infome.js";
 import * as getid from "./getid.js";
 import * as botinfo from "./botinfo.js";
-import type { ChatInputCommandInteraction } from "discord.js";
+import * as commandlist from "./commandlist.js";
+import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
-import type { Message } from "discord.js";
 
 export interface Command {
   data: { toJSON: () => object; name: string };
@@ -46,6 +46,7 @@ export const commands: Command[] = [
   infome,
   getid,
   botinfo,
+  commandlist,
 ];
 
 type PrefixModule = {
@@ -54,7 +55,13 @@ type PrefixModule = {
   executeMessage: (message: Message, args: string[]) => Promise<void>;
 };
 
-const prefixModules: PrefixModule[] = [sanctioninfo, infome, getid, botinfo];
+const prefixModules: PrefixModule[] = [
+  sanctioninfo,
+  infome,
+  getid,
+  botinfo,
+  commandlist,
+];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({
   name: mod.prefixName,

@@ -5,6 +5,7 @@ import {
   EmbedBuilder,
   Message,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 function buildInfoEmbed(member: GuildMember): EmbedBuilder {
   const roles = member.roles.cache
@@ -28,57 +29,19 @@ function buildInfoEmbed(member: GuildMember): EmbedBuilder {
 
   return new EmbedBuilder()
     .setColor(member.displayColor || 0x6366f1)
-    .setAuthor({
-      name: member.user.tag,
-      iconURL: member.user.displayAvatarURL(),
-    })
+    .setAuthor({ name: member.user.tag, iconURL: member.user.displayAvatarURL() })
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .addFields(
       { name: "🪪 ID", value: `\`${member.id}\``, inline: true },
-      {
-        name: "🏷️ Surnom",
-        value: member.nickname ?? "*(aucun)*",
-        inline: true,
-      },
-      {
-        name: "🤖 Bot",
-        value: member.user.bot ? "Oui" : "Non",
-        inline: true,
-      },
-      {
-        name: "📅 Compte créé",
-        value: `<t:${accountCreated}:F>\n<t:${accountCreated}:R>`,
-        inline: true,
-      },
-      {
-        name: "📥 A rejoint le serveur",
-        value: joinedAt
-          ? `<t:${joinedAt}:F>\n<t:${joinedAt}:R>`
-          : "Inconnu",
-        inline: true,
-      },
-      {
-        name: "🔊 Vocal",
-        value: voiceChannel ? `<#${voiceChannel.id}>` : "Absent",
-        inline: true,
-      },
-      {
-        name: `🎭 Rôles (${member.roles.cache.size - 1})`,
-        value: roles.length > 0 ? roles.join(" ") : "Aucun",
-      },
-      ...(badges.length > 0
-        ? [{ name: "🏅 Permissions notables", value: badges.join(" • ") }]
-        : []),
-      {
-        name: "🎨 Couleur du rôle principal",
-        value: member.displayHexColor,
-        inline: true,
-      },
-      {
-        name: "📊 Position du rôle principal",
-        value: `#${member.roles.highest.position}`,
-        inline: true,
-      }
+      { name: "🏷️ Surnom", value: member.nickname ?? "*(aucun)*", inline: true },
+      { name: "🤖 Bot", value: member.user.bot ? "Oui" : "Non", inline: true },
+      { name: "📅 Compte créé", value: `<t:${accountCreated}:F>\n<t:${accountCreated}:R>`, inline: true },
+      { name: "📥 A rejoint le serveur", value: joinedAt ? `<t:${joinedAt}:F>\n<t:${joinedAt}:R>` : "Inconnu", inline: true },
+      { name: "🔊 Vocal", value: voiceChannel ? `<#${voiceChannel.id}>` : "Absent", inline: true },
+      { name: `🎭 Rôles (${member.roles.cache.size - 1})`, value: roles.length > 0 ? roles.join(" ") : "Aucun" },
+      ...(badges.length > 0 ? [{ name: "🏅 Permissions notables", value: badges.join(" • ") }] : []),
+      { name: "🎨 Couleur du rôle principal", value: member.displayHexColor, inline: true },
+      { name: "📊 Position du rôle principal", value: `#${member.roles.highest.position}`, inline: true }
     )
     .setImage(member.user.bannerURL({ size: 512 }) ?? null)
     .setFooter({ text: `Serveur : ${member.guild.name}` })
@@ -103,7 +66,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.deferReply();
   const embed = buildInfoEmbed(member);
-  return interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(0x6366f1, "👤 Consultation infome", [
+      { name: "Cible", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Via", value: "Commande slash", inline: true },
+    ], { tag: interaction.user.tag, id: interaction.user.id })
+  );
 }
 
 export const prefixName = "infome";
@@ -126,4 +97,13 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const embed = buildInfoEmbed(member);
   await message.reply({ embeds: [embed] });
+
+  await sendLog(
+    message.client,
+    logEmbed(0x6366f1, "👤 Consultation infome", [
+      { name: "Cible", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Via", value: "Commande préfixe `&infome`", inline: true },
+      { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+    ], { tag: message.author.tag, id: message.author.id })
+  );
 }

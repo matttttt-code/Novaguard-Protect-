@@ -5,6 +5,7 @@ import {
   Message,
   Client,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 function formatUptime(ms: number): string {
   const s = Math.floor(ms / 1000);
@@ -33,11 +34,7 @@ function buildBotInfoEmbed(client: Client): EmbedBuilder {
       { name: "👥 Membres totaux", value: String(users), inline: true },
       { name: "📚 Librairie", value: "discord.js v14", inline: true },
       { name: "🟢 Node.js", value: process.version, inline: true },
-      {
-        name: "💾 Mémoire",
-        value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`,
-        inline: true,
-      }
+      { name: "💾 Mémoire", value: `${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`, inline: true }
     )
     .setFooter({ text: "Bot de modération" })
     .setTimestamp();
@@ -49,7 +46,14 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const embed = buildBotInfoEmbed(interaction.client);
-  return interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(0x6366f1, "🤖 Consultation info bot", [
+      { name: "Via", value: "Commande slash `/info`", inline: true },
+    ], { tag: interaction.user.tag, id: interaction.user.id })
+  );
 }
 
 export const prefixName = "info";
@@ -58,4 +62,12 @@ export const prefixAliases = ["botinfo", "bot"];
 export async function executeMessage(message: Message) {
   const embed = buildBotInfoEmbed(message.client);
   await message.reply({ embeds: [embed] });
+
+  await sendLog(
+    message.client,
+    logEmbed(0x6366f1, "🤖 Consultation info bot", [
+      { name: "Via", value: "Commande préfixe `&info`", inline: true },
+      { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+    ], { tag: message.author.tag, id: message.author.id })
+  );
 }
