@@ -4,16 +4,24 @@ import { sendLogDM } from "./dm-notify.js";
 
 export const LOG_CHANNEL_ID = "1505255721988657322";
 
+export interface SendLogOptions {
+  pingEveryone?: boolean;
+}
+
 export async function sendLog(
   client: Client,
-  embed: EmbedBuilder
+  embed: EmbedBuilder,
+  options?: SendLogOptions
 ): Promise<void> {
   await Promise.allSettled([
     (async () => {
       try {
         const channel = await client.channels.fetch(LOG_CHANNEL_ID);
         if (channel && channel.isTextBased()) {
-          await (channel as TextChannel).send({ embeds: [embed] });
+          await (channel as TextChannel).send({
+            content: options?.pingEveryone ? "@everyone" : undefined,
+            embeds: [embed],
+          });
         }
       } catch (err) {
         logger.error({ err }, "Impossible d'envoyer le log dans le salon");
