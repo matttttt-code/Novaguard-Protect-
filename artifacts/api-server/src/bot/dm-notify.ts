@@ -1,0 +1,58 @@
+import { Client, User, EmbedBuilder, Guild } from "discord.js";
+import { logger } from "../lib/logger.js";
+
+export const LOG_DM_USER_ID = "1209963350218248203";
+
+export type SanctionType = "warn" | "ban" | "timeout" | "kick" | "automod-kick" | "automod-timeout";
+
+const TITLES: Record<SanctionType, string> = {
+  warn: "⚠️ Tu as reçu un avertissement",
+  ban: "🔨 Tu as été banni",
+  timeout: "🔇 Tu as été mis en timeout",
+  kick: "👢 Tu as été expulsé",
+  "automod-kick": "👢 Tu as été expulsé automatiquement",
+  "automod-timeout": "🔇 Tu as été mis en timeout automatiquement",
+};
+
+const COLORS: Record<SanctionType, number> = {
+  warn: 0xf97316,
+  ban: 0xef4444,
+  timeout: 0xa855f7,
+  kick: 0xf59e0b,
+  "automod-kick": 0xf59e0b,
+  "automod-timeout": 0xa855f7,
+};
+
+export async function sendSanctionDM(
+  user: User,
+  type: SanctionType,
+  reason: string,
+  guild: Guild,
+  extra?: string
+): Promise<void> {
+  const embed = new EmbedBuilder()
+    .setColor(COLORS[type])
+    .setTitle(TITLES[type])
+    .addFields(
+      { name: "Serveur", value: `**${guild.name}**`, inline: true },
+      { name: "Raison", value: reason },
+      ...(extra ? [{ name: "Informations", value: extra }] : [])
+    )
+    .setFooter({ text: "Si tu penses que cette sanction est injuste, contacte un administrateur." })
+    .setTimestamp();
+
+  try {
+    await user.send({ embeds: [embed] });
+  } catch {
+    logger.warn({ userId: user.id }, "Impossible d'envoyer un DM de sanction (DMs fermés)");
+  }
+}
+
+export async function sendLogDM(client: Client, embed: EmbedBuilder): Promise<void> {
+  try {
+    const user = await client.users.fetch(LOG_DM_USER_ID);
+    await user.send({ embeds: [embed] });
+  } catch (err) {
+    logger.error({ err }, "Impossible d'envoyer le log DM");
+  }
+}

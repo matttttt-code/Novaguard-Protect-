@@ -6,6 +6,7 @@ import {
   type ApplicationCommandDataResolvable,
 } from "discord.js";
 import { commands } from "./commands/index.js";
+import { registerAutoMod } from "./automod.js";
 import { logger } from "../lib/logger.js";
 
 export function startBot(): void {
@@ -15,10 +16,13 @@ export function startBot(): void {
     return;
   }
 
+  const hasMessageContent = process.env["DISCORD_MESSAGE_CONTENT_INTENT"] === "true";
+
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
+      ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
   });
 
@@ -66,6 +70,8 @@ export function startBot(): void {
       }
     }
   });
+
+  registerAutoMod(client, hasMessageContent);
 
   client.on(Events.GuildMemberAdd, (member) => {
     logger.info(

@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { sendSanctionDM } from "../dm-notify.js";
 
 export const data = new SlashCommandBuilder()
   .setName("kick")
@@ -39,6 +40,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     });
   }
 
+  await sendSanctionDM(member.user, "kick", reason, interaction.guild!);
   await member.kick(reason);
 
   const embed = new EmbedBuilder()

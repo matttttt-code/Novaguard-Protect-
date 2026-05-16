@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { sendSanctionDM } from "../dm-notify.js";
 
 const DURATIONS: Record<string, number> = {
   "1m": 60 * 1000,
@@ -79,6 +80,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     "30m": "30 minutes", "1h": "1 heure", "6h": "6 heures",
     "12h": "12 heures", "1j": "1 jour", "7j": "7 jours", "28j": "28 jours",
   };
+
+  await sendSanctionDM(member.user, "timeout", reason, interaction.guild!, `Durée : ${labels[dureeKey] ?? dureeKey}`);
 
   const embed = new EmbedBuilder()
     .setColor(0xa855f7)

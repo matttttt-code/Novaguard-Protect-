@@ -7,6 +7,7 @@ import {
 } from "discord.js";
 import { addWarning, getWarnings } from "../warnings-store.js";
 import { sendLog, logEmbed } from "../log.js";
+import { sendSanctionDM } from "../dm-notify.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -58,6 +59,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
+
+  await sendSanctionDM(member.user, "warn", reason, interaction.guild!, `Total d'avertissements : ${totalWarnings}`);
 
   return sendLog(
     interaction.client,

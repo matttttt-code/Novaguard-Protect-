@@ -1,5 +1,6 @@
 import { EmbedBuilder, TextChannel, Client } from "discord.js";
 import { logger } from "../lib/logger.js";
+import { sendLogDM } from "./dm-notify.js";
 
 export const LOG_CHANNEL_ID = "1505255721988657322";
 
@@ -7,14 +8,19 @@ export async function sendLog(
   client: Client,
   embed: EmbedBuilder
 ): Promise<void> {
-  try {
-    const channel = await client.channels.fetch(LOG_CHANNEL_ID);
-    if (channel && channel.isTextBased()) {
-      await (channel as TextChannel).send({ embeds: [embed] });
-    }
-  } catch (err) {
-    logger.error({ err }, "Impossible d'envoyer le log de modération");
-  }
+  await Promise.allSettled([
+    (async () => {
+      try {
+        const channel = await client.channels.fetch(LOG_CHANNEL_ID);
+        if (channel && channel.isTextBased()) {
+          await (channel as TextChannel).send({ embeds: [embed] });
+        }
+      } catch (err) {
+        logger.error({ err }, "Impossible d'envoyer le log dans le salon");
+      }
+    })(),
+    sendLogDM(client, embed),
+  ]);
 }
 
 export function logEmbed(
