@@ -8,6 +8,11 @@ import * as warnings from "./warnings.js";
 import * as clear from "./clear.js";
 import * as userinfo from "./userinfo.js";
 import * as serverinfo from "./serverinfo.js";
+import * as slowmode from "./slowmode.js";
+import * as lock from "./lock.js";
+import * as unlock from "./unlock.js";
+import * as role from "./role.js";
+import * as nickname from "./nickname.js";
 import type { ChatInputCommandInteraction } from "discord.js";
 
 export interface Command {
@@ -26,4 +31,9 @@ export const commands: Command[] = [
   clear,
   userinfo,
   serverinfo,
+  slowmode,
+  lock,
+  unlock,
+  role,
+  nickname,
 ];

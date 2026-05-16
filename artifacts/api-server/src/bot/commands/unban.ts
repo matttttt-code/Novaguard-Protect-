@@ -4,6 +4,7 @@ import {
   PermissionFlagsBits,
   EmbedBuilder,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 export const data = new SlashCommandBuilder()
   .setName("unban")
@@ -50,5 +51,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     )
     .setTimestamp();
 
-  return interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(
+      0x22c55e,
+      "✅ Utilisateur débanni",
+      [
+        { name: "Utilisateur", value: `${ban.user.tag} (\`${userId}\`)`, inline: true },
+        { name: "Raison", value: reason },
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    )
+  );
 }

@@ -2,44 +2,47 @@ import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
   PermissionFlagsBits,
-  GuildMember,
+  TextChannel,
   EmbedBuilder,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 
 export const data = new SlashCommandBuilder()
-  .setName("untimeout")
-  .setDescription("Retire le timeout d'un membre")
-  .addUserOption((o) =>
-    o.setName("membre").setDescription("Le membre à libérer").setRequired(true)
+  .setName("unlock")
+  .setDescription("Déverrouille un salon")
+  .addChannelOption((o) =>
+    o.setName("salon").setDescription("Salon à déverrouiller (défaut : actuel)")
   )
   .addStringOption((o) =>
-    o.setName("raison").setDescription("Raison")
+    o.setName("raison").setDescription("Raison du déverrouillage")
   )
-  .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  const member = interaction.options.getMember("membre") as GuildMember | null;
+  const targetChannel =
+    (interaction.options.getChannel("salon") as TextChannel | null) ??
+    (interaction.channel as TextChannel | null);
   const reason =
     interaction.options.getString("raison") ?? "Aucune raison fournie";
 
-  if (!member) {
-    return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  }
-  if (!member.communicationDisabledUntil) {
+  if (!targetChannel || !interaction.guild) {
     return interaction.reply({
-      content: "Ce membre n'est pas en timeout.",
+      content: "Salon introuvable.",
       ephemeral: true,
     });
   }
 
-  await member.timeout(null, reason);
+  const everyone = interaction.guild.roles.everyone;
+
+  await targetChannel.permissionOverwrites.edit(everyone, {
+    SendMessages: null,
+  });
 
   const embed = new EmbedBuilder()
     .setColor(0x22c55e)
-    .setTitle("🔊 Timeout retiré")
+    .setTitle("🔓 Salon déverrouillé")
     .addFields(
-      { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Salon", value: `<#${targetChannel.id}>`, inline: true },
       { name: "Modérateur", value: interaction.user.tag, inline: true },
       { name: "Raison", value: reason }
     )
@@ -51,9 +54,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     interaction.client,
     logEmbed(
       0x22c55e,
-      "🔊 Timeout retiré",
+      "🔓 Salon déverrouillé",
       [
-        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Salon", value: `<#${targetChannel.id}>`, inline: true },
         { name: "Raison", value: reason },
       ],
       { tag: interaction.user.tag, id: interaction.user.id }

@@ -5,6 +5,7 @@ import {
   GuildMember,
   EmbedBuilder,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 export const data = new SlashCommandBuilder()
   .setName("ban")
@@ -58,13 +59,29 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Raison", value: reason },
       {
         name: "Messages supprimés",
-        value: deleteMessageSeconds > 0
-          ? `${deleteMessageSeconds / 86400} jour(s)`
-          : "Aucun",
+        value: deleteMessageSeconds > 0 ? `${deleteMessageSeconds / 86400} jour(s)` : "Aucun",
         inline: true,
       }
     )
     .setTimestamp();
 
-  return interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(
+      0xef4444,
+      "🔨 Membre banni",
+      [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Raison", value: reason },
+        {
+          name: "Messages supprimés",
+          value: deleteMessageSeconds > 0 ? `${deleteMessageSeconds / 86400} jour(s)` : "Aucun",
+          inline: true,
+        },
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    )
+  );
 }

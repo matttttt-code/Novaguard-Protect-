@@ -6,6 +6,7 @@ import {
   EmbedBuilder,
 } from "discord.js";
 import { addWarning, getWarnings } from "../warnings-store.js";
+import { sendLog, logEmbed } from "../log.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -56,5 +57,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     )
     .setTimestamp();
 
-  return interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(
+      0xf97316,
+      "⚠️ Avertissement",
+      [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Total", value: String(totalWarnings), inline: true },
+        { name: "Raison", value: reason },
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    )
+  );
 }

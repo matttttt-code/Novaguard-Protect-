@@ -5,6 +5,7 @@ import {
   GuildMember,
   EmbedBuilder,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 const DURATIONS: Record<string, number> = {
   "1m": 60 * 1000,
@@ -90,5 +91,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     )
     .setTimestamp();
 
-  return interaction.reply({ embeds: [embed] });
+  await interaction.reply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(
+      0xa855f7,
+      "🔇 Membre mis en timeout",
+      [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Durée", value: labels[dureeKey] ?? dureeKey, inline: true },
+        { name: "Raison", value: reason },
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    )
+  );
 }

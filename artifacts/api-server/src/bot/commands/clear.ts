@@ -5,6 +5,7 @@ import {
   TextChannel,
   EmbedBuilder,
 } from "discord.js";
+import { sendLog, logEmbed } from "../log.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clear")
@@ -64,5 +65,19 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     )
     .setTimestamp();
 
-  return interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [embed] });
+
+  return sendLog(
+    interaction.client,
+    logEmbed(
+      0x3b82f6,
+      "🗑️ Messages supprimés",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        { name: "Nombre", value: String(deleted), inline: true },
+        ...(targetMember ? [{ name: "Filtre membre", value: targetMember.tag, inline: true }] : []),
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    )
+  );
 }
