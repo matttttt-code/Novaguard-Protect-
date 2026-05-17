@@ -6,11 +6,13 @@ import {
   Message,
   GuildMember,
   TextChannel,
+  Client,
 } from "discord.js";
 import { isTicketChannel, getTicketByChannel, claimTicket, resetTickets } from "../ticket-store.js";
 import { getConfig } from "../guild-config-store.js";
+import { sendLog, logEmbed } from "../log.js";
 
-async function doClose(channel: TextChannel, closedBy: string, reason: string): Promise<void> {
+async function doClose(client: Client, channel: TextChannel, closedBy: string, closedById: string, reason: string, guildId: string): Promise<void> {
   const ticket = getTicketByChannel(channel.id);
 
   const embed = new EmbedBuilder()
@@ -19,6 +21,7 @@ async function doClose(channel: TextChannel, closedBy: string, reason: string): 
     .addFields(
       { name: "Fermé par", value: closedBy, inline: true },
       { name: "Raison", value: reason, inline: true },
+      ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
       ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
       ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : [])
     )
@@ -26,6 +29,18 @@ async function doClose(channel: TextChannel, closedBy: string, reason: string): 
     .setTimestamp();
 
   await channel.send({ embeds: [embed] });
+
+  await sendLog(client, logEmbed(
+    0xef4444, "🔒 Ticket fermé",
+    [
+      { name: "Salon", value: channel.name, inline: true },
+      { name: "Raison", value: reason, inline: true },
+      ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+      ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : []),
+    ],
+    { tag: closedBy, id: closedById }
+  ), { guildId });
 
   setTimeout(async () => {
     const { closeTicket } = await import("../ticket-store.js");
@@ -68,6 +83,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const sub = interaction.options.getSubcommand();
   const config = getConfig(interaction.guild.id);
   const guildMember = interaction.member as GuildMember;
+  const guildId = interaction.guild.id;
 
   const isStaff = config.ticketStaffRoleId
     ? guildMember.roles.cache.has(config.ticketStaffRoleId)
@@ -80,7 +96,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     if (!guildMember.permissions.has(PermissionFlagsBits.Administrator)) {
       return interaction.reply({ content: "❌ Seuls les administrateurs peuvent réinitialiser le registre des tickets.", ephemeral: true });
     }
-    const count = resetTickets(interaction.guild.id);
+    const count = resetTickets(guildId);
     return interaction.reply({
       embeds: [new EmbedBuilder()
         .setColor(0xf97316)
@@ -105,7 +121,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     }
     const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
     await interaction.reply({ content: "🔒 Fermeture du ticket en cours...", ephemeral: true });
-    await doClose(channel, interaction.user.tag, reason);
+    await doClose(interaction.client, channel, interaction.user.tag, interaction.user.id, reason, guildId);
     return;
   }
 
@@ -122,7 +138,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
     claimTicket(interaction.channelId, interaction.user.tag, interaction.user.id);
 
-    const embed = new EmbedBuilder()
+    const claimEmbed = new EmbedBuilder()
       .setColor(0x22c55e)
       .setTitle("✅ Ticket pris en charge")
       .setDescription(`<@${interaction.user.id}> prend en charge ce ticket.`)
@@ -134,8 +150,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       .setTimestamp();
 
     await channel.setTopic(`Ticket #${ticket?.ticketNumber ?? "?"} — ${ticket?.username ?? "?"} — Pris en charge par ${interaction.user.tag}`).catch(() => null);
+    await interaction.reply({ embeds: [claimEmbed] });
 
-    return interaction.reply({ embeds: [embed] });
+    await sendLog(interaction.client, logEmbed(
+      0x22c55e, "✅ Ticket pris en charge",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+        ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    ), { guildId });
+    return;
   }
 
   if (!isStaff) {
@@ -152,12 +178,32 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await channel.permissionOverwrites.edit(member.id, {
       ViewChannel: true, SendMessages: true, ReadMessageHistory: true,
     });
-    return interaction.reply({ content: `✅ <@${member.id}> a été ajouté au ticket.` });
+    await interaction.reply({ content: `✅ <@${member.id}> a été ajouté au ticket.` });
+    await sendLog(interaction.client, logEmbed(
+      0x6366f1, "🎫 Membre ajouté au ticket",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        { name: "Membre ajouté", value: `<@${member.id}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    ), { guildId });
+    return;
   }
 
   if (sub === "retirer") {
     await channel.permissionOverwrites.delete(member.id);
-    return interaction.reply({ content: `✅ <@${member.id}> a été retiré du ticket.` });
+    await interaction.reply({ content: `✅ <@${member.id}> a été retiré du ticket.` });
+    await sendLog(interaction.client, logEmbed(
+      0xf97316, "🎫 Membre retiré du ticket",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        { name: "Membre retiré", value: `<@${member.id}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ],
+      { tag: interaction.user.tag, id: interaction.user.id }
+    ), { guildId });
+    return;
   }
 
   return interaction.reply({ content: "Sous-commande inconnue.", ephemeral: true });
@@ -170,6 +216,7 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const sub = args[0]?.toLowerCase();
   const config = getConfig(message.guild.id);
+  const guildId = message.guild.id;
 
   const isStaff = config.ticketStaffRoleId
     ? message.member.roles.cache.has(config.ticketStaffRoleId)
@@ -182,7 +229,7 @@ export async function executeMessage(message: Message, args: string[]) {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
       await message.reply("❌ Seuls les administrateurs peuvent réinitialiser le registre des tickets."); return;
     }
-    const count = resetTickets(message.guild.id);
+    const count = resetTickets(guildId);
     await message.reply({
       embeds: [new EmbedBuilder()
         .setColor(0xf97316)
@@ -202,7 +249,7 @@ export async function executeMessage(message: Message, args: string[]) {
     if (!isTicketChannel(message.channelId)) { await message.reply("❌ Cette commande ne fonctionne que dans un salon ticket."); return; }
     if (!isStaff && !isOwner) { await message.reply("❌ Seul le staff ou le créateur du ticket peut le fermer."); return; }
     const reason = args.slice(1).join(" ") || "Aucune raison fournie";
-    await doClose(message.channel as TextChannel, message.author.tag, reason);
+    await doClose(message.client, message.channel as TextChannel, message.author.tag, message.author.id, reason, guildId);
     return;
   }
 
@@ -213,7 +260,7 @@ export async function executeMessage(message: Message, args: string[]) {
 
     claimTicket(message.channelId, message.author.tag, message.author.id);
 
-    const embed = new EmbedBuilder()
+    const claimEmbed = new EmbedBuilder()
       .setColor(0x22c55e)
       .setTitle("✅ Ticket pris en charge")
       .setDescription(`<@${message.author.id}> prend en charge ce ticket.`)
@@ -225,7 +272,17 @@ export async function executeMessage(message: Message, args: string[]) {
       .setTimestamp();
 
     await (message.channel as TextChannel).setTopic(`Ticket #${ticket?.ticketNumber ?? "?"} — ${ticket?.username ?? "?"} — Pris en charge par ${message.author.tag}`).catch(() => null);
-    await message.reply({ embeds: [embed] });
+    await message.reply({ embeds: [claimEmbed] });
+
+    await sendLog(message.client, logEmbed(
+      0x22c55e, "✅ Ticket pris en charge",
+      [
+        { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+        ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+      ],
+      { tag: message.author.tag, id: message.author.id }
+    ), { guildId });
     return;
   }
 
@@ -244,12 +301,30 @@ export async function executeMessage(message: Message, args: string[]) {
   if (sub === "ajouter") {
     await channel.permissionOverwrites.edit(member.id, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
     await message.reply(`✅ <@${member.id}> ajouté au ticket.`);
+    await sendLog(message.client, logEmbed(
+      0x6366f1, "🎫 Membre ajouté au ticket",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        { name: "Membre ajouté", value: `<@${member.id}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ],
+      { tag: message.author.tag, id: message.author.id }
+    ), { guildId });
     return;
   }
 
   if (sub === "retirer") {
     await channel.permissionOverwrites.delete(member.id);
     await message.reply(`✅ <@${member.id}> retiré du ticket.`);
+    await sendLog(message.client, logEmbed(
+      0xf97316, "🎫 Membre retiré du ticket",
+      [
+        { name: "Salon", value: `<#${channel.id}>`, inline: true },
+        { name: "Membre retiré", value: `<@${member.id}>`, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ],
+      { tag: message.author.tag, id: message.author.id }
+    ), { guildId });
     return;
   }
 

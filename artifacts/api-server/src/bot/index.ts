@@ -519,6 +519,18 @@ async function handleTicketClose(interaction: ButtonInteraction): Promise<void> 
 
   closeTicket(channel.id);
 
+  await sendLog(interaction.client, logEmbed(
+    0xef4444, "🔒 Ticket fermé (bouton)",
+    [
+      { name: "Salon", value: channel.name, inline: true },
+      { name: "Fermé par", value: user.tag, inline: true },
+      ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+      ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : []),
+    ],
+    { tag: user.tag, id: user.id }
+  ), { guildId: guild.id });
+
   setTimeout(async () => {
     await channel.delete("Ticket fermé").catch(() => null);
   }, 5000);
