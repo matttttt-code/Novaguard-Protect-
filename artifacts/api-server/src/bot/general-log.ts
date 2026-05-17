@@ -379,8 +379,9 @@ export function registerGeneralLog(client: Client): void {
       changes.push(`**Mentionnable** : ${oldRole.mentionable ? "Oui" : "Non"} → ${newRole.mentionable ? "Oui" : "Non"}`);
 
     // Diff des permissions
-    const addedPerms = newRole.permissions.missing(oldRole.permissions);
-    const removedPerms = oldRole.permissions.missing(newRole.permissions);
+    // A.missing(B) = permissions présentes dans B mais absentes de A
+    const addedPerms = oldRole.permissions.missing(newRole.permissions);   // dans new mais pas dans old = ajoutées
+    const removedPerms = newRole.permissions.missing(oldRole.permissions); // dans old mais pas dans new = retirées
     const fmtPerm = (p: string) => `\`${PERM_FR[p] ?? p}\``;
     if (addedPerms.length)
       changes.push(`**Permissions accordées** : ${addedPerms.map(fmtPerm).join(", ")}`);
@@ -471,7 +472,10 @@ export function registerGeneralLog(client: Client): void {
     // Rôles admin nouvellement reçus
     const newAdminRoles = addedRoles.filter((r) => r.permissions.has(PermissionFlagsBits.Administrator));
 
-    const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberUpdate, newMember.id);
+    // MemberRoleUpdate pour les changements de rôles, MemberUpdate pour le reste (pseudo)
+    const hasRoleChange = addedRoles.size > 0 || removedRoles.size > 0;
+    const auditEvent = hasRoleChange ? AuditLogEvent.MemberRoleUpdate : AuditLogEvent.MemberUpdate;
+    const executor = await getAuditExecutor(newMember.guild, auditEvent, newMember.id);
 
     const isAdminAlert = newAdminRoles.size > 0;
     const embed = new EmbedBuilder()
