@@ -21,12 +21,16 @@ export const data = new SlashCommandBuilder()
   .addIntegerOption((o) =>
     o.setName("jours").setDescription("Jours de messages supprimés (1-7, défaut 1)").setMinValue(1).setMaxValue(7)
   )
+  .addBooleanOption((o) =>
+    o.setName("dm").setDescription("Envoyer un DM à l'utilisateur ? (par défaut : paramètre global du serveur)")
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
   const days = interaction.options.getInteger("jours") ?? 1;
+  const dmOption = interaction.options.getBoolean("dm");
 
   if (!member || !interaction.guild) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
   if (!member.bannable) return interaction.reply({ content: "Je ne peux pas bannir ce membre.", ephemeral: true });
@@ -34,7 +38,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   await interaction.deferReply();
 
-  await sendSanctionDM(member.user, "kick", `[SOFTBAN] ${reason} — Vos messages récents ont été supprimés.`, interaction.guild);
+  await sendSanctionDM(member.user, "kick", `[SOFTBAN] ${reason} — Vos messages récents ont été supprimés.`, interaction.guild, undefined, dmOption ?? undefined);
   await member.ban({ reason: `[SOFTBAN] ${reason}`, deleteMessageSeconds: days * 86400 });
   await interaction.guild.members.unban(member.id, "Softban — déban automatique");
 
@@ -46,7 +50,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
       { name: "Modérateur", value: interaction.user.tag, inline: true },
       { name: "Messages supprimés", value: `${days} jour(s)`, inline: true },
-      { name: "Raison", value: reason }
+      { name: "Raison", value: reason },
+      { name: "DM envoyé", value: dmOption === false ? "Non (forcé)" : dmOption === true ? "Oui (forcé)" : "Selon config serveur", inline: true },
     )
     .setTimestamp();
 

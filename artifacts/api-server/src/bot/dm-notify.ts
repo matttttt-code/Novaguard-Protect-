@@ -24,15 +24,23 @@ const COLORS: Record<SanctionType, number> = {
   "automod-timeout": 0xa855f7,
 };
 
+/**
+ * Envoie un DM de sanction.
+ * @param forceDm  true = toujours envoyer · false = ne jamais envoyer · undefined = utiliser le paramètre global du serveur
+ */
 export async function sendSanctionDM(
   user: User,
   type: SanctionType,
   reason: string,
   guild: Guild,
-  extra?: string
+  extra?: string,
+  forceDm?: boolean,
 ): Promise<void> {
-  const config = getConfig(guild.id);
-  if (!config.sanctionDmEnabled) return;
+  if (forceDm === false) return;
+  if (forceDm !== true) {
+    const config = getConfig(guild.id);
+    if (!config.sanctionDmEnabled) return;
+  }
 
   const embed = new EmbedBuilder()
     .setColor(COLORS[type])

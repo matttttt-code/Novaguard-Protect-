@@ -19,11 +19,15 @@ export const data = new SlashCommandBuilder()
   .addStringOption((o) =>
     o.setName("raison").setDescription("Raison de l'avertissement").setRequired(true)
   )
+  .addBooleanOption((o) =>
+    o.setName("dm").setDescription("Envoyer un DM à l'utilisateur ? (par défaut : paramètre global du serveur)")
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const reason = interaction.options.getString("raison", true);
+  const dmOption = interaction.options.getBoolean("dm");
 
   if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
   if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous avertir.", ephemeral: true });
@@ -45,12 +49,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Modérateur", value: interaction.user.tag, inline: true },
       { name: "Case ID", value: `#${caseId}`, inline: true },
       { name: "Total", value: String(total), inline: true },
-      { name: "Raison", value: reason }
+      { name: "Raison", value: reason },
+      { name: "DM envoyé", value: dmOption === false ? "Non (forcé)" : dmOption === true ? "Oui (forcé)" : "Selon config serveur", inline: true },
     )
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
-  await sendSanctionDM(member.user, "warn", reason, interaction.guild!, `Case #${caseId} — Total : ${total}`);
+  await sendSanctionDM(member.user, "warn", reason, interaction.guild!, `Case #${caseId} — Total : ${total}`, dmOption ?? undefined);
 
   return sendLog(
     interaction.client,

@@ -24,6 +24,9 @@ export const data = new SlashCommandBuilder()
       .setDescription("Supprimer les messages des X derniers jours (0-7)")
       .setMinValue(0).setMaxValue(7)
   )
+  .addBooleanOption((o) =>
+    o.setName("dm").setDescription("Envoyer un DM à l'utilisateur ? (par défaut : paramètre global du serveur)")
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -33,6 +36,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
   const deleteMessageSeconds = (interaction.options.getInteger("supprimer_messages") ?? 0) * 86400;
+  const dmOption = interaction.options.getBoolean("dm");
 
   if (user.id === interaction.user.id) {
     return interaction.reply({ content: "Vous ne pouvez pas vous bannir.", ephemeral: true });
@@ -45,7 +49,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   await interaction.deferReply();
 
   if (member) {
-    await sendSanctionDM(member.user, "ban", reason, interaction.guild);
+    await sendSanctionDM(member.user, "ban", reason, interaction.guild, undefined, dmOption ?? undefined);
   }
 
   try {
@@ -60,7 +64,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Modérateur", value: interaction.user.tag, inline: true },
       { name: "Raison", value: reason },
       { name: "Messages supprimés", value: deleteMessageSeconds > 0 ? `${deleteMessageSeconds / 86400} jour(s)` : "Aucun", inline: true },
-      { name: "Dans le serveur", value: member ? "Oui" : "Non (banni par ID)", inline: true }
+      { name: "Dans le serveur", value: member ? "Oui" : "Non (banni par ID)", inline: true },
+      { name: "DM envoyé", value: dmOption === false ? "Non (forcé)" : dmOption === true ? "Oui (forcé)" : "Selon config serveur", inline: true },
     ).setTimestamp();
 
   await interaction.editReply({ embeds: [embed] });

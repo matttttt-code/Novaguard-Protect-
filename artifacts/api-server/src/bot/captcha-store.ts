@@ -1,34 +1,21 @@
 export interface CaptchaChallenge {
-  question: string;
-  answer: string;
+  code: string;
   guildId: string;
   attempts: number;
   challengeMessageId?: string;
 }
 
-const pending = new Map<string, CaptchaChallenge>();
+const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-export function generateChallenge(): { question: string; answer: string } {
-  const ops = ["+", "-", "×"] as const;
-  const op = ops[Math.floor(Math.random() * ops.length)];
-  let a: number, b: number, answer: number;
-
-  if (op === "+") {
-    a = Math.floor(Math.random() * 20) + 1;
-    b = Math.floor(Math.random() * 20) + 1;
-    answer = a + b;
-  } else if (op === "-") {
-    a = Math.floor(Math.random() * 20) + 10;
-    b = Math.floor(Math.random() * 10) + 1;
-    answer = a - b;
-  } else {
-    a = Math.floor(Math.random() * 10) + 2;
-    b = Math.floor(Math.random() * 9) + 2;
-    answer = a * b;
+export function generateChallenge(): { code: string } {
+  let code = "";
+  for (let i = 0; i < 6; i++) {
+    code += CHARS[Math.floor(Math.random() * CHARS.length)];
   }
-
-  return { question: `${a} ${op} ${b}`, answer: String(answer) };
+  return { code };
 }
+
+const pending = new Map<string, CaptchaChallenge>();
 
 export function setCaptcha(userId: string, challenge: CaptchaChallenge): void {
   pending.set(userId, challenge);

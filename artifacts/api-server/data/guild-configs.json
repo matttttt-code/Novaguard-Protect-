@@ -6,11 +6,17 @@
     "joinLock": false,
     "ticketStaffRoleId": "1505490829513457745",
     "ticketCategoryId": "1505522715044347935",
+    "transcriptChannelId": null,
     "welcomeEnabled": true,
-    "welcomeChannelId": null,
+    "welcomeChannelId": "1504531231071535224",
     "welcomeMessage": "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉",
     "leaveEnabled": true,
     "leaveChannelId": "1504513292247240820",
-    "leaveMessage": "👋 **{username}** a quitté le serveur. Il reste **{count}** membres."
+    "leaveMessage": "👋 **{username}** a quitté le serveur. Il reste **{count}** membres.",
+    "captchaEnabled": true,
+    "captchaChannelId": "1504533905770811504",
+    "captchaUnverifiedRoleId": "1504819202090074203",
+    "captchaVerifiedRoleId": "1504474629878710414",
+    "sanctionDmEnabled": true
   }
 }

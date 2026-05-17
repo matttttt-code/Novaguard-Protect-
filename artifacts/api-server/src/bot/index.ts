@@ -64,14 +64,13 @@ export function startBot(): void {
   }
 
   const hasMessageContent = process.env["DISCORD_MESSAGE_CONTENT_INTENT"] === "true";
-  const hasGuildMembers = process.env["DISCORD_GUILD_MEMBERS_INTENT"] === "true";
 
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.DirectMessages,
-      ...(hasGuildMembers ? [GatewayIntentBits.GuildMembers] : []),
+      GatewayIntentBits.GuildMembers,
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
   });
@@ -232,7 +231,7 @@ export function startBot(): void {
         await member.roles.add(cfg.captchaUnverifiedRoleId).catch(() => null);
       }
 
-      const challenge = generateChallenge();
+      const { code: captchaCode } = generateChallenge();
 
       // Approche canal (RaidProtect style)
       if (cfg.captchaChannelId) {
@@ -240,14 +239,14 @@ export function startBot(): void {
           const captchaCh = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
           if (captchaCh && captchaCh.isTextBased()) {
             const captchaEmbed = new EmbedBuilder()
-              .setColor(0x6366f1)
-              .setTitle("🤖 Vérification anti-bot")
+              .setColor(0x5865f2)
+              .setTitle("🛡️ Vérification anti-bot")
               .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
               .setDescription(
-                `Bienvenue <@${member.id}> ! Pour accéder au serveur, résous ce calcul :\n\n` +
-                `## \`${challenge.question} = ?\`\n\n` +
-                `Réponds directement dans ce salon avec **uniquement le nombre**.\n` +
-                `⏱️ **5 minutes** · **3 tentatives**`
+                `Bienvenue <@${member.id}> ! Pour accéder au serveur, tape le code suivant dans ce salon :\n\n` +
+                `\`\`\`\n${captchaCode}\n\`\`\`\n` +
+                `> ⏱️ **5 minutes** pour répondre · **3 tentatives** maximum\n` +
+                `> Le code est insensible à la casse.`
               )
               .setFooter({ text: `${member.guild.name} • Vérification requise`, iconURL: member.guild.iconURL() ?? undefined })
               .setTimestamp();
@@ -255,8 +254,7 @@ export function startBot(): void {
             const sent = await captchaCh.send({ content: `<@${member.id}>`, embeds: [captchaEmbed] });
 
             setCaptcha(member.id, {
-              question: challenge.question,
-              answer: challenge.answer,
+              code: captchaCode,
               guildId,
               attempts: 3,
               challengeMessageId: sent.id,
@@ -301,9 +299,9 @@ export function startBot(): void {
       try {
         await member.user.send(
           `👋 Bienvenue sur **${member.guild.name}** !\n\n` +
-          `🤖 Pour accéder au serveur, résous ce captcha en DM :\n\n` +
-          `> **${challenge.question} = ?**\n\n` +
-          `⏱️ **5 minutes** · **3 tentatives** · Réponds avec uniquement le nombre`
+          `🛡️ Pour accéder au serveur, tape exactement ce code en réponse à ce message :\n\n` +
+          `\`\`\`\n${captchaCode}\n\`\`\`\n` +
+          `⏱️ **5 minutes** · **3 tentatives** · Le code est insensible à la casse.`
         );
       } catch {
         dmSent = false;
@@ -313,7 +311,7 @@ export function startBot(): void {
       }
 
       if (dmSent) {
-        setCaptcha(member.id, { question: challenge.question, answer: challenge.answer, guildId, attempts: 3 });
+        setCaptcha(member.id, { code: captchaCode, guildId, attempts: 3 });
 
         const timeoutId = setTimeout(async () => {
           if (!hasCaptcha(member.id)) return;
@@ -451,7 +449,7 @@ async function handleCaptchaChannelMessage(
   // Delete the member's message to keep channel clean
   await message.delete().catch(() => null);
 
-  if (answer === challenge.answer) {
+  if (answer.toUpperCase() === challenge.code.toUpperCase()) {
     const msgId = challenge.challengeMessageId;
     const chanId = getConfig(challenge.guildId).captchaChannelId;
     deleteCaptcha(message.author.id);
@@ -493,7 +491,7 @@ async function handleCaptchaChannelMessage(
           const ch = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
           if (ch?.isTextBased()) {
             const errMsg = await (ch as TextChannel).send({
-              content: `<@${message.author.id}> ❌ Mauvaise réponse — encore **${remaining}** tentative(s). Rappel : \`${challenge.question} = ?\``,
+              content: `<@${message.author.id}> ❌ Code incorrect — encore **${remaining}** tentative(s). Retape le code affiché dans le message de vérification.`,
             });
             setTimeout(() => errMsg.delete().catch(() => null), 8_000);
           }
@@ -511,10 +509,10 @@ async function handleCaptchaDM(
   const challenge = getCaptcha(message.author.id)!;
   const answer = message.content.trim();
 
-  if (answer === challenge.answer) {
+  if (answer.toUpperCase() === challenge.code.toUpperCase()) {
     deleteCaptcha(message.author.id);
     await resolveCaptchaSuccess(client, message.author.id, challenge.guildId, captchaTimeouts);
-    await message.reply("✅ **Captcha résolu !** Tu as maintenant accès au serveur. Bienvenue ! 🎉");
+    await message.reply("✅ **Code correct !** Tu as maintenant accès au serveur. Bienvenue ! 🎉");
   } else {
     const remaining = decrementAttempts(message.author.id);
     if (remaining <= 0) {
@@ -528,8 +526,8 @@ async function handleCaptchaDM(
       await message.reply("❌ Trop de mauvaises réponses. Tu as été **expulsé** du serveur. Rejoins à nouveau pour réessayer.");
     } else {
       await message.reply(
-        `❌ Mauvaise réponse ! Il te reste **${remaining}** tentative(s).\n` +
-        `Rappel : **${challenge.question} = ?**`
+        `❌ Code incorrect ! Il te reste **${remaining}** tentative(s).\n` +
+        `Retape le code exactement comme indiqué dans le message précédent.`
       );
     }
   }
@@ -911,13 +909,12 @@ async function handleModalSubmit(client: Client, interaction: ModalSubmitInterac
 
   async function replyAndRefresh(content: string) {
     const newCfg = getConfig(guildId);
-    // Try to update the original dashboard message
-    if (interaction.message) {
-      await interaction.message.edit({ embeds: [buildDashboardEmbed(newCfg, guild!)], components: buildDashboardRows(newCfg) }).catch(() => null);
-      await interaction.reply({ content, ephemeral: true });
-    } else {
-      await interaction.reply({ content, embeds: [buildDashboardEmbed(newCfg, guild!)], components: buildDashboardRows(newCfg), ephemeral: true });
-    }
+    await interaction.reply({
+      content,
+      embeds: [buildDashboardEmbed(newCfg, guild!)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
   }
 
   switch (customId) {

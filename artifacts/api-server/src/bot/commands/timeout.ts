@@ -38,12 +38,16 @@ export const data = new SlashCommandBuilder()
       )
   )
   .addStringOption((o) => o.setName("raison").setDescription("Raison du timeout"))
+  .addBooleanOption((o) =>
+    o.setName("dm").setDescription("Envoyer un DM à l'utilisateur ? (par défaut : paramètre global du serveur)")
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const dureeKey = interaction.options.getString("durée", true);
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
+  const dmOption = interaction.options.getBoolean("dm");
 
   if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
   if (!member.moderatable) return interaction.reply({ content: "Je ne peux pas mettre ce membre en timeout.", ephemeral: true });
@@ -51,14 +55,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const ms = DURATIONS[dureeKey]!;
   await member.timeout(ms, reason);
-  await sendSanctionDM(member.user, "timeout", reason, interaction.guild!, `Durée : ${LABELS[dureeKey] ?? dureeKey}`);
+  await sendSanctionDM(member.user, "timeout", reason, interaction.guild!, `Durée : ${LABELS[dureeKey] ?? dureeKey}`, dmOption ?? undefined);
 
   const embed = new EmbedBuilder().setColor(0xa855f7).setTitle("🔇 Membre mis en timeout")
     .addFields(
       { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
       { name: "Modérateur", value: interaction.user.tag, inline: true },
       { name: "Durée", value: LABELS[dureeKey] ?? dureeKey, inline: true },
-      { name: "Raison", value: reason }
+      { name: "Raison", value: reason },
+      { name: "DM envoyé", value: dmOption === false ? "Non (forcé)" : dmOption === true ? "Oui (forcé)" : "Selon config serveur", inline: true },
     ).setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
