@@ -161,6 +161,11 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setCustomId("dash_sanction_dm_toggle")
       .setLabel(config.sanctionDmEnabled ? "📨 DM Sanctions ON" : "🔕 DM Sanctions OFF")
       .setStyle(config.sanctionDmEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setLabel("🌐 Dashboard Web")
+      .setStyle(ButtonStyle.Link)
+      .setURL(DASHBOARD_URL ?? "https://discord.com")
+      .setDisabled(!DASHBOARD_URL),
   );
 
   const row5 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -197,15 +202,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const embed = buildDashboardEmbed(config, interaction.guild);
   const rows = buildDashboardRows(config);
 
-  const webRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setLabel("🌐 Ouvrir le Dashboard Web")
-      .setStyle(ButtonStyle.Link)
-      .setURL(DASHBOARD_URL ?? "https://discord.com")
-      .setDisabled(!DASHBOARD_URL),
-  );
-
-  return interaction.reply({ embeds: [embed], components: [...rows, webRow], ephemeral: true });
+  return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
 }
 
 export const prefixName = "dashboard";
@@ -222,13 +219,5 @@ export async function executeMessage(message: Message) {
   const embed = buildDashboardEmbed(config, message.guild);
   const rows = buildDashboardRows(config);
 
-  const webRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setLabel("🌐 Ouvrir le Dashboard Web")
-      .setStyle(ButtonStyle.Link)
-      .setURL(DASHBOARD_URL ?? "https://discord.com")
-      .setDisabled(!DASHBOARD_URL),
-  );
-
-  await message.reply({ embeds: [embed], components: [...rows, webRow] });
+  await message.reply({ embeds: [embed], components: rows });
 }
