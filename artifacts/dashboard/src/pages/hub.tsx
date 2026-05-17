@@ -7,7 +7,7 @@ import { Activity, Users, Server, Clock, HardDrive, Wifi, LogOut } from "lucide-
 import { clearToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
-function StatCard({ title, value, icon: Icon, description }: { title: string; value: string | React.ReactNode; icon: React.ElementType; description?: string }) {
+function StatCard({ title, value, icon: Icon, description, className }: { title: string; value: string | React.ReactNode; icon: React.ElementType; description?: string; className?: string }) {
   return (
     <Card className="bg-card border-border">
       <CardHeader className="flex flex-row items-center justify-between pb-2">
@@ -37,12 +37,10 @@ export default function Hub() {
   }, [setLocation]);
 
   const { data: stats, isError: statsError, error: rawStatsError } = useGetDashboardStats({
-    query: { refetchInterval: 30000, retry: false }
+    query: { refetchInterval: 30000 } as any
   });
 
-  const { data: guilds, isError: guildsError } = useGetDashboardGuilds({
-    query: { retry: false }
-  });
+  const { data: guilds, isError: guildsError } = useGetDashboardGuilds();
 
   useEffect(() => {
     if (statsError || guildsError) {

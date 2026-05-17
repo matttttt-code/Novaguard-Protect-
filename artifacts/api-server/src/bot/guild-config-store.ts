@@ -29,6 +29,10 @@ export interface GuildConfig {
   antiWebhookEnabled: boolean;
   suspiciousCheckEnabled: boolean;
   whitelistedInviteCodes: string[];
+  vpnCheckEnabled: boolean;
+  vpnCheckMinAgeDays: number;
+  vpnCheckAction: "kick" | "ban" | "flag";
+  vpnCheckRequireNoAvatar: boolean;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -63,6 +67,10 @@ function defaults(): GuildConfig {
     antiWebhookEnabled: false,
     suspiciousCheckEnabled: false,
     whitelistedInviteCodes: [],
+    vpnCheckEnabled: false,
+    vpnCheckMinAgeDays: 30,
+    vpnCheckAction: "kick",
+    vpnCheckRequireNoAvatar: false,
   };
 }
 

@@ -89,7 +89,11 @@ export const GetGuildConfigResponse = zod.object({
   "antiInsultWords": zod.array(zod.string()),
   "antiWebhookEnabled": zod.boolean(),
   "suspiciousCheckEnabled": zod.boolean(),
-  "whitelistedInviteCodes": zod.array(zod.string())
+  "whitelistedInviteCodes": zod.array(zod.string()),
+  "vpnCheckEnabled": zod.boolean().optional(),
+  "vpnCheckMinAgeDays": zod.number().optional(),
+  "vpnCheckAction": zod.enum(['kick', 'ban', 'flag']).optional(),
+  "vpnCheckRequireNoAvatar": zod.boolean().optional()
 })
 
 
@@ -127,7 +131,11 @@ export const UpdateGuildConfigBody = zod.object({
   "antiInsultWords": zod.array(zod.string()).optional(),
   "antiWebhookEnabled": zod.boolean().optional(),
   "suspiciousCheckEnabled": zod.boolean().optional(),
-  "whitelistedInviteCodes": zod.array(zod.string()).optional()
+  "whitelistedInviteCodes": zod.array(zod.string()).optional(),
+  "vpnCheckEnabled": zod.boolean().optional(),
+  "vpnCheckMinAgeDays": zod.number().optional(),
+  "vpnCheckAction": zod.enum(['kick', 'ban', 'flag']).optional(),
+  "vpnCheckRequireNoAvatar": zod.boolean().optional()
 })
 
 export const UpdateGuildConfigResponse = zod.object({
@@ -157,7 +165,11 @@ export const UpdateGuildConfigResponse = zod.object({
   "antiInsultWords": zod.array(zod.string()),
   "antiWebhookEnabled": zod.boolean(),
   "suspiciousCheckEnabled": zod.boolean(),
-  "whitelistedInviteCodes": zod.array(zod.string())
+  "whitelistedInviteCodes": zod.array(zod.string()),
+  "vpnCheckEnabled": zod.boolean().optional(),
+  "vpnCheckMinAgeDays": zod.number().optional(),
+  "vpnCheckAction": zod.enum(['kick', 'ban', 'flag']).optional(),
+  "vpnCheckRequireNoAvatar": zod.boolean().optional()
 })
 
 

@@ -288,6 +288,15 @@ components:
           type: array
           items:
             type: string
+        vpnCheckEnabled:
+          type: boolean
+        vpnCheckMinAgeDays:
+          type: integer
+        vpnCheckAction:
+          type: string
+          enum: [kick, ban, flag]
+        vpnCheckRequireNoAvatar:
+          type: boolean
 
     GuildConfigPatch:
       type: object
@@ -351,3 +360,12 @@ components:
           type: array
           items:
             type: string
+        vpnCheckEnabled:
+          type: boolean
+        vpnCheckMinAgeDays:
+          type: integer
+        vpnCheckAction:
+          type: string
+          enum: [kick, ban, flag]
+        vpnCheckRequireNoAvatar:
+          type: boolean

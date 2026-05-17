@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getClient } from "../bot/client-store.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { UpdateGuildConfigBody } from "@workspace/api-zod";
+import { getGuildLogs, getAllBotErrors, logConfigChange } from "../bot/event-log-store.js";
 
 const router = Router();
 
@@ -99,8 +100,34 @@ router.patch("/dashboard/config/:guildId", authMiddleware, (req, res) => {
     res.status(400).json({ error: "Données invalides", details: parsed.error.issues });
     return;
   }
+  const before = getConfig(guildId);
   setConfig(guildId, parsed.data);
-  res.json(getConfig(guildId));
+  const after = getConfig(guildId);
+  // Log each changed field
+  for (const key of Object.keys(parsed.data) as (keyof typeof parsed.data)[]) {
+    const oldVal = (before as unknown as Record<string, unknown>)[key];
+    const newVal = (after as unknown as Record<string, unknown>)[key];
+    if (JSON.stringify(oldVal) !== JSON.stringify(newVal)) {
+      logConfigChange(guildId, key, oldVal, newVal, "dashboard");
+    }
+  }
+  res.json(after);
+});
+
+// ── GET /api/dashboard/logs/:guildId ────────────────────────────────────────
+router.get("/dashboard/logs/:guildId", authMiddleware, (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const limit = Math.min(Number(req.query["limit"] ?? 100), 200);
+  const type = req.query["type"] as string | undefined;
+  let logs = getGuildLogs(guildId, limit);
+  if (type) logs = logs.filter((l) => l.type === type);
+  res.json(logs);
+});
+
+// ── GET /api/dashboard/errors ────────────────────────────────────────────────
+router.get("/dashboard/errors", authMiddleware, (req, res) => {
+  const limit = Math.min(Number(req.query["limit"] ?? 100), 100);
+  res.json(getAllBotErrors(limit));
 });
 
 export default router;

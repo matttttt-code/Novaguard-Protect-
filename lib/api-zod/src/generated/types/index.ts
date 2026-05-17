@@ -12,6 +12,8 @@ export * from './dashboardAuthResult';
 export * from './guildConfig';
 export * from './guildConfigPatch';
 export * from './guildConfigPatchSecurityLevel';
+export * from './guildConfigPatchVpnCheckAction';
 export * from './guildConfigSecurityLevel';
+export * from './guildConfigVpnCheckAction';
 export * from './guildSummary';
 export * from './healthStatus';

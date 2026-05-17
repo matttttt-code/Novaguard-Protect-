@@ -44,6 +44,15 @@ export const GuildConfigSecurityLevel = {
   NUMBER_3: 3,
 } as const;
 
+export type GuildConfigVpnCheckAction = typeof GuildConfigVpnCheckAction[keyof typeof GuildConfigVpnCheckAction];
+
+
+export const GuildConfigVpnCheckAction = {
+  kick: 'kick',
+  ban: 'ban',
+  flag: 'flag',
+} as const;
+
 export interface GuildConfig {
   /** @nullable */
   logChannelId: string | null;
@@ -84,6 +93,10 @@ export interface GuildConfig {
   antiWebhookEnabled: boolean;
   suspiciousCheckEnabled: boolean;
   whitelistedInviteCodes: string[];
+  vpnCheckEnabled?: boolean;
+  vpnCheckMinAgeDays?: number;
+  vpnCheckAction?: GuildConfigVpnCheckAction;
+  vpnCheckRequireNoAvatar?: boolean;
 }
 
 export type GuildConfigPatchSecurityLevel = typeof GuildConfigPatchSecurityLevel[keyof typeof GuildConfigPatchSecurityLevel];
@@ -93,6 +106,15 @@ export const GuildConfigPatchSecurityLevel = {
   NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
+} as const;
+
+export type GuildConfigPatchVpnCheckAction = typeof GuildConfigPatchVpnCheckAction[keyof typeof GuildConfigPatchVpnCheckAction];
+
+
+export const GuildConfigPatchVpnCheckAction = {
+  kick: 'kick',
+  ban: 'ban',
+  flag: 'flag',
 } as const;
 
 export interface GuildConfigPatch {
@@ -135,5 +157,9 @@ export interface GuildConfigPatch {
   antiWebhookEnabled?: boolean;
   suspiciousCheckEnabled?: boolean;
   whitelistedInviteCodes?: string[];
+  vpnCheckEnabled?: boolean;
+  vpnCheckMinAgeDays?: number;
+  vpnCheckAction?: GuildConfigPatchVpnCheckAction;
+  vpnCheckRequireNoAvatar?: boolean;
 }
 

@@ -44,6 +44,7 @@ import {
   setSanctionDmEnabled,
   setSecurityLevel,
 } from "./guild-config-store.js";
+import { logCommandExec, logBotError } from "./event-log-store.js";
 import { getPendingLevel3, removePendingLevel3, markOwnerApproved } from "./security-pending-store.js";
 import { getPendingRaid2, removePendingRaid2 } from "./raid2-pending-store.js";
 import { buildSecureEmbed } from "./commands/secure.js";
@@ -178,9 +179,12 @@ export function startBot(): void {
 
     try {
       await command.execute(interaction);
+      logCommandExec(interaction.guild?.id ?? null, interaction.commandName, "slash", interaction.user.tag, interaction.user.id, true);
     } catch (err) {
       const errCode = generateErrorCode();
       logger.error({ err, errCode, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
+      logCommandExec(interaction.guild?.id ?? null, interaction.commandName, "slash", interaction.user.tag, interaction.user.id, false);
+      logBotError(interaction.guild?.id ?? null, errCode, interaction.commandName, err instanceof Error ? err.message : String(err));
       void sendCommandErrorAlert(
         client,
         interaction.commandName,
@@ -348,6 +352,37 @@ export function startBot(): void {
     if (antialtKicked) return;
 
     const cfg = getConfig(guildId);
+
+    // ── Détection VPN/Proxy heuristique ────────────────────────────────────
+    // Signaux : compte trop récent + (optionnel) pas d'avatar → potentiel
+    // contournement de ban via VPN + compte jetable.
+    if (cfg.vpnCheckEnabled) {
+      const isNewAccount = accountAgeDays < cfg.vpnCheckMinAgeDays;
+      const hasNoAvatarSignal = cfg.vpnCheckRequireNoAvatar ? !member.user.avatar : false;
+      const vpnFlag = isNewAccount && (!cfg.vpnCheckRequireNoAvatar || hasNoAvatarSignal);
+      if (vpnFlag) {
+        const ageLabel = accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`;
+        const suspectFields = [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Âge du compte", value: ageLabel, inline: true },
+          { name: "Avatar", value: member.user.avatar ? "✅ Oui" : "❌ Aucun", inline: true },
+          { name: "Raison", value: `Compte < ${cfg.vpnCheckMinAgeDays}j${cfg.vpnCheckRequireNoAvatar ? " + pas d'avatar" : ""} — suspect VPN/proxy` },
+        ] as const;
+
+        if (cfg.vpnCheckAction === "ban") {
+          await member.ban({ reason: "[VPN CHECK] Compte suspect — contournement possible via VPN" }).catch(() => null);
+          await sendLog(client, logEmbed(0xdc2626, "🌐 VPN Check — Ban automatique", [...suspectFields], { tag: client.user!.tag, id: client.user!.id }), { guildId, logType: "ban" });
+          return;
+        } else if (cfg.vpnCheckAction === "kick") {
+          await member.kick("[VPN CHECK] Compte suspect — contournement possible via VPN").catch(() => null);
+          await sendLog(client, logEmbed(0xf97316, "🌐 VPN Check — Expulsion automatique", [...suspectFields], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+          return;
+        } else {
+          // flag only : log sans sanction
+          await sendLog(client, logEmbed(0xf59e0b, "🌐 VPN Check — Compte suspect (signalé)", [...suspectFields], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+        }
+      }
+    }
 
     // Badname : renommer les pseudos non conformes à l'arrivée
     void checkAndRenameMember(member).catch(() => null);

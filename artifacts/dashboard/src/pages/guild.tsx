@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useRoute, Link, useLocation } from "wouter";
 import { useGetGuildConfig, useUpdateGuildConfig, getGetGuildConfigQueryKey } from "@workspace/api-client-react";
+import { useQuery } from "@tanstack/react-query";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,10 +11,60 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { ChevronLeft, Save, ShieldAlert, Shield, X, Plus } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ChevronLeft, Save, ShieldAlert, Shield, X, Plus, RefreshCw, AlertTriangle, Terminal, Settings2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getToken } from "@/lib/auth";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface EventLog {
+  id: string;
+  type: "config_change" | "command_exec" | "bot_error";
+  guildId: string | null;
+  timestamp: number;
+  field?: string;
+  oldValue?: string;
+  newValue?: string;
+  command?: string;
+  via?: "slash" | "prefix";
+  userTag?: string;
+  userId?: string;
+  success?: boolean;
+  errCode?: string;
+  errMessage?: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function apiFetch<T>(path: string): Promise<T> {
+  const token = getToken();
+  return fetch(path, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  }).then((r) => r.json() as Promise<T>);
+}
+
+function relativeTime(ts: number): string {
+  const diff = Math.floor((Date.now() - ts) / 1000);
+  if (diff < 60) return `il y a ${diff}s`;
+  if (diff < 3600) return `il y a ${Math.floor(diff / 60)}min`;
+  if (diff < 86400) return `il y a ${Math.floor(diff / 3600)}h`;
+  return new Date(ts).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
+function tryPretty(raw?: string): string {
+  if (!raw) return "—";
+  try {
+    const v = JSON.parse(raw);
+    if (Array.isArray(v)) return v.length === 0 ? "[]" : v.join(", ");
+    if (typeof v === "boolean") return v ? "✅ Activé" : "❌ Désactivé";
+    if (v === null) return "null";
+    return String(v);
+  } catch {
+    return raw;
+  }
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
 function TagInput({ value = [], onChange, placeholder }: { value: string[], onChange: (val: string[]) => void, placeholder?: string }) {
   const [input, setInput] = useState("");
 
@@ -55,6 +106,151 @@ function TagInput({ value = [], onChange, placeholder }: { value: string[], onCh
   );
 }
 
+// ── Log rows ──────────────────────────────────────────────────────────────────
+function ConfigChangeRow({ log }: { log: EventLog }) {
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-border/40 last:border-0">
+      <Settings2 className="h-4 w-4 mt-0.5 text-blue-400 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-mono">
+          <span className="text-foreground font-semibold">{log.field}</span>
+          <span className="text-muted-foreground"> modifié</span>
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5 font-mono truncate">
+          <span className="text-red-400">{tryPretty(log.oldValue)}</span>
+          {" → "}
+          <span className="text-green-400">{tryPretty(log.newValue)}</span>
+        </p>
+        <p className="text-xs text-muted-foreground/60 mt-0.5">{relativeTime(log.timestamp)} · {log.userTag ?? "dashboard"}</p>
+      </div>
+    </div>
+  );
+}
+
+function CommandExecRow({ log }: { log: EventLog }) {
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-border/40 last:border-0">
+      <Terminal className={`h-4 w-4 mt-0.5 shrink-0 ${log.success ? "text-green-400" : "text-red-400"}`} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-mono">
+          <span className="font-semibold">{log.via === "slash" ? "/" : "&"}{log.command}</span>
+          {" "}
+          <Badge variant={log.success ? "outline" : "destructive"} className="text-xs py-0 h-4">
+            {log.success ? "OK" : "ERREUR"}
+          </Badge>
+          {" "}
+          <Badge variant="secondary" className="text-xs py-0 h-4">{log.via}</Badge>
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">{relativeTime(log.timestamp)} · {log.userTag ?? "?"}</p>
+      </div>
+    </div>
+  );
+}
+
+function BotErrorRow({ log }: { log: EventLog }) {
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-border/40 last:border-0">
+      <AlertTriangle className="h-4 w-4 mt-0.5 text-red-400 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-mono">
+          <span className="font-semibold text-red-400">{log.errCode}</span>
+          <span className="text-muted-foreground"> — {log.command}</span>
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5 truncate font-mono">{log.errMessage ?? "—"}</p>
+        <p className="text-xs text-muted-foreground/60 mt-0.5">{relativeTime(log.timestamp)}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Logs section ──────────────────────────────────────────────────────────────
+function LogsSection({ guildId }: { guildId: string }) {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+  const { data: allLogs = [], isLoading: logsLoading, refetch: refetchLogs } = useQuery<EventLog[]>({
+    queryKey: ["guild-logs", guildId],
+    queryFn: () => apiFetch<EventLog[]>(`${base}/api/dashboard/logs/${guildId}?limit=200`),
+    refetchInterval: 15000,
+  });
+
+  const { data: botErrors = [], isLoading: errorsLoading, refetch: refetchErrors } = useQuery<EventLog[]>({
+    queryKey: ["bot-errors"],
+    queryFn: () => apiFetch<EventLog[]>(`${base}/api/dashboard/errors?limit=100`),
+    refetchInterval: 15000,
+  });
+
+  const configLogs = allLogs.filter((l) => l.type === "config_change");
+  const commandLogs = allLogs.filter((l) => l.type === "command_exec");
+
+  return (
+    <Card className="border-border bg-card col-span-1 md:col-span-2">
+      <CardHeader className="pb-3 border-b border-border/50 bg-muted/20">
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-lg font-mono tracking-wide uppercase flex items-center gap-2">
+            📋 Journaux d'activité
+          </CardTitle>
+          <Button variant="ghost" size="sm" onClick={() => { void refetchLogs(); void refetchErrors(); }} className="gap-1 text-xs font-mono">
+            <RefreshCw className="h-3 w-3" /> Actualiser
+          </Button>
+        </div>
+        <CardDescription className="font-mono text-xs">Mis à jour toutes les 15 secondes · données en mémoire (redémarrage = reset)</CardDescription>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <Tabs defaultValue="config">
+          <TabsList className="font-mono text-xs mb-4">
+            <TabsTrigger value="config" className="gap-1">
+              <Settings2 className="h-3 w-3" /> Config <Badge variant="secondary" className="ml-1 text-xs">{configLogs.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="commands" className="gap-1">
+              <Terminal className="h-3 w-3" /> Commandes <Badge variant="secondary" className="ml-1 text-xs">{commandLogs.length}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="errors" className="gap-1">
+              <AlertTriangle className="h-3 w-3" /> Erreurs <Badge variant={botErrors.length > 0 ? "destructive" : "secondary"} className="ml-1 text-xs">{botErrors.length}</Badge>
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="config">
+            {logsLoading ? (
+              <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 w-full" />)}</div>
+            ) : configLogs.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic font-mono text-center py-6">Aucun changement de configuration enregistré.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto pr-1">
+                {configLogs.map((log) => <ConfigChangeRow key={log.id} log={log} />)}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="commands">
+            {logsLoading ? (
+              <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+            ) : commandLogs.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic font-mono text-center py-6">Aucune exécution de commande enregistrée.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto pr-1">
+                {commandLogs.map((log) => <CommandExecRow key={log.id} log={log} />)}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="errors">
+            {errorsLoading ? (
+              <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}</div>
+            ) : botErrors.length === 0 ? (
+              <p className="text-xs text-muted-foreground italic font-mono text-center py-6">✅ Aucune erreur bot enregistrée.</p>
+            ) : (
+              <div className="max-h-72 overflow-y-auto pr-1">
+                {botErrors.map((log) => <BotErrorRow key={log.id} log={log} />)}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function GuildConfigEditor() {
   const [, params] = useRoute("/guilds/:guildId");
   const guildId = params?.guildId || "";
@@ -62,9 +258,7 @@ export default function GuildConfigEditor() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data: config, isLoading, isError } = useGetGuildConfig(guildId, {
-    query: { retry: false, refetchOnWindowFocus: false }
-  });
+  const { data: config, isLoading, isError } = useGetGuildConfig(guildId);
 
   const updateConfig = useUpdateGuildConfig();
 
@@ -210,6 +404,62 @@ export default function GuildConfigEditor() {
                 <Label className="flex flex-col"><span>Contrôle Suspect</span><span className="text-xs text-muted-foreground font-normal">Analyse les profils douteux</span></Label>
                 <Switch checked={formData.suspiciousCheckEnabled} onCheckedChange={(v) => handleChange("suspiciousCheckEnabled", v)} />
               </div>
+
+              {/* ── VPN / Proxy Detection ── */}
+              <div className="border-t border-border/50 pt-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <Label className="flex flex-col">
+                    <span>🌐 Détection VPN / Proxy</span>
+                    <span className="text-xs text-muted-foreground font-normal">Signale ou sanctionne les comptes suspects à l'arrivée</span>
+                  </Label>
+                  <Switch checked={formData.vpnCheckEnabled ?? false} onCheckedChange={(v) => handleChange("vpnCheckEnabled", v)} />
+                </div>
+
+                {formData.vpnCheckEnabled && (
+                  <div className="pl-3 border-l-2 border-primary/30 space-y-3 mt-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Âge minimum du compte (jours)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={formData.vpnCheckMinAgeDays ?? 30}
+                        onChange={(e) => handleChange("vpnCheckMinAgeDays", Number(e.target.value))}
+                        className="font-mono text-sm h-8"
+                      />
+                      <p className="text-xs text-muted-foreground">Comptes créés depuis moins de X jours → signalés</p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <Label className="text-xs">Action</Label>
+                      <Select
+                        value={formData.vpnCheckAction ?? "kick"}
+                        onValueChange={(v) => handleChange("vpnCheckAction", v)}
+                      >
+                        <SelectTrigger className="font-mono text-sm h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="flag">🏴 Signaler uniquement (log)</SelectItem>
+                          <SelectItem value="kick">👢 Expulser</SelectItem>
+                          <SelectItem value="ban">🔨 Bannir</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label className="flex flex-col text-xs">
+                        <span>Exiger : pas d'avatar</span>
+                        <span className="text-muted-foreground font-normal">Ne déclenche que si le compte n'a pas de photo de profil</span>
+                      </Label>
+                      <Switch
+                        checked={formData.vpnCheckRequireNoAvatar ?? false}
+                        onCheckedChange={(v) => handleChange("vpnCheckRequireNoAvatar", v)}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </SectionCard>
 
@@ -353,10 +603,12 @@ export default function GuildConfigEditor() {
             </SectionCard>
           </div>
 
+          {/* JOURNAUX D'ACTIVITÉ */}
+          <LogsSection guildId={guildId} />
+
         </div>
       </div>
       
-      {/* Floating save indicator if dirty */}
       {dirtyFields.size > 0 && (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-popover text-popover-foreground border border-border shadow-xl rounded-full px-6 py-3 flex items-center gap-4 z-50">
           <span className="text-sm font-medium font-mono">{dirtyFields.size} modification(s) non sauvegardée(s)</span>

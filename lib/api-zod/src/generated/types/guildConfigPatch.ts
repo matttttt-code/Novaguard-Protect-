@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { GuildConfigPatchSecurityLevel } from './guildConfigPatchSecurityLevel';
+import type { GuildConfigPatchVpnCheckAction } from './guildConfigPatchVpnCheckAction';
 
 export interface GuildConfigPatch {
   /** @nullable */
@@ -47,4 +48,8 @@ export interface GuildConfigPatch {
   antiWebhookEnabled?: boolean;
   suspiciousCheckEnabled?: boolean;
   whitelistedInviteCodes?: string[];
+  vpnCheckEnabled?: boolean;
+  vpnCheckMinAgeDays?: number;
+  vpnCheckAction?: GuildConfigPatchVpnCheckAction;
+  vpnCheckRequireNoAvatar?: boolean;
 }
