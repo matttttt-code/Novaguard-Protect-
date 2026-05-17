@@ -1,6 +1,5 @@
 import { EmbedBuilder, TextChannel, Client } from "discord.js";
 import { logger } from "../lib/logger.js";
-import { sendLogDM } from "./dm-notify.js";
 import { getConfig } from "./guild-config-store.js";
 import { getAlertPing } from "./alert-ping.js";
 
@@ -52,23 +51,9 @@ export async function sendLog(
     }
   }
 
-  // Build a dedicated DM embed with a green jump link
-  let dmEmbed = embed;
-  if (options?.guildId && options?.commandChannelId) {
-    const jumpUrl = `https://discord.com/channels/${options.guildId}/${options.commandChannelId}`;
-    dmEmbed = EmbedBuilder.from(embed.toJSON())
-      .setURL(jumpUrl)
-      .addFields({
-        name: "📍 Lieu d'exécution",
-        value: `[🟢 Aller au salon](${jumpUrl})`,
-        inline: true,
-      });
-  }
-
-  await Promise.allSettled([
-    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone, options?.pingContent, options?.guildId)),
-    sendLogDM(client, dmEmbed),
-  ]);
+  await Promise.allSettled(
+    targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone, options?.pingContent, options?.guildId)),
+  );
 }
 
 export function logEmbed(

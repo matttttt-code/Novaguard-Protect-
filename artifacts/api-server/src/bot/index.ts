@@ -109,8 +109,8 @@ export function startBot(): void {
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
     readyClient.user.setActivity("le serveur 🛡️", { type: ActivityType.Watching });
 
+    const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);
     try {
-      const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);
       // Enregistrement par serveur uniquement (instantané, sans doublon global)
       await Promise.all(
         readyClient.guilds.cache.map(g => g.commands.set(commandData).catch(() => null)),
@@ -120,7 +120,9 @@ export function startBot(): void {
       logger.error({ err }, "Erreur lors de l'enregistrement des commandes");
     }
 
-    await sendStartupAlert(readyClient).catch(() => null);
+    await sendStartupAlert(readyClient, commandData.length, prefixCommands.length).catch((err) => {
+      logger.error({ err }, "Impossible d'envoyer le DM de démarrage");
+    });
     await initInviteTracker(readyClient).catch(() => null);
   });
 
