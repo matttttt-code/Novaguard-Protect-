@@ -55,6 +55,7 @@ import * as antiwebhook from "./antiwebhook.js";
 import * as whitelistinvite from "./whitelistinvite.js";
 import * as hoistrole from "./hoistrole.js";
 import * as secureinfo from "./secureinfo.js";
+import * as sendsecuredm from "./sendsecuredm.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -77,7 +78,7 @@ export const commands: Command[] = [
   voicemute, rolerequest, suggestion, errortest,
   setinvitelog, checkinvite, checkinvites,
   blacklistinvite, serverstats, testinviteembed,
-  secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo,
+  secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
 ];
 
 type PrefixModule = {
@@ -100,7 +101,7 @@ const prefixModules: PrefixModule[] = [
   voicemute, rolerequest, suggestion, errortest,
   setinvitelog, checkinvite, checkinvites,
   blacklistinvite, serverstats, testinviteembed, restart,
-  secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo,
+  secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

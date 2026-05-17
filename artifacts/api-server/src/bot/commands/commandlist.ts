@@ -125,6 +125,7 @@ function buildEmbeds(): EmbedBuilder[] {
         value: [
           "`/secure voir|niveau <1|2|3>|suspicieux activer|désactiver` · `&secure`",
           "`/secureinfo` · `&secureinfo` (`&niveaux`) — **Explications détaillées** de chaque niveau",
+          "`/sendsecuredm membre @m|everyone` · `&sendsecuredm` (`&ssdm`) — Envoie DM info sécurité à un membre ou tous",
           "`/antiinsult activer|désactiver|ajouter|retirer|liste|charger-defaults` · `&antiinsult`",
           "`/antiwebhook activer|désactiver|statut` · `&antiwebhook`",
           "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`)",
@@ -138,7 +139,7 @@ function buildEmbeds(): EmbedBuilder[] {
         value: [
           "👢 **Spam** : N1/N2/N3 → 5 msg/5s · Raid N2 → 3 msg/3s — Expulsion",
           "🔇 **Emojis** (+5) / **Lien** / **MAJUSCULES** (100%) → Timeout 24h",
-          "🤬 **Insulte** → Warn (N1 uniquement — désactivé en N2 et N3)",
+          "🤬 **Insulte** → Timeout 24h (tous niveaux)",
           "🔗 **Webhook** non autorisé → Suppression + alerte DM owner",
           "*Modérateurs (ManageMessages) exemptés de tout l'automod*",
         ].join("\n"),
@@ -161,7 +162,7 @@ function buildEmbeds(): EmbedBuilder[] {
         ].join("\n"),
       },
     )
-    .setFooter({ text: "57 commandes slash · 57 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "58 commandes slash · 58 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];

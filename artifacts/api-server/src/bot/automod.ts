@@ -218,11 +218,11 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
     const content = message.content;
     if (!content) return;
 
-    // ── Anti-insulte (niveau normal uniquement, désactivé en niveaux 2 et 3) ──
-    if (cfg.antiInsultEnabled && cfg.antiInsultWords.length > 0 && secLvl < 2) {
+    // ── Anti-insulte (tous niveaux — timeout 24h) ──
+    if (cfg.antiInsultEnabled && cfg.antiInsultWords.length > 0) {
       const found = detectInsult(content, cfg.antiInsultWords);
       if (found) {
-        await applyWarn(member, `Insulte détectée : \`${found}\``, message);
+        await applyTimeout(member, `Insulte détectée : \`${found}\``, message, TIMEOUT_24H_MS);
         return;
       }
     }

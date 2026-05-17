@@ -19,7 +19,7 @@ function buildEmbeds(): EmbedBuilder[] {
           "• **Anti-émoji** : plus de 5 émojis par message → timeout 24h",
           "• **Anti-lien** : lien non autorisé → timeout 24h",
           "• **Anti-majuscules** : message 100 % en caps → timeout 24h",
-          "• **Anti-insulte** ✅ actif → avertissement (liste configurable via `/antiinsult`)",
+          "• **Anti-insulte** ✅ actif → **timeout 24h** (liste configurable via `/antiinsult`)",
           "• **Anti-webhook** : si activé via `/antiwebhook` → suppression + alerte DM owner",
           "• Alerte DM owner si un membre reçoit un rôle **Administrateur**",
           "*Modérateurs (ManageMessages) exemptés de l'automod*",
@@ -29,7 +29,7 @@ function buildEmbeds(): EmbedBuilder[] {
         name: "🟡 Niveau 2 — Élevé",
         value: [
           "Tout le niveau 1, plus :",
-          "• **Anti-insulte désactivé** à ce niveau (mesures plus strictes en N3)",
+          "• **Anti-insulte** ✅ actif → timeout 24h (même comportement qu'en N1)",
           "• Comptes de moins de **3 jours** : signalés comme suspects à l'arrivée + alerte DM owner",
           "• Détection de comptes suspects renforcée (`/secure suspicieux activer`)",
           "• Activation via `/secure niveau 2` (aucune validation supplémentaire requise)",
@@ -108,10 +108,10 @@ function buildEmbeds(): EmbedBuilder[] {
         value: [
           "| Niveau | Anti-insulte | Spam | Comptes suspects | Validation |",
           "|--------|-------------|------|-----------------|------------|",
-          "| **N1** | Warn | 5/5s | Non | Aucune |",
-          "| **N2** | Désactivé | 5/5s | <3j signalé | Aucune |",
-          "| **N3** | Désactivé | 5/5s | <7j timeout 1h | Owner + Admin |",
-          "| **Raid N2** | — | **3/3s** | Timeout 10min | Owner seul |",
+          "| **N1** | Timeout 24h | 5/5s | Non | Aucune |",
+          "| **N2** | Timeout 24h | 5/5s | <3j signalé | Aucune |",
+          "| **N3** | Timeout 24h | 5/5s | <7j timeout 1h | Owner + Admin |",
+          "| **Raid N2** | Timeout 24h | **3/3s** | Timeout 10min | Owner seul |",
         ].join("\n"),
       },
     )

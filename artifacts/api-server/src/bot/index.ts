@@ -869,21 +869,7 @@ async function activateLevel3Effects(client: Client, guildId: string): Promise<v
   const targetGuild = client.guilds.cache.get(guildId);
   if (!targetGuild) return;
 
-  // a) DM tous les membres admins du serveur
-  try {
-    const allMembers = await targetGuild.members.fetch();
-    const adminMembers = allMembers.filter(m => !m.user.bot && m.permissions.has(PermissionFlagsBits.Administrator));
-    for (const [, adminMember] of adminMembers) {
-      await adminMember.user.send(
-        `🔴 **Niveau de sécurité 3 activé — ${targetGuild.name}**\n\n` +
-        `Le mode de sécurité **maximum** vient d'être activé sur ce serveur.\n` +
-        `Toutes les actions suspectes sont surveillées de près.\n` +
-        `Si tu n'étais pas au courant, contacte immédiatement le propriétaire du serveur.`
-      ).catch(() => null);
-    }
-  } catch { /* ignore */ }
-
-  // b) Suppression de tous les webhooks
+  // a) Suppression de tous les webhooks
   const webhooks = await targetGuild.fetchWebhooks().catch(() => null);
   if (webhooks) await Promise.all([...webhooks.values()].map(wh => wh.delete("Niveau 3 sécurité — suppression webhooks").catch(() => null)));
 
@@ -1184,7 +1170,6 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         if (cfg.logChannelId) {
           const lCh = tGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
           await lCh?.send({
-            content: "@here",
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
