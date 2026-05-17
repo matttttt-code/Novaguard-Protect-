@@ -200,11 +200,11 @@ export function startBot(): void {
 
     if (!message.channel.isDMBased()) return;
 
-    // === DM : CAPTCHA fallback (pas de salon configuré) ===
+    // === DM : CAPTCHA (admin toujours par DM ; membre si pas de salon configuré) ===
     if (hasCaptcha(message.author.id)) {
       const challenge = getCaptcha(message.author.id)!;
       const cfg = getConfig(challenge.guildId);
-      if (!cfg.captchaChannelId) {
+      if (!cfg.captchaChannelId || challenge.adminRoleId) {
         await handleCaptchaDM(client, message, captchaTimeouts);
         return;
       }
