@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { sendLog, logEmbed } from "./log.js";
-import { getConfig } from "./guild-config-store.js";
+import { getConfig, isRaidMode2 } from "./guild-config-store.js";
 import { sendSanctionDM, sendLogDM } from "./dm-notify.js";
 import { addWarning } from "./warnings-store.js";
 
@@ -200,13 +200,16 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
 
     const key = `${message.guildId}-${message.author.id}`;
     const now = Date.now();
-    const timestamps = (messageTimestamps.get(key) ?? []).filter((t) => now - t < SPAM_WINDOW_MS);
+    const isN2Active = isRaidMode2(message.guildId!);
+    const spamLimit = isN2Active ? 3 : SPAM_LIMIT;
+    const spamWindow = isN2Active ? 3000 : SPAM_WINDOW_MS;
+    const timestamps = (messageTimestamps.get(key) ?? []).filter((t) => now - t < spamWindow);
     timestamps.push(now);
     messageTimestamps.set(key, timestamps);
 
-    if (timestamps.length >= SPAM_LIMIT) {
+    if (timestamps.length >= spamLimit) {
       messageTimestamps.delete(key);
-      await applyKick(member, `Spam : ${SPAM_LIMIT} messages en moins de ${SPAM_WINDOW_MS / 1000} secondes`, message);
+      await applyKick(member, `Spam : ${spamLimit} messages en moins de ${spamWindow / 1000}s${isN2Active ? " (Anti-Raid N2)" : ""}`, message);
       return;
     }
 

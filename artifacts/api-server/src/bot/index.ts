@@ -19,6 +19,8 @@ import {
   Guild,
   User,
   Message,
+  GuildVerificationLevel,
+  VoiceChannel,
 } from "discord.js";
 import { commands, prefixCommands } from "./commands/index.js";
 import { registerAutoMod } from "./automod.js";
@@ -33,7 +35,7 @@ import {
 } from "./blacklist-store.js";
 import { sendLog, logEmbed } from "./log.js";
 import {
-  isRaidMode, isJoinLocked, getConfig,
+  isRaidMode, isJoinLocked, getConfig, isRaidMode2,
   setRaidMode, setJoinLock, setRaidMode2,
   setLogChannel, setBanLogChannel, setGeneralLogChannel, setInviteLogChannel,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
@@ -258,6 +260,36 @@ export function startBot(): void {
         ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
       } catch (err) { logger.error({ err }, "Raid mode kick error"); }
       return;
+    }
+
+    // Anti-Raid Niveau 2 : timeout 10 min pour tout nouveau membre
+    if (isRaidMode2(guildId)) {
+      await member.timeout(10 * 60 * 1000, "Anti-Raid Niveau 2 actif — quarantaine temporaire").catch(() => null);
+      await sendLog(client, logEmbed(0xf59e0b, "🛡️ Anti-Raid N2 — Timeout automatique à l'arrivée", [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Durée", value: "10 minutes", inline: true },
+        { name: "Raison", value: "Anti-Raid Niveau 2 actif" },
+      ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+    }
+
+    // Niveau 3 : quarantaine auto pour comptes < 7 jours
+    if (getConfig(guildId).securityLevel >= 3 && accountAgeDays < 7) {
+      await member.timeout(60 * 60 * 1000, "Niveau 3 sécurité — compte < 7 jours").catch(() => null);
+      await sendLog(client, logEmbed(0xef4444, "🔴 Niveau 3 — Quarantaine automatique (compte récent)", [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+        { name: "Timeout", value: "1 heure — compte < 7 jours", inline: true },
+      ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("🔴 N3 — Quarantaine auto (compte récent)")
+        .addFields(
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Âge", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+          { name: "Serveur", value: member.guild.name, inline: true },
+        )
+        .setTimestamp()
+      );
     }
 
     const cfg = getConfig(guildId);
@@ -831,6 +863,41 @@ async function handleAdminAlertButton(client: Client, interaction: ButtonInterac
   }
 }
 
+// ──── LEVEL 3 ACTIVATION EFFECTS ────
+
+async function activateLevel3Effects(client: Client, guildId: string): Promise<void> {
+  const targetGuild = client.guilds.cache.get(guildId);
+  if (!targetGuild) return;
+
+  // a) DM tous les membres admins du serveur
+  try {
+    const allMembers = await targetGuild.members.fetch();
+    const adminMembers = allMembers.filter(m => !m.user.bot && m.permissions.has(PermissionFlagsBits.Administrator));
+    for (const [, adminMember] of adminMembers) {
+      await adminMember.user.send(
+        `🔴 **Niveau de sécurité 3 activé — ${targetGuild.name}**\n\n` +
+        `Le mode de sécurité **maximum** vient d'être activé sur ce serveur.\n` +
+        `Toutes les actions suspectes sont surveillées de près.\n` +
+        `Si tu n'étais pas au courant, contacte immédiatement le propriétaire du serveur.`
+      ).catch(() => null);
+    }
+  } catch { /* ignore */ }
+
+  // b) Suppression de tous les webhooks
+  const webhooks = await targetGuild.fetchWebhooks().catch(() => null);
+  if (webhooks) await Promise.all([...webhooks.values()].map(wh => wh.delete("Niveau 3 sécurité — suppression webhooks").catch(() => null)));
+
+  // c) Gel des salons vocaux : retirer Connect à @everyone
+  const everyoneRole = targetGuild.roles.everyone;
+  const voiceChannels = targetGuild.channels.cache.filter(ch => ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice);
+  for (const [, ch] of voiceChannels) {
+    await (ch as VoiceChannel).permissionOverwrites.edit(everyoneRole, { Connect: false }, { reason: "Niveau 3 — gel vocal" }).catch(() => null);
+  }
+
+  // d) Vérification → TRÈS HAUTE (téléphone requis)
+  await targetGuild.setVerificationLevel(GuildVerificationLevel.VeryHigh, "Niveau 3 sécurité activé").catch(() => null);
+}
+
 // ──── OWNER ADMIN ALERT BUTTONS ────
 
 async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteraction): Promise<void> {
@@ -1008,6 +1075,15 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       await interaction.update({ content: `✅ Anti-Raid Niveau 2 **approuvé** pour **${raid2.guildName}**.`, embeds: [], components: [] });
       const tGuild = client.guilds.cache.get(r2GuildId);
       if (tGuild) {
+        // Révocation de toutes les invitations
+        const n2Invites = await tGuild.invites.fetch().catch(() => null);
+        if (n2Invites) await Promise.all(n2Invites.map(inv => inv.delete("Anti-Raid N2 activé").catch(() => null)));
+        // Suppression de tous les webhooks
+        const n2Webhooks = await tGuild.fetchWebhooks().catch(() => null);
+        if (n2Webhooks) await Promise.all([...n2Webhooks.values()].map(wh => wh.delete("Anti-Raid N2 activé").catch(() => null)));
+        // Vérification → Haute (téléphone requis)
+        await tGuild.setVerificationLevel(GuildVerificationLevel.High, "Anti-Raid N2 activé").catch(() => null);
+
         const cfg = getConfig(r2GuildId);
         if (cfg.logChannelId) {
           const lCh = tGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
@@ -1017,7 +1093,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setColor(0xef4444)
               .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
               .setDescription(`Approuvé par le propriétaire du bot.\nDemandé par <@${raid2.requesterId}>.`)
-              .addFields({ name: "⚠️ Effet", value: "Tout nouveau **salon** ou **rôle** créé sera automatiquement supprimé." })
+              .addFields({ name: "⚠️ Effets actifs", value: "• Tout nouveau **salon** ou **rôle** créé sera supprimé auto\n• Tout membre qui rejoint reçoit un **timeout 10 min**\n• Toutes les **invitations** ont été révoquées\n• Tous les **webhooks** ont été supprimés\n• Vérification Discord → **Haute** (téléphone requis)\n• Anti-spam renforcé : 3 msg en 3s = expulsion" })
               .setTimestamp()],
           }).catch(() => null);
         }
@@ -1052,6 +1128,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       setSecurityLevel(sacGuildId, 3);
       removePendingLevel3(sacGuildId);
       await interaction.update({ content: `✅ Niveau 3 **activé** et confirmé par ${interaction.user.tag}.`, embeds: [], components: [] });
+      await activateLevel3Effects(client, sacGuildId);
       const sacLogCh = interaction.channel as TextChannel | null;
       await sacLogCh?.send({
         content: "@everyone",

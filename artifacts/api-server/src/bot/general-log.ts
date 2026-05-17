@@ -290,12 +290,21 @@ export function registerGeneralLog(client: Client): void {
     // Anti-Raid Niveau 2 : suppression auto de tout nouveau salon
     if (isRaidMode2(channel.guildId)) {
       const name = channel.name;
+      const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
       await channel.delete("Anti-Raid Niveau 2 actif").catch(() => null);
       await sendGenLog(client, channel.guildId, new EmbedBuilder()
         .setColor(0xef4444).setTitle("🛡️ Anti-Raid N2 — Salon supprimé automatiquement")
-        .addFields({ name: "Salon supprimé", value: `\`${name}\`` })
+        .addFields(
+          { name: "Salon supprimé", value: `\`${name}\`` },
+          ...(executor ? [userField(executor, "Créé par")] : []),
+        )
         .setFooter({ text: "Anti-Raid Niveau 2 actif" })
         .setTimestamp());
+      const n2Owner = await client.users.fetch(LOG_DM_USER_ID).catch(() => null);
+      await n2Owner?.send(
+        `🛡️ **Anti-Raid N2** — Salon \`${name}\` supprimé auto sur **${channel.guild.name}**` +
+        (executor ? ` (créé par **${executor.tag}**)` : "") + `.`
+      ).catch(() => null);
       return;
     }
     const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
@@ -356,12 +365,21 @@ export function registerGeneralLog(client: Client): void {
     // Anti-Raid Niveau 2 : suppression auto de tout nouveau rôle
     if (isRaidMode2(role.guild.id)) {
       const name = role.name;
+      const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
       await role.delete("Anti-Raid Niveau 2 actif").catch(() => null);
       await sendGenLog(client, role.guild.id, new EmbedBuilder()
         .setColor(0xef4444).setTitle("🛡️ Anti-Raid N2 — Rôle supprimé automatiquement")
-        .addFields({ name: "Rôle supprimé", value: `\`${name}\`` })
+        .addFields(
+          { name: "Rôle supprimé", value: `\`${name}\`` },
+          ...(executor ? [userField(executor, "Créé par")] : []),
+        )
         .setFooter({ text: "Anti-Raid Niveau 2 actif" })
         .setTimestamp());
+      const n2Owner = await client.users.fetch(LOG_DM_USER_ID).catch(() => null);
+      await n2Owner?.send(
+        `🛡️ **Anti-Raid N2** — Rôle \`${name}\` supprimé auto sur **${role.guild.name}**` +
+        (executor ? ` (créé par **${executor.tag}**)` : "") + `.`
+      ).catch(() => null);
       return;
     }
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
