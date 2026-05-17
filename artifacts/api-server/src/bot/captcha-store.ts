@@ -4,6 +4,7 @@ export interface CaptchaChallenge {
   attempts: number;
   challengeMessageId?: string;
   isTest?: boolean;
+  adminRoleId?: string;
 }
 
 const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";

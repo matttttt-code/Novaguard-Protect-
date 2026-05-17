@@ -602,7 +602,7 @@ export function registerGeneralLog(client: Client): void {
           .setLabel("❌ Refuser — retirer le rôle")
           .setStyle(ButtonStyle.Danger),
         new ButtonBuilder()
-          .setCustomId(`oa_captcha:${newMember.guild.id}:${newMember.id}`)
+          .setCustomId(`oa_captcha:${newMember.guild.id}:${newMember.id}:${newAdminRoles.first()?.id ?? "0"}`)
           .setLabel("🔐 Envoyer captcha au membre")
           .setStyle(ButtonStyle.Secondary),
       );
