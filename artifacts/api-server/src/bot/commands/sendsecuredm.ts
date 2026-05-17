@@ -11,7 +11,7 @@ import {
 import { getConfig } from "../guild-config-store.js";
 import { isRaidMode, isRaidMode2 } from "../guild-config-store.js";
 
-function buildSecurityDM(guild: Guild): EmbedBuilder {
+export function buildSecurityDM(guild: Guild): EmbedBuilder {
   const cfg = getConfig(guild.id);
   const lvlLabel = cfg.securityLevel === 3 ? "🔴 Maximum (N3)" : cfg.securityLevel === 2 ? "🟡 Élevé (N2)" : "🟢 Normal (N1)";
   const raidActive = isRaidMode(guild.id);
@@ -73,6 +73,21 @@ async function sendToMember(member: GuildMember, guild: Guild): Promise<"ok" | "
   } catch {
     return "fail";
   }
+}
+
+export async function sendToAllMembersSecureDM(client: Client, guildId: string): Promise<{ sent: number; failed: number }> {
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return { sent: 0, failed: 0 };
+  let members;
+  try { members = await guild.members.fetch(); } catch { return { sent: 0, failed: 0 }; }
+  const humans = [...members.values()].filter(m => !m.user.bot);
+  let sent = 0; let failed = 0;
+  for (const member of humans) {
+    const res = await sendToMember(member, guild);
+    if (res === "ok") sent++; else failed++;
+    await new Promise(r => setTimeout(r, 600));
+  }
+  return { sent, failed };
 }
 
 export const data = new SlashCommandBuilder()

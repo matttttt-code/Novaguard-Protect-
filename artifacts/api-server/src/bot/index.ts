@@ -61,6 +61,7 @@ import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
+import { sendToAllMembersSecureDM } from "./commands/sendsecuredm.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 
 function isValidId(s: string): boolean {
@@ -1176,11 +1177,17 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setDescription(`Approuvé par le propriétaire du bot.\nDemandé par <@${raid2.requesterId}>.`)
               .addFields({ name: "⚠️ Effets actifs", value: "• Tout nouveau **salon** ou **rôle** créé sera supprimé auto\n• Tout membre qui rejoint reçoit un **timeout 10 min**\n• Toutes les **invitations** ont été révoquées\n• Tous les **webhooks** ont été supprimés\n• Vérification Discord → **Haute** (téléphone requis)\n• Anti-spam renforcé : 3 msg en 3s = expulsion" })
               .setTimestamp()],
+            components: [
+              new ActionRowBuilder<ButtonBuilder>().addComponents(
+                new ButtonBuilder()
+                  .setCustomId(`send_sec_dm:${r2GuildId}`)
+                  .setLabel("📨 Envoyer DM sécurité à tous")
+                  .setStyle(ButtonStyle.Danger),
+              ),
+            ],
           }).catch(() => null);
         }
       }
-      const reqUser = await client.users.fetch(raid2.requesterId).catch(() => null);
-      await reqUser?.send(`✅ L'**Anti-Raid Niveau 2** sur **${raid2.guildName}** a été approuvé et est maintenant actif.`).catch(() => null);
     } else {
       removePendingRaid2(r2GuildId);
       await interaction.update({ content: `❌ Anti-Raid Niveau 2 **refusé** pour **${raid2.guildName}**.`, embeds: [], components: [] });
@@ -1212,22 +1219,50 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       await activateLevel3Effects(client, sacGuildId);
       const sacLogCh = interaction.channel as TextChannel | null;
       await sacLogCh?.send({
-        content: "@here",
         embeds: [new EmbedBuilder()
           .setColor(0xef4444)
           .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
           .setDescription(`Approuvé par le propriétaire du bot + confirmé par <@${interaction.user.id}>.\nDemandé par <@${sacPending.requesterId}>.`)
           .addFields({ name: "Effets actifs", value: "• Anti-insulte timeout 24h\n• Anti-webhook auto\n• Comptes < 7 jours suspects\n• Alerte DM owner pour tout compte suspect" })
           .setTimestamp()],
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`send_sec_dm:${sacGuildId}`)
+              .setLabel("📨 Envoyer DM sécurité à tous")
+              .setStyle(ButtonStyle.Danger),
+          ),
+        ],
       }).catch(() => null);
-      const sacReq = await client.users.fetch(sacPending.requesterId).catch(() => null);
-      await sacReq?.send(`✅ Ta demande de niveau 3 sur **${sacPending.guildName}** a été approuvée et confirmée. Le niveau 3 est maintenant actif.`).catch(() => null);
     } else {
       removePendingLevel3(sacGuildId);
       await interaction.update({ content: `❌ Niveau 3 **refusé** par ${interaction.user.tag}.`, embeds: [], components: [] });
       const sacReq = await client.users.fetch(sacPending.requesterId).catch(() => null);
       await sacReq?.send(`❌ Ta demande de niveau 3 sur **${sacPending.guildName}** a été refusée par un administrateur du serveur.`).catch(() => null);
     }
+    return;
+  }
+
+  if (customId.startsWith("send_sec_dm:")) {
+    const sdGuildId = customId.split(":")[1] ?? "";
+    if (!sdGuildId) return;
+    const sdMember = guild
+      ? await guild.members.fetch(interaction.user.id).catch(() => null)
+      : null;
+    const hasAdmin = sdMember?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+    if (!hasAdmin) {
+      await interaction.reply({ content: "❌ Seuls les administrateurs peuvent déclencher cette action.", ephemeral: true });
+      return;
+    }
+    await interaction.update({
+      content: "⏳ Envoi des DMs de sécurité en cours… cela peut prendre plusieurs minutes selon la taille du serveur.",
+      components: [],
+    });
+    sendToAllMembersSecureDM(client, sdGuildId).then(async ({ sent, failed }) => {
+      await interaction.editReply({
+        content: `✅ DM de sécurité envoyé à **${sent}** membre(s).${failed > 0 ? `\n❌ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""}`,
+      }).catch(() => null);
+    }).catch(() => null);
     return;
   }
 
