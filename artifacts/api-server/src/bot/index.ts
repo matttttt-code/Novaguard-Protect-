@@ -424,6 +424,11 @@ async function resolveCaptchaSuccess(
       }).catch(() => null);
       // Auto-delete success message after 10s
       setTimeout(() => { msg?.delete().catch(() => null); }, 10_000);
+      // Feedback visible pour l'utilisateur
+      const successMsg = await ch?.send({
+        content: `<@${userId}> ✅ **Vérification réussie !** Tu as maintenant accès au serveur. Bienvenue ! 🎉`,
+      }).catch(() => null);
+      if (successMsg) setTimeout(() => successMsg.delete().catch(() => null), 10_000);
     } catch { /* ignore */ }
   }
 
@@ -483,6 +488,17 @@ async function handleCaptchaChannelMessage(
       const guild = client.guilds.cache.get(challenge.guildId);
       const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
       await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+      // Feedback visible pour l'utilisateur
+      const cfg2 = getConfig(challenge.guildId);
+      if (cfg2.captchaChannelId) {
+        try {
+          const ch2 = await client.channels.fetch(cfg2.captchaChannelId) as TextChannel | null;
+          const failMsg = await ch2?.send({
+            content: `<@${message.author.id}> ❌ **Captcha échoué !** Trop de mauvaises tentatives — tu as été expulsé du serveur.`,
+          }).catch(() => null);
+          if (failMsg) setTimeout(() => failMsg.delete().catch(() => null), 10_000);
+        } catch { /* ignore */ }
+      }
     } else {
       // Send temporary error in captcha channel
       const cfg = getConfig(challenge.guildId);

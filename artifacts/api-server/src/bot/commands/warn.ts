@@ -65,7 +65,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Total", value: String(total), inline: true },
       { name: "Raison", value: reason },
     ], { tag: interaction.user.tag, id: interaction.user.id }),
-    { guildId: interaction.guildId ?? undefined }
+    { guildId: interaction.guildId ?? undefined, commandChannelId: interaction.channelId ?? undefined }
   );
 }
 

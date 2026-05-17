@@ -72,7 +72,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
     { name: "Durée", value: LABELS[dureeKey] ?? dureeKey, inline: true },
     { name: "Raison", value: reason },
-  ], { tag: interaction.user.tag, id: interaction.user.id }));
+  ], { tag: interaction.user.tag, id: interaction.user.id }),
+  { guildId: interaction.guildId ?? undefined, commandChannelId: interaction.channelId ?? undefined });
 }
 
 export const prefixName = "timeout";

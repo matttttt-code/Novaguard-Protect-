@@ -18,5 +18,25 @@
     "captchaUnverifiedRoleId": "1504819202090074203",
     "captchaVerifiedRoleId": "1504474629878710414",
     "sanctionDmEnabled": true
+  },
+  "1504534006253883463": {
+    "logChannelId": null,
+    "banLogChannelId": null,
+    "raidMode": false,
+    "joinLock": false,
+    "ticketStaffRoleId": null,
+    "ticketCategoryId": null,
+    "transcriptChannelId": null,
+    "welcomeEnabled": false,
+    "welcomeChannelId": null,
+    "welcomeMessage": "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉",
+    "leaveEnabled": false,
+    "leaveChannelId": null,
+    "leaveMessage": "👋 **{username}** a quitté le serveur. Il reste **{count}** membres.",
+    "captchaEnabled": true,
+    "captchaChannelId": "1505559059364057159",
+    "captchaUnverifiedRoleId": "1505559435433742346",
+    "captchaVerifiedRoleId": "1504538153900572672",
+    "sanctionDmEnabled": true
   }
 }

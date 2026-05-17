@@ -48,7 +48,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   return sendLog(interaction.client, logEmbed(0xf59e0b, "👢 Membre expulsé", [
     { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
     { name: "Raison", value: reason },
-  ], { tag: interaction.user.tag, id: interaction.user.id }));
+  ], { tag: interaction.user.tag, id: interaction.user.id }),
+  { guildId: interaction.guildId ?? undefined, commandChannelId: interaction.channelId ?? undefined });
 }
 
 export const prefixName = "kick";

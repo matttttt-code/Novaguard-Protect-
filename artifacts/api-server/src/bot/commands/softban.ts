@@ -64,7 +64,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       { name: "Messages supprimés", value: `${days} jour(s)`, inline: true },
       { name: "Raison", value: reason },
     ], { tag: interaction.user.tag, id: interaction.user.id }),
-    { guildId: interaction.guildId ?? undefined, logType: "ban" }
+    { guildId: interaction.guildId ?? undefined, logType: "ban", commandChannelId: interaction.channelId ?? undefined }
   );
 }
 

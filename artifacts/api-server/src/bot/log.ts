@@ -7,6 +7,7 @@ export interface SendLogOptions {
   pingEveryone?: boolean;
   guildId?: string;
   logType?: "general" | "ban";
+  commandChannelId?: string;
 }
 
 async function sendToChannel(
@@ -47,9 +48,22 @@ export async function sendLog(
     }
   }
 
+  // Build a dedicated DM embed with a green jump link
+  let dmEmbed = embed;
+  if (options?.guildId && options?.commandChannelId) {
+    const jumpUrl = `https://discord.com/channels/${options.guildId}/${options.commandChannelId}`;
+    dmEmbed = EmbedBuilder.from(embed.toJSON())
+      .setURL(jumpUrl)
+      .addFields({
+        name: "📍 Lieu d'exécution",
+        value: `[🟢 Aller au salon](${jumpUrl})`,
+        inline: true,
+      });
+  }
+
   await Promise.allSettled([
     ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone)),
-    sendLogDM(client, embed),
+    sendLogDM(client, dmEmbed),
   ]);
 }
 

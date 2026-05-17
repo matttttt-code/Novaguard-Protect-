@@ -76,7 +76,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     { name: "Messages supprimés", value: deleteMessageSeconds > 0 ? `${deleteMessageSeconds / 86400} jour(s)` : "Aucun", inline: true },
     { name: "Dans le serveur", value: member ? "Oui" : "Non (banni par ID)", inline: true },
   ], { tag: interaction.user.tag, id: interaction.user.id }),
-  { guildId: interaction.guildId ?? undefined, logType: "ban" });
+  { guildId: interaction.guildId ?? undefined, logType: "ban", commandChannelId: interaction.channelId ?? undefined });
 }
 
 export const prefixName = "ban";
