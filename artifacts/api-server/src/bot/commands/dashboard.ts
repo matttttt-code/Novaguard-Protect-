@@ -17,10 +17,10 @@ import {
 } from "../guild-config-store.js";
 
 export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBuilder {
-  const bool = (v: boolean) => (v ? "✅ Activé" : "❌ Désactivé");
-  const chan = (id: string | null) => (id ? `<#${id}>` : "Non défini");
-  const role = (id: string | null) => (id ? `<@&${id}>` : "Non défini");
-  const truncate = (s: string, n = 60) => (s.length > n ? s.slice(0, n) + "…" : s);
+  const bool = (v: boolean, on = "✅ Activé", off = "❌ Désactivé") => (v ? on : off);
+  const chan = (id: string | null) => (id ? `<#${id}>` : "*Non défini*");
+  const role = (id: string | null) => (id ? `<@&${id}>` : "*Non défini*");
+  const truncate = (s: string, n = 55) => (s.length > n ? s.slice(0, n) + "…" : s);
 
   return new EmbedBuilder()
     .setColor(0x6366f1)
@@ -33,7 +33,7 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
           `**Statut :** ${bool(config.welcomeEnabled)}\n` +
           `**Salon :** ${chan(config.welcomeChannelId)}\n` +
           `**Message :** \`${truncate(config.welcomeMessage)}\``,
-        inline: false,
+        inline: true,
       },
       {
         name: "🚪 Messages de départ",
@@ -41,41 +41,43 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
           `**Statut :** ${bool(config.leaveEnabled)}\n` +
           `**Salon :** ${chan(config.leaveChannelId)}\n` +
           `**Message :** \`${truncate(config.leaveMessage)}\``,
-        inline: false,
+        inline: true,
       },
+      { name: "\u200B", value: "\u200B", inline: false },
       {
         name: "🤖 Captcha anti-bot",
         value:
           `**Statut :** ${bool(config.captchaEnabled)}\n` +
+          `**Salon vérif. :** ${chan(config.captchaChannelId)}\n` +
           `**Rôle non-vérifié :** ${role(config.captchaUnverifiedRoleId)}\n` +
-          `**Rôle vérifié :** ${role(config.captchaVerifiedRoleId)}\n` +
-          `*Math challenge en DM — 3 tentatives, 5 min*`,
-        inline: false,
+          `**Rôle vérifié :** ${role(config.captchaVerifiedRoleId)}`,
+        inline: true,
       },
       {
-        name: "🛡️ Sécurité",
+        name: "🛡️ Sécurité & Logs",
         value:
           `**Join Lock :** ${bool(config.joinLock)}\n` +
           `**Mode Raid :** ${bool(config.raidMode)}\n` +
-          `**Salon de logs :** ${chan(config.logChannelId)}\n` +
-          `**Salon ban-logs :** ${chan(config.banLogChannelId)}`,
-        inline: false,
+          `**DM sanctions :** ${bool(config.sanctionDmEnabled, "✅ ON", "❌ OFF")}\n` +
+          `**Logs :** ${chan(config.logChannelId)} · Ban-logs : ${chan(config.banLogChannelId)}`,
+        inline: true,
       },
+      { name: "\u200B", value: "\u200B", inline: false },
       {
         name: "🎫 Tickets",
         value:
-          `**Rôle staff :** ${config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "Non défini"}\n` +
-          `**Catégorie :** ${config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : "Non définie"}\n` +
+          `**Rôle staff :** ${config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "*Non défini*"}\n` +
+          `**Catégorie :** ${config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : "*Non définie*"}\n` +
           `**Transcripts :** ${chan(config.transcriptChannelId)}`,
-        inline: false,
+        inline: true,
       },
       {
-        name: "💡 Variables disponibles pour les messages",
-        value: "`{user}` = mention · `{username}` = nom · `{server}` = serveur · `{count}` = nb membres",
-        inline: false,
-      }
+        name: "💡 Variables messages",
+        value: "`{user}` mention · `{username}` nom · `{server}` serveur · `{count}` membres",
+        inline: true,
+      },
     )
-    .setFooter({ text: "Utilisez les boutons ci-dessous pour configurer le bot." })
+    .setFooter({ text: "Config persistante par serveur • Utilisez les boutons ci-dessous", iconURL: guild.iconURL() ?? undefined })
     .setTimestamp();
 }
 
@@ -93,6 +95,10 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setCustomId("dash_welcome_msg")
       .setLabel("📝 Message arrivée")
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_reset_welcome_msg")
+      .setLabel("🔄 Reset arrivée")
+      .setStyle(ButtonStyle.Danger),
   );
 
   const row2 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -108,6 +114,10 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setCustomId("dash_leave_msg")
       .setLabel("📝 Message départ")
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_reset_leave_msg")
+      .setLabel("🔄 Reset départ")
+      .setStyle(ButtonStyle.Danger),
   );
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -115,6 +125,10 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setCustomId("dash_captcha_toggle")
       .setLabel(config.captchaEnabled ? "🤖 Captcha ON" : "🤖 Captcha OFF")
       .setStyle(config.captchaEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("dash_captcha_channel")
+      .setLabel("📍 Salon vérif.")
+      .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId("dash_captcha_unverified_role")
       .setLabel("🔴 Rôle non-vérifié")
@@ -127,13 +141,9 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
 
   const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
-      .setCustomId("dash_reset_welcome_msg")
-      .setLabel("🔄 Reset msg arrivée")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("dash_reset_leave_msg")
-      .setLabel("🔄 Reset msg départ")
-      .setStyle(ButtonStyle.Danger),
+      .setCustomId("dash_sanction_dm_toggle")
+      .setLabel(config.sanctionDmEnabled ? "📨 DM Sanctions ON" : "🔕 DM Sanctions OFF")
+      .setStyle(config.sanctionDmEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
   );
 
   return [row1, row2, row3, row4];

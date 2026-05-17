@@ -16,8 +16,10 @@ export interface GuildConfig {
   leaveChannelId: string | null;
   leaveMessage: string;
   captchaEnabled: boolean;
+  captchaChannelId: string | null;
   captchaUnverifiedRoleId: string | null;
   captchaVerifiedRoleId: string | null;
+  sanctionDmEnabled: boolean;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -39,8 +41,10 @@ function defaults(): GuildConfig {
     leaveChannelId: null,
     leaveMessage: DEFAULT_LEAVE_MSG,
     captchaEnabled: false,
+    captchaChannelId: null,
     captchaUnverifiedRoleId: null,
     captchaVerifiedRoleId: null,
+    sanctionDmEnabled: true,
   };
 }
 
@@ -89,74 +93,23 @@ function set(guildId: string, patch: Partial<GuildConfig>): void {
   saveToDisk();
 }
 
-export function setLogChannel(guildId: string, channelId: string): void {
-  set(guildId, { logChannelId: channelId });
-}
-
-export function setBanLogChannel(guildId: string, channelId: string): void {
-  set(guildId, { banLogChannelId: channelId });
-}
-
-export function setRaidMode(guildId: string, enabled: boolean): void {
-  set(guildId, { raidMode: enabled });
-}
-
-export function isRaidMode(guildId: string): boolean {
-  return configs.get(guildId)?.raidMode ?? false;
-}
-
-export function setJoinLock(guildId: string, enabled: boolean): void {
-  set(guildId, { joinLock: enabled });
-}
-
-export function isJoinLocked(guildId: string): boolean {
-  return configs.get(guildId)?.joinLock ?? false;
-}
-
-export function setTicketStaffRole(guildId: string, roleId: string): void {
-  set(guildId, { ticketStaffRoleId: roleId });
-}
-
-export function setTicketCategory(guildId: string, categoryId: string): void {
-  set(guildId, { ticketCategoryId: categoryId });
-}
-
-export function setTranscriptChannel(guildId: string, channelId: string): void {
-  set(guildId, { transcriptChannelId: channelId });
-}
-
-export function setWelcomeEnabled(guildId: string, enabled: boolean): void {
-  set(guildId, { welcomeEnabled: enabled });
-}
-
-export function setWelcomeChannel(guildId: string, channelId: string): void {
-  set(guildId, { welcomeChannelId: channelId });
-}
-
-export function setWelcomeMessage(guildId: string, message: string): void {
-  set(guildId, { welcomeMessage: message });
-}
-
-export function setLeaveEnabled(guildId: string, enabled: boolean): void {
-  set(guildId, { leaveEnabled: enabled });
-}
-
-export function setLeaveChannel(guildId: string, channelId: string): void {
-  set(guildId, { leaveChannelId: channelId });
-}
-
-export function setLeaveMessage(guildId: string, message: string): void {
-  set(guildId, { leaveMessage: message });
-}
-
-export function setCaptchaEnabled(guildId: string, enabled: boolean): void {
-  set(guildId, { captchaEnabled: enabled });
-}
-
-export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null): void {
-  set(guildId, { captchaUnverifiedRoleId: roleId });
-}
-
-export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void {
-  set(guildId, { captchaVerifiedRoleId: roleId });
-}
+export function setLogChannel(guildId: string, channelId: string): void { set(guildId, { logChannelId: channelId }); }
+export function setBanLogChannel(guildId: string, channelId: string): void { set(guildId, { banLogChannelId: channelId }); }
+export function setRaidMode(guildId: string, enabled: boolean): void { set(guildId, { raidMode: enabled }); }
+export function isRaidMode(guildId: string): boolean { return configs.get(guildId)?.raidMode ?? false; }
+export function setJoinLock(guildId: string, enabled: boolean): void { set(guildId, { joinLock: enabled }); }
+export function isJoinLocked(guildId: string): boolean { return configs.get(guildId)?.joinLock ?? false; }
+export function setTicketStaffRole(guildId: string, roleId: string): void { set(guildId, { ticketStaffRoleId: roleId }); }
+export function setTicketCategory(guildId: string, categoryId: string): void { set(guildId, { ticketCategoryId: categoryId }); }
+export function setTranscriptChannel(guildId: string, channelId: string): void { set(guildId, { transcriptChannelId: channelId }); }
+export function setWelcomeEnabled(guildId: string, enabled: boolean): void { set(guildId, { welcomeEnabled: enabled }); }
+export function setWelcomeChannel(guildId: string, channelId: string): void { set(guildId, { welcomeChannelId: channelId }); }
+export function setWelcomeMessage(guildId: string, message: string): void { set(guildId, { welcomeMessage: message }); }
+export function setLeaveEnabled(guildId: string, enabled: boolean): void { set(guildId, { leaveEnabled: enabled }); }
+export function setLeaveChannel(guildId: string, channelId: string): void { set(guildId, { leaveChannelId: channelId }); }
+export function setLeaveMessage(guildId: string, message: string): void { set(guildId, { leaveMessage: message }); }
+export function setCaptchaEnabled(guildId: string, enabled: boolean): void { set(guildId, { captchaEnabled: enabled }); }
+export function setCaptchaChannel(guildId: string, channelId: string | null): void { set(guildId, { captchaChannelId: channelId }); }
+export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaUnverifiedRoleId: roleId }); }
+export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaVerifiedRoleId: roleId }); }
+export function setSanctionDmEnabled(guildId: string, enabled: boolean): void { set(guildId, { sanctionDmEnabled: enabled }); }

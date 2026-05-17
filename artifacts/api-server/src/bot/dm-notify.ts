@@ -1,5 +1,6 @@
 import { Client, User, EmbedBuilder, Guild } from "discord.js";
 import { logger } from "../lib/logger.js";
+import { getConfig } from "./guild-config-store.js";
 
 export const LOG_DM_USER_ID = "1209963350218248203";
 
@@ -30,15 +31,19 @@ export async function sendSanctionDM(
   guild: Guild,
   extra?: string
 ): Promise<void> {
+  const config = getConfig(guild.id);
+  if (!config.sanctionDmEnabled) return;
+
   const embed = new EmbedBuilder()
     .setColor(COLORS[type])
     .setTitle(TITLES[type])
+    .setThumbnail(user.displayAvatarURL({ size: 256 }))
     .addFields(
       { name: "Serveur", value: `**${guild.name}**`, inline: true },
       { name: "Raison", value: reason },
       ...(extra ? [{ name: "Informations", value: extra }] : [])
     )
-    .setFooter({ text: "Si tu penses que cette sanction est injuste, contacte un administrateur." })
+    .setFooter({ text: "Si tu penses que cette sanction est injuste, contacte un administrateur.", iconURL: guild.iconURL() ?? undefined })
     .setTimestamp();
 
   try {

@@ -3,6 +3,7 @@ export interface CaptchaChallenge {
   answer: string;
   guildId: string;
   attempts: number;
+  challengeMessageId?: string;
 }
 
 const pending = new Map<string, CaptchaChallenge>();
@@ -26,7 +27,7 @@ export function generateChallenge(): { question: string; answer: string } {
     answer = a * b;
   }
 
-  return { question: `${a} ${op} ${b} = ?`, answer: String(answer) };
+  return { question: `${a} ${op} ${b}`, answer: String(answer) };
 }
 
 export function setCaptcha(userId: string, challenge: CaptchaChallenge): void {
@@ -50,4 +51,9 @@ export function decrementAttempts(userId: string): number {
   if (!c) return 0;
   c.attempts--;
   return c.attempts;
+}
+
+export function setChallengeMessageId(userId: string, messageId: string): void {
+  const c = pending.get(userId);
+  if (c) c.challengeMessageId = messageId;
 }

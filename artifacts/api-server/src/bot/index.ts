@@ -18,6 +18,7 @@ import {
   type ApplicationCommandDataResolvable,
   Guild,
   User,
+  Message,
 } from "discord.js";
 import { commands, prefixCommands } from "./commands/index.js";
 import { registerAutoMod } from "./automod.js";
@@ -35,15 +36,25 @@ import {
   isRaidMode, isJoinLocked, getConfig,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
   setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
-  setCaptchaEnabled, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
+  setCaptchaEnabled, setCaptchaChannel, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
+  setSanctionDmEnabled,
 } from "./guild-config-store.js";
 import {
-  getCaptcha, setCaptcha, deleteCaptcha, hasCaptcha, decrementAttempts, generateChallenge,
+  getCaptcha, setCaptcha, deleteCaptcha, hasCaptcha, decrementAttempts,
+  generateChallenge, setChallengeMessageId,
 } from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
+
+function isValidId(s: string): boolean {
+  return /^\d{17,20}$/.test(s.trim());
+}
+
+function parseId(raw: string): string {
+  return raw.replace(/[<#@&!>]/g, "").trim();
+}
 
 export function startBot(): void {
   const token = process.env["DISCORD_TOKEN"];
@@ -108,110 +119,52 @@ export function startBot(): void {
   });
 
   client.on(Events.MessageCreate, async (message) => {
-    if (!message.author.bot && message.channel.isDMBased()) {
-      // Captcha DM response — check before support
-      if (hasCaptcha(message.author.id)) {
-        const challenge = getCaptcha(message.author.id)!;
-        const answer = message.content.trim();
+    if (message.author.bot) return;
 
-        if (answer === challenge.answer) {
-          deleteCaptcha(message.author.id);
-          const tid = captchaTimeouts.get(message.author.id);
-          if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
-
-          const guild = client.guilds.cache.get(challenge.guildId);
-          if (guild) {
-            const gMember = await guild.members.fetch(message.author.id).catch(() => null);
-            if (gMember) {
-              const cfg = getConfig(guild.id);
-              if (cfg.captchaUnverifiedRoleId) {
-                await gMember.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
-              }
-              if (cfg.captchaVerifiedRoleId) {
-                await gMember.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
-              }
-
-              await sendLog(client, new EmbedBuilder()
-                .setColor(0x22c55e)
-                .setTitle("✅ Captcha résolu — Accès accordé")
-                .setThumbnail(message.author.displayAvatarURL())
-                .addFields(
-                  { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
-                  { name: "Membres", value: String(guild.memberCount), inline: true },
-                )
-                .setTimestamp(),
-              { guildId: guild.id });
-
-              const welcomeCfg = getConfig(guild.id);
-              if (welcomeCfg.welcomeEnabled && welcomeCfg.welcomeChannelId) {
-                try {
-                  const wCh = await client.channels.fetch(welcomeCfg.welcomeChannelId);
-                  if (wCh && wCh.isTextBased()) {
-                    const text = welcomeCfg.welcomeMessage
-                      .replace(/\{user\}/g, `<@${message.author.id}>`)
-                      .replace(/\{username\}/g, message.author.username)
-                      .replace(/\{server\}/g, guild.name)
-                      .replace(/\{count\}/g, String(guild.memberCount));
-                    const wEmbed = new EmbedBuilder()
-                      .setColor(0x22c55e)
-                      .setDescription(text)
-                      .setThumbnail(message.author.displayAvatarURL())
-                      .setTimestamp();
-                    await (wCh as TextChannel).send({ embeds: [wEmbed] });
-                  }
-                } catch (err) {
-                  logger.error({ err }, "Erreur envoi message d'arrivée post-captcha");
-                }
-              }
-            }
-          }
-          await message.reply("✅ **Captcha résolu !** Tu as maintenant accès au serveur. Bienvenue ! 🎉");
-        } else {
-          const remaining = decrementAttempts(message.author.id);
-          if (remaining <= 0) {
-            deleteCaptcha(message.author.id);
-            const tid = captchaTimeouts.get(message.author.id);
-            if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
-
-            const guild = client.guilds.cache.get(challenge.guildId);
-            if (guild) {
-              const gMember = await guild.members.fetch(message.author.id).catch(() => null);
-              await gMember?.kick("Captcha échoué — trop de tentatives incorrectes").catch(() => null);
-            }
-            await message.reply("❌ Trop de mauvaises réponses. Tu as été **expulsé** du serveur. Tu peux rejoindre et réessayer.");
-          } else {
-            await message.reply(
-              `❌ Mauvaise réponse ! Il te reste **${remaining}** tentative(s).\n` +
-              `Rappel : **${challenge.question}**`
-            );
-          }
-        }
+    // === CAPTCHA CHANNEL (non-DM) ===
+    if (!message.channel.isDMBased() && message.guildId && hasCaptcha(message.author.id)) {
+      const challenge = getCaptcha(message.author.id)!;
+      const cfg = getConfig(challenge.guildId);
+      if (cfg.captchaChannelId && message.channelId === cfg.captchaChannelId && message.guildId === challenge.guildId) {
+        await handleCaptchaChannelMessage(client, message, captchaTimeouts);
         return;
       }
+    }
 
-      // Support DM response
-      const pending = getSupportRequest(message.author.id);
-      if (pending) {
-        removeSupportRequest(message.author.id);
-        const config = getConfig(pending.guildId);
-        const channelId = config.logChannelId;
-        await handleSupportResponse(
-          client,
-          message.author.id,
-          pending.guildId,
-          pending.guildName,
-          channelId,
-          message.content,
-          message.author.tag
-        );
-        await message.reply("✅ Ta réponse a bien été transmise au staff ! Un modérateur te contactera si nécessaire.");
+    if (!message.channel.isDMBased()) return;
+
+    // === DM : CAPTCHA fallback (pas de salon configuré) ===
+    if (hasCaptcha(message.author.id)) {
+      const challenge = getCaptcha(message.author.id)!;
+      const cfg = getConfig(challenge.guildId);
+      if (!cfg.captchaChannelId) {
+        await handleCaptchaDM(client, message, captchaTimeouts);
+        return;
       }
+    }
+
+    // === DM : réponse support ===
+    const pending = getSupportRequest(message.author.id);
+    if (pending) {
+      removeSupportRequest(message.author.id);
+      const config = getConfig(pending.guildId);
+      await handleSupportResponse(
+        client,
+        message.author.id,
+        pending.guildId,
+        pending.guildName,
+        config.logChannelId,
+        message.content,
+        message.author.tag
+      );
+      await message.reply("✅ Ta réponse a bien été transmise au staff ! Un modérateur te contactera si nécessaire.");
     }
   });
 
   registerAutoMod(client, hasMessageContent);
   registerPrefixHandler(client, prefixCommands);
 
+  // ──── GUILD MEMBER ADD ────
   client.on(Events.GuildMemberAdd, async (member) => {
     logger.info({ guild: member.guild.name, user: member.user.tag }, "Nouveau membre rejoint");
 
@@ -222,202 +175,168 @@ export function startBot(): void {
     const createdTs = Math.floor(member.user.createdTimestamp / 1000);
     const isSuspect = accountAgeHours < 24;
 
-    // Per-guild blacklist
+    // Blacklist locale
     if (isBlacklisted(guildId, member.id)) {
       try {
         await member.ban({ reason: "[ANTIDC] Membre blacklisté — ban automatique à la reconnexion" });
-        logger.info({ user: member.user.tag }, "AntiDC : membre blacklisté (local) banni automatiquement");
-
-        await sendLog(
-          client,
-          logEmbed(0x0f0f0f, "🤖 AntiDC — Ban automatique", [
-            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-            { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
-            { name: "Raison", value: "Membre blacklisté — tentative de reconnexion détectée" },
-          ], { tag: client.user!.tag, id: client.user!.id }),
-          { guildId, pingEveryone: true, logType: "ban" }
-        );
-      } catch (err) {
-        logger.error({ err, user: member.user.tag }, "AntiDC : impossible de bannir le membre blacklisté");
-      }
+        await sendLog(client, logEmbed(0x0f0f0f, "🤖 AntiDC — Ban automatique", [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+          { name: "Raison", value: "Membre blacklisté — tentative de reconnexion" },
+        ], { tag: client.user!.tag, id: client.user!.id }), { guildId, pingEveryone: true, logType: "ban" });
+      } catch (err) { logger.error({ err }, "AntiDC : impossible de bannir"); }
       return;
     }
 
-    // Global blacklist (cross-guild)
+    // Blacklist globale
     if (isGloballyBlacklisted(member.id)) {
       try {
-        await member.ban({ reason: "[ANTIDC GLOBAL] Membre blacklisté sur un autre serveur" });
-        logger.info({ user: member.user.tag }, "AntiDC global : membre blacklisté banni automatiquement");
-
-        await sendLog(
-          client,
-          logEmbed(0x0f0f0f, "🤖 AntiDC Global — Ban automatique", [
-            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-            { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
-            { name: "Raison", value: "Membre blacklisté globalement (via un autre serveur du bot)" },
-          ], { tag: client.user!.tag, id: client.user!.id }),
-          { guildId, pingEveryone: true, logType: "ban" }
-        );
-      } catch (err) {
-        logger.error({ err, user: member.user.tag }, "AntiDC global : impossible de bannir");
-      }
+        await member.ban({ reason: "[ANTIDC GLOBAL] Membre blacklisté sur un autre serveur du bot" });
+        await sendLog(client, logEmbed(0x0f0f0f, "🌐 AntiDC Global — Ban automatique", [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Raison", value: "Blacklist global — banni sur un autre serveur du bot" },
+        ], { tag: client.user!.tag, id: client.user!.id }), { guildId, pingEveryone: true, logType: "ban" });
+      } catch (err) { logger.error({ err }, "AntiDC global : impossible de bannir"); }
       return;
     }
 
+    // Join lock
     if (isJoinLocked(guildId)) {
       try {
         await member.kick("Verrouillage des arrivées actif — rejoins plus tard");
-        logger.info({ user: member.user.tag }, "Join lock : membre expulsé automatiquement");
-
-        await sendLog(
-          client,
-          logEmbed(0xf97316, "🔒 Join Lock — Expulsion automatique", [
-            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-            { name: "Raison", value: "Verrouillage des arrivées actif" },
-          ], { tag: client.user!.tag, id: client.user!.id }),
-          { guildId }
-        );
-      } catch (err) {
-        logger.error({ err }, "Join lock kick error");
-      }
+        await sendLog(client, logEmbed(0xf97316, "🔒 Join Lock — Expulsion automatique", [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Raison", value: "Verrouillage des arrivées actif" },
+        ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+      } catch (err) { logger.error({ err }, "Join lock kick error"); }
       return;
     }
 
+    // Raid mode
     if (isRaidMode(guildId)) {
       try {
         await member.kick("Mode Raid actif — rejoin bloqué");
-        logger.info({ user: member.user.tag }, "Raid mode : membre expulsé automatiquement");
-
-        await sendLog(
-          client,
-          logEmbed(0xef4444, "🚨 Raid Mode — Expulsion automatique", [
-            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-            { name: "Raison", value: "Mode Raid actif — aucun nouveau membre autorisé" },
-          ], { tag: client.user!.tag, id: client.user!.id }),
-          { guildId }
-        );
-      } catch (err) {
-        logger.error({ err }, "Raid mode kick error");
-      }
+        await sendLog(client, logEmbed(0xef4444, "🚨 Raid Mode — Expulsion automatique", [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Raison", value: "Mode Raid actif — aucun nouveau membre autorisé" },
+        ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+      } catch (err) { logger.error({ err }, "Raid mode kick error"); }
       return;
     }
 
     const cfg = getConfig(guildId);
 
-    // Captcha anti-bot
+    // ── Captcha anti-bot ──
     if (cfg.captchaEnabled) {
       if (cfg.captchaUnverifiedRoleId) {
         await member.roles.add(cfg.captchaUnverifiedRoleId).catch(() => null);
       }
 
       const challenge = generateChallenge();
-      let dmSent = true;
 
+      // Approche canal (RaidProtect style)
+      if (cfg.captchaChannelId) {
+        try {
+          const captchaCh = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
+          if (captchaCh && captchaCh.isTextBased()) {
+            const captchaEmbed = new EmbedBuilder()
+              .setColor(0x6366f1)
+              .setTitle("🤖 Vérification anti-bot")
+              .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+              .setDescription(
+                `Bienvenue <@${member.id}> ! Pour accéder au serveur, résous ce calcul :\n\n` +
+                `## \`${challenge.question} = ?\`\n\n` +
+                `Réponds directement dans ce salon avec **uniquement le nombre**.\n` +
+                `⏱️ **5 minutes** · **3 tentatives**`
+              )
+              .setFooter({ text: `${member.guild.name} • Vérification requise`, iconURL: member.guild.iconURL() ?? undefined })
+              .setTimestamp();
+
+            const sent = await captchaCh.send({ content: `<@${member.id}>`, embeds: [captchaEmbed] });
+
+            setCaptcha(member.id, {
+              question: challenge.question,
+              answer: challenge.answer,
+              guildId,
+              attempts: 3,
+              challengeMessageId: sent.id,
+            });
+
+            const timeoutId = setTimeout(async () => {
+              if (!hasCaptcha(member.id)) return;
+              deleteCaptcha(member.id);
+              captchaTimeouts.delete(member.id);
+              const gMember = await member.guild.members.fetch(member.id).catch(() => null);
+              if (gMember) {
+                await gMember.kick("Captcha non résolu dans les 5 minutes").catch(() => null);
+                // Edit challenge message to show timeout
+                await sent.edit({
+                  embeds: [new EmbedBuilder()
+                    .setColor(0xef4444)
+                    .setTitle("⏰ Temps écoulé")
+                    .setDescription(`<@${member.id}> n'a pas résolu le captcha dans les 5 minutes et a été expulsé.`)
+                    .setTimestamp()],
+                }).catch(() => null);
+              }
+            }, 5 * 60 * 1000);
+
+            captchaTimeouts.set(member.id, timeoutId);
+
+            await sendLog(client, new EmbedBuilder()
+              .setColor(0xf97316).setTitle("🤖 Captcha envoyé (salon)")
+              .setThumbnail(member.user.displayAvatarURL())
+              .addFields(
+                { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+                { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+              ).setTimestamp(), { guildId });
+            return;
+          }
+        } catch (err) {
+          logger.error({ err }, "Captcha : impossible d'envoyer dans le salon");
+        }
+      }
+
+      // Fallback DM si pas de salon ou erreur
+      let dmSent = true;
       try {
         await member.user.send(
           `👋 Bienvenue sur **${member.guild.name}** !\n\n` +
-          `🤖 Pour accéder au serveur, résous ce captcha **en répondant dans ce DM** :\n\n` +
-          `> **${challenge.question}**\n\n` +
-          `⏱️ Tu as **5 minutes** et **3 tentatives**.\n` +
-          `*(Réponds uniquement avec le nombre, ex: \`42\`)*`
+          `🤖 Pour accéder au serveur, résous ce captcha en DM :\n\n` +
+          `> **${challenge.question} = ?**\n\n` +
+          `⏱️ **5 minutes** · **3 tentatives** · Réponds avec uniquement le nombre`
         );
       } catch {
         dmSent = false;
         logger.warn({ user: member.user.tag }, "Captcha : DMs fermés — accès accordé sans captcha");
-        if (cfg.captchaUnverifiedRoleId) {
-          await member.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
-        }
-        if (cfg.captchaVerifiedRoleId) {
-          await member.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
-        }
+        if (cfg.captchaUnverifiedRoleId) await member.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
+        if (cfg.captchaVerifiedRoleId) await member.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
       }
 
       if (dmSent) {
-        setCaptcha(member.id, {
-          question: challenge.question,
-          answer: challenge.answer,
-          guildId,
-          attempts: 3,
-        });
+        setCaptcha(member.id, { question: challenge.question, answer: challenge.answer, guildId, attempts: 3 });
 
         const timeoutId = setTimeout(async () => {
           if (!hasCaptcha(member.id)) return;
           deleteCaptcha(member.id);
           captchaTimeouts.delete(member.id);
-
           const gMember = await member.guild.members.fetch(member.id).catch(() => null);
           if (gMember) {
             await gMember.kick("Captcha non résolu dans les 5 minutes").catch(() => null);
-            try {
-              await member.user.send(
-                "⏰ Tu as été **expulsé** de **" + member.guild.name + "** pour n'avoir pas résolu le captcha dans les 5 minutes.\n" +
-                "Tu peux rejoindre à nouveau pour réessayer."
-              );
-            } catch { /* DMs closed */ }
+            try { await member.user.send(`⏰ Tu as été expulsé de **${member.guild.name}** — captcha non résolu à temps. Rejoins à nouveau pour réessayer.`); } catch { /* DMs */ }
           }
         }, 5 * 60 * 1000);
-
         captchaTimeouts.set(member.id, timeoutId);
-
-        await sendLog(client, new EmbedBuilder()
-          .setColor(0xf97316)
-          .setTitle("🤖 Captcha envoyé")
-          .setThumbnail(member.user.displayAvatarURL())
-          .addFields(
-            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-            { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
-          )
-          .setTimestamp(),
-        { guildId });
-
-        return; // Don't send join log or welcome until captcha resolved
+        return;
       }
     }
 
-    // Normal join log + welcome
-    const joinEmbed = new EmbedBuilder()
-      .setColor(isSuspect ? 0xef4444 : 0x22c55e)
-      .setTitle(isSuspect ? "⚠️ Nouveau membre — Compte suspect" : "✅ Nouveau membre")
-      .setThumbnail(member.user.displayAvatarURL())
-      .addFields(
-        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Compte créé le", value: `<t:${createdTs}:F>`, inline: true },
-        { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours} heure(s)` : `${accountAgeDays} jour(s)`, inline: true },
-        { name: "Membres", value: String(member.guild.memberCount), inline: true }
-      )
-      .setTimestamp();
-
-    if (isSuspect) {
-      joinEmbed.setDescription("⚠️ Ce compte a moins de **24 heures**. Possible compte alternatif ou suspect.");
-    }
-
-    await sendLog(client, joinEmbed, { guildId, pingEveryone: isSuspect });
-
-    if (cfg.welcomeEnabled && cfg.welcomeChannelId) {
-      try {
-        const wCh = await client.channels.fetch(cfg.welcomeChannelId);
-        if (wCh && wCh.isTextBased()) {
-          const text = cfg.welcomeMessage
-            .replace(/\{user\}/g, `<@${member.id}>`)
-            .replace(/\{username\}/g, member.user.username)
-            .replace(/\{server\}/g, member.guild.name)
-            .replace(/\{count\}/g, String(member.guild.memberCount));
-          const wEmbed = new EmbedBuilder()
-            .setColor(0x22c55e)
-            .setDescription(text)
-            .setThumbnail(member.user.displayAvatarURL())
-            .setTimestamp();
-          await (wCh as TextChannel).send({ embeds: [wEmbed] });
-        }
-      } catch (err) {
-        logger.error({ err }, "Erreur envoi message d'arrivée");
-      }
-    }
+    // ── Join log normal ──
+    await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
+    await sendWelcomeMessage(client, member, guildId, cfg);
   });
 
+  // ──── GUILD MEMBER REMOVE ────
   client.on(Events.GuildMemberRemove, async (member) => {
-    logger.info({ guild: member.guild.name, user: member.user.tag }, "Membre quitté");
-
     const guildId = member.guild.id;
     const createdTs = Math.floor(member.user.createdTimestamp / 1000);
     const joinedTs = member.joinedTimestamp ? Math.floor(member.joinedTimestamp / 1000) : null;
@@ -425,13 +344,14 @@ export function startBot(): void {
     const leaveEmbed = new EmbedBuilder()
       .setColor(0x6b7280)
       .setTitle("👋 Membre quitté")
-      .setThumbnail(member.user.displayAvatarURL())
+      .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
       .addFields(
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Membres restants", value: String(member.guild.memberCount), inline: true },
+        { name: "Membres restants", value: `**${member.guild.memberCount}**`, inline: true },
         { name: "Compte créé le", value: `<t:${createdTs}:F>`, inline: false },
-        ...(joinedTs ? [{ name: "Avait rejoint le", value: `<t:${joinedTs}:F>`, inline: false }] : [])
+        ...(joinedTs ? [{ name: "Était là depuis", value: `<t:${joinedTs}:R>`, inline: true }] : [])
       )
+      .setFooter({ text: member.guild.name, iconURL: member.guild.iconURL() ?? undefined })
       .setTimestamp();
 
     await sendLog(client, leaveEmbed, { guildId });
@@ -446,16 +366,20 @@ export function startBot(): void {
             .replace(/\{username\}/g, member.user.username)
             .replace(/\{server\}/g, member.guild.name)
             .replace(/\{count\}/g, String(member.guild.memberCount));
+
           const lEmbed = new EmbedBuilder()
             .setColor(0x6b7280)
             .setDescription(text)
-            .setThumbnail(member.user.displayAvatarURL())
+            .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+            .addFields(
+              { name: "👥 Membres restants", value: `**${member.guild.memberCount}**`, inline: true },
+              ...(joinedTs ? [{ name: "📅 Était là depuis", value: `<t:${joinedTs}:R>`, inline: true }] : []),
+            )
+            .setFooter({ text: member.guild.name, iconURL: member.guild.iconURL() ?? undefined })
             .setTimestamp();
           await (lCh as TextChannel).send({ embeds: [lEmbed] });
         }
-      } catch (err) {
-        logger.error({ err }, "Erreur envoi message de départ");
-      }
+      } catch (err) { logger.error({ err }, "Erreur envoi message de départ"); }
     }
   });
 
@@ -463,6 +387,218 @@ export function startBot(): void {
     logger.error({ err }, "Impossible de se connecter à Discord");
   });
 }
+
+// ──── CAPTCHA HELPERS ────
+
+async function resolveCaptchaSuccess(
+  client: Client,
+  userId: string,
+  guildId: string,
+  captchaTimeouts: Map<string, ReturnType<typeof setTimeout>>,
+  challengeMessageId?: string,
+  captchaChannelId?: string | null,
+): Promise<void> {
+  const tid = captchaTimeouts.get(userId);
+  if (tid) { clearTimeout(tid); captchaTimeouts.delete(userId); }
+
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
+
+  const gMember = await guild.members.fetch(userId).catch(() => null);
+  if (!gMember) return;
+
+  const cfg = getConfig(guildId);
+  if (cfg.captchaUnverifiedRoleId) await gMember.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
+  if (cfg.captchaVerifiedRoleId) await gMember.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
+
+  // Edit the challenge message in the captcha channel
+  if (challengeMessageId && captchaChannelId) {
+    try {
+      const ch = await client.channels.fetch(captchaChannelId) as TextChannel | null;
+      const msg = await ch?.messages.fetch(challengeMessageId).catch(() => null);
+      await msg?.edit({
+        content: null,
+        embeds: [new EmbedBuilder()
+          .setColor(0x22c55e)
+          .setTitle("✅ Vérification réussie")
+          .setDescription(`<@${userId}> a résolu le captcha et a accès au serveur.`)
+          .setTimestamp()],
+      }).catch(() => null);
+      // Auto-delete success message after 10s
+      setTimeout(() => { msg?.delete().catch(() => null); }, 10_000);
+    } catch { /* ignore */ }
+  }
+
+  // Send join log + welcome now
+  const accountAgeMs = Date.now() - gMember.user.createdTimestamp;
+  const accountAgeDays = Math.floor(accountAgeMs / 86_400_000);
+  const accountAgeHours = Math.floor(accountAgeMs / 3_600_000);
+  const createdTs = Math.floor(gMember.user.createdTimestamp / 1000);
+  const isSuspect = accountAgeHours < 24;
+
+  await sendJoinLog(client, gMember.user, guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
+  await sendWelcomeMessage(client, gMember, guildId, cfg);
+}
+
+async function handleCaptchaChannelMessage(
+  client: Client,
+  message: Message,
+  captchaTimeouts: Map<string, ReturnType<typeof setTimeout>>,
+): Promise<void> {
+  const challenge = getCaptcha(message.author.id)!;
+  const answer = message.content.trim();
+
+  // Delete the member's message to keep channel clean
+  await message.delete().catch(() => null);
+
+  if (answer === challenge.answer) {
+    const msgId = challenge.challengeMessageId;
+    const chanId = getConfig(challenge.guildId).captchaChannelId;
+    deleteCaptcha(message.author.id);
+    await resolveCaptchaSuccess(client, message.author.id, challenge.guildId, captchaTimeouts, msgId, chanId);
+  } else {
+    const remaining = decrementAttempts(message.author.id);
+    if (remaining <= 0) {
+      const msgId = challenge.challengeMessageId;
+      deleteCaptcha(message.author.id);
+      const tid = captchaTimeouts.get(message.author.id);
+      if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+
+      // Edit challenge message to show failure
+      const cfg = getConfig(challenge.guildId);
+      if (msgId && cfg.captchaChannelId) {
+        try {
+          const ch = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
+          const msg = await ch?.messages.fetch(msgId).catch(() => null);
+          await msg?.edit({
+            content: null,
+            embeds: [new EmbedBuilder()
+              .setColor(0xef4444)
+              .setTitle("❌ Captcha échoué")
+              .setDescription(`<@${message.author.id}> a épuisé ses tentatives et a été expulsé.`)
+              .setTimestamp()],
+          }).catch(() => null);
+          setTimeout(() => { msg?.delete().catch(() => null); }, 10_000);
+        } catch { /* ignore */ }
+      }
+
+      const guild = client.guilds.cache.get(challenge.guildId);
+      const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
+      await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+    } else {
+      // Send temporary error in captcha channel
+      const cfg = getConfig(challenge.guildId);
+      if (cfg.captchaChannelId) {
+        try {
+          const ch = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
+          if (ch?.isTextBased()) {
+            const errMsg = await (ch as TextChannel).send({
+              content: `<@${message.author.id}> ❌ Mauvaise réponse — encore **${remaining}** tentative(s). Rappel : \`${challenge.question} = ?\``,
+            });
+            setTimeout(() => errMsg.delete().catch(() => null), 8_000);
+          }
+        } catch { /* ignore */ }
+      }
+    }
+  }
+}
+
+async function handleCaptchaDM(
+  client: Client,
+  message: Message,
+  captchaTimeouts: Map<string, ReturnType<typeof setTimeout>>,
+): Promise<void> {
+  const challenge = getCaptcha(message.author.id)!;
+  const answer = message.content.trim();
+
+  if (answer === challenge.answer) {
+    deleteCaptcha(message.author.id);
+    await resolveCaptchaSuccess(client, message.author.id, challenge.guildId, captchaTimeouts);
+    await message.reply("✅ **Captcha résolu !** Tu as maintenant accès au serveur. Bienvenue ! 🎉");
+  } else {
+    const remaining = decrementAttempts(message.author.id);
+    if (remaining <= 0) {
+      deleteCaptcha(message.author.id);
+      const tid = captchaTimeouts.get(message.author.id);
+      if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+
+      const guild = client.guilds.cache.get(challenge.guildId);
+      const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
+      await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+      await message.reply("❌ Trop de mauvaises réponses. Tu as été **expulsé** du serveur. Rejoins à nouveau pour réessayer.");
+    } else {
+      await message.reply(
+        `❌ Mauvaise réponse ! Il te reste **${remaining}** tentative(s).\n` +
+        `Rappel : **${challenge.question} = ?**`
+      );
+    }
+  }
+}
+
+// ──── WELCOME / JOIN LOG HELPERS ────
+
+async function sendJoinLog(
+  client: Client,
+  user: User,
+  guild: Guild,
+  guildId: string,
+  isSuspect: boolean,
+  accountAgeHours: number,
+  accountAgeDays: number,
+  createdTs: number,
+): Promise<void> {
+  const joinEmbed = new EmbedBuilder()
+    .setColor(isSuspect ? 0xef4444 : 0x22c55e)
+    .setTitle(isSuspect ? "⚠️ Nouveau membre — Compte suspect" : "✅ Nouveau membre")
+    .setThumbnail(user.displayAvatarURL({ size: 256 }))
+    .addFields(
+      { name: "Membre", value: `${user.tag} (\`${user.id}\`)`, inline: true },
+      { name: "Compte créé le", value: `<t:${createdTs}:F>`, inline: true },
+      { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours} heure(s)` : `${accountAgeDays} jour(s)`, inline: true },
+      { name: "Membres", value: `**${guild.memberCount}**`, inline: true },
+    )
+    .setFooter({ text: guild.name, iconURL: guild.iconURL() ?? undefined })
+    .setTimestamp();
+
+  if (isSuspect) joinEmbed.setDescription("⚠️ Ce compte a moins de **24 heures** — possible compte alternatif ou suspect.");
+
+  await sendLog(client, joinEmbed, { guildId, pingEveryone: isSuspect });
+}
+
+async function sendWelcomeMessage(
+  client: Client,
+  member: { user: User; guild: Guild; id: string },
+  guildId: string,
+  cfg: ReturnType<typeof getConfig>,
+): Promise<void> {
+  if (!cfg.welcomeEnabled || !cfg.welcomeChannelId) return;
+  try {
+    const wCh = await client.channels.fetch(cfg.welcomeChannelId);
+    if (!wCh || !wCh.isTextBased()) return;
+
+    const text = cfg.welcomeMessage
+      .replace(/\{user\}/g, `<@${member.id}>`)
+      .replace(/\{username\}/g, member.user.username)
+      .replace(/\{server\}/g, member.guild.name)
+      .replace(/\{count\}/g, String(member.guild.memberCount));
+
+    const joinedTs = Math.floor(member.user.createdTimestamp / 1000);
+    const wEmbed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setDescription(text)
+      .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
+      .addFields(
+        { name: "📅 Compte créé", value: `<t:${joinedTs}:R>`, inline: true },
+        { name: "👥 Membre n°", value: `**${member.guild.memberCount}**`, inline: true },
+      )
+      .setFooter({ text: member.guild.name, iconURL: member.guild.iconURL() ?? undefined })
+      .setTimestamp();
+
+    await (wCh as TextChannel).send({ embeds: [wEmbed] });
+  } catch (err) { logger.error({ err }, "Erreur envoi message d'arrivée"); }
+}
+
+// ──── BUTTON INTERACTION ────
 
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
@@ -473,15 +609,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     return;
   }
 
-  if (customId === "ticket_create") {
-    await handleTicketCreate(client, interaction);
-    return;
-  }
-
-  if (customId === "ticket_close") {
-    await handleTicketClose(interaction);
-    return;
-  }
+  if (customId === "ticket_create") { await handleTicketCreate(client, interaction); return; }
+  if (customId === "ticket_close") { await handleTicketClose(interaction); return; }
 
   if (customId.startsWith("support_ticket_")) {
     const targetUserId = customId.slice("support_ticket_".length);
@@ -490,32 +619,18 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     const isStaff = config.ticketStaffRoleId
       ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
       : member?.permissions.has(PermissionFlagsBits.ManageMessages) ?? false;
-    if (!isStaff) {
-      await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true });
-      return;
-    }
+    if (!isStaff) { await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true }); return; }
     const existingChannelId = getTicketChannelByUser(guild.id, targetUserId);
-    if (existingChannelId) {
-      await interaction.reply({ content: `❌ Cet utilisateur a déjà un ticket ouvert : <#${existingChannelId}>`, ephemeral: true });
-      return;
-    }
+    if (existingChannelId) { await interaction.reply({ content: `❌ Cet utilisateur a déjà un ticket ouvert : <#${existingChannelId}>`, ephemeral: true }); return; }
     let targetUser: User;
     try { targetUser = await client.users.fetch(targetUserId); }
-    catch {
-      await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true });
-      return;
-    }
+    catch { await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true }); return; }
     await interaction.deferReply({ ephemeral: true });
     const ticketCh = await createTicketForUser(client, guild, targetUser);
-    if (!ticketCh) {
-      await interaction.editReply({ content: "❌ Impossible de créer le salon ticket." });
-      return;
-    }
+    if (!ticketCh) { await interaction.editReply({ content: "❌ Impossible de créer le salon ticket." }); return; }
     await interaction.editReply({ content: `✅ Ticket créé pour <@${targetUserId}> : <#${ticketCh.id}>` });
     await interaction.message.edit({ components: [] }).catch(() => null);
-    try {
-      await targetUser.send(`📬 Le staff a ouvert un ticket pour ta demande de support sur **${guild.name}**. Rendez-vous dans <#${ticketCh.id}> !`);
-    } catch { /* DMs fermés */ }
+    try { await targetUser.send(`📬 Le staff a ouvert un ticket pour ta demande de support sur **${guild.name}**. Rendez-vous dans <#${ticketCh.id}> !`); } catch { /* DMs */ }
     return;
   }
 
@@ -526,20 +641,12 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     const isStaff = config.ticketStaffRoleId
       ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
       : member?.permissions.has(PermissionFlagsBits.ManageMessages) ?? false;
-    if (!isStaff) {
-      await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true });
-      return;
-    }
+    if (!isStaff) { await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true }); return; }
     let targetUser: User;
     try { targetUser = await client.users.fetch(targetUserId); }
-    catch {
-      await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true });
-      return;
-    }
+    catch { await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true }); return; }
     try {
-      await targetUser.send(
-        `📬 Bonjour ! Ta demande de support sur **${guild.name}** a bien été vue par le staff. Tu auras une réponse très bientôt ! 😊`
-      );
+      await targetUser.send(`📬 Bonjour ! Ta demande de support sur **${guild.name}** a bien été vue par le staff. Tu auras une réponse très bientôt ! 😊`);
       await interaction.reply({ content: `✅ Message envoyé en DM à ${targetUser.tag}.`, ephemeral: true });
     } catch {
       await interaction.reply({ content: "❌ Impossible d'envoyer un DM (DMs fermés).", ephemeral: true });
@@ -560,7 +667,6 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
 
   const userId = customId.replace("bl_approve_", "").replace("bl_deny_", "");
   const pending = getPendingUnban(userId);
-
   if (!pending) {
     await interaction.reply({ content: "❌ Cette demande est expirée ou déjà traitée.", ephemeral: true });
     await interaction.message.edit({ components: [] }).catch(() => null);
@@ -572,7 +678,6 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       await guild.members.unban(userId, `Déban validé par ${interaction.user.tag}`);
       removeFromBlacklist(guild.id, userId);
       removePendingUnban(userId);
-
       const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("✅ Déban validé")
         .addFields(
           { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
@@ -580,42 +685,37 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           { name: "Demandé par", value: pending.requesterTag, inline: true },
           { name: "Raison du déban", value: pending.reason }
         ).setTimestamp();
-
       await interaction.reply({ embeds: [embed] });
       await interaction.message.edit({ components: [] }).catch(() => null);
-
       await sendLog(client, logEmbed(0x22c55e, "✅ Déban blacklist validé", [
         { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
         { name: "Demandé par", value: pending.requesterTag, inline: true },
         { name: "Raison", value: pending.reason },
-      ], { tag: interaction.user.tag, id: interaction.user.id }),
-      { guildId: guild.id, logType: "ban" });
+      ], { tag: interaction.user.tag, id: interaction.user.id }), { guildId: guild.id, logType: "ban" });
     } catch (err) {
-      logger.error({ err }, "Impossible de débannir le membre blacklisté");
+      logger.error({ err }, "Impossible de débannir");
       await interaction.reply({ content: "❌ Impossible de débannir cet utilisateur.", ephemeral: true });
     }
   }
 
   if (isDeny) {
     removePendingUnban(userId);
-
     const embed = new EmbedBuilder().setColor(0xef4444).setTitle("❌ Déban refusé")
       .addFields(
         { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
         { name: "Refusé par", value: interaction.user.tag, inline: true },
         { name: "Demandé par", value: pending.requesterTag, inline: true }
       ).setTimestamp();
-
     await interaction.reply({ embeds: [embed] });
     await interaction.message.edit({ components: [] }).catch(() => null);
-
     await sendLog(client, logEmbed(0xef4444, "❌ Déban blacklist refusé", [
       { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
       { name: "Demandé par", value: pending.requesterTag, inline: true },
-    ], { tag: interaction.user.tag, id: interaction.user.id }),
-    { guildId: guild.id, logType: "ban" });
+    ], { tag: interaction.user.tag, id: interaction.user.id }), { guildId: guild.id, logType: "ban" });
   }
 }
+
+// ──── TICKET HELPERS ────
 
 async function createTicketForUser(client: Client, guild: Guild, user: User): Promise<TextChannel | null> {
   const config = getConfig(guild.id);
@@ -644,20 +744,10 @@ async function createTicketForUser(client: Client, guild: Guild, user: User): Pr
     return null;
   }
 
-  openTicket({
-    channelId: ticketChannel.id,
-    ticketNumber,
-    userId: user.id,
-    username: user.tag,
-    guildId: guild.id,
-    createdAt: new Date(),
-    claimedBy: null,
-    claimedById: null,
-  });
+  openTicket({ channelId: ticketChannel.id, ticketNumber, userId: user.id, username: user.tag, guildId: guild.id, createdAt: new Date(), claimedBy: null, claimedById: null });
 
   const welcomeEmbed = new EmbedBuilder()
-    .setColor(0x6366f1)
-    .setTitle("🎫 Nouveau ticket")
+    .setColor(0x6366f1).setTitle("🎫 Nouveau ticket")
     .setDescription(
       `Bonjour <@${user.id}> ! Le staff sera avec toi dans quelques instants.\n\n` +
       "**Décris ton problème ou ta demande ci-dessous.**\n" +
@@ -667,32 +757,18 @@ async function createTicketForUser(client: Client, guild: Guild, user: User): Pr
       { name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true },
       { name: "Ouvert le", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
       ...(config.ticketStaffRoleId ? [{ name: "Staff notifié", value: `<@&${config.ticketStaffRoleId}>`, inline: true }] : [])
-    )
-    .setTimestamp();
+    ).setTimestamp();
 
   const closeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ticket_close")
-      .setLabel("🔒  Fermer le ticket")
-      .setStyle(ButtonStyle.Danger)
+    new ButtonBuilder().setCustomId("ticket_close").setLabel("🔒  Fermer le ticket").setStyle(ButtonStyle.Danger)
   );
 
   const staffPing = config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "";
-  await ticketChannel.send({
-    content: `<@${user.id}>${staffPing ? ` ${staffPing}` : ""}`,
-    embeds: [welcomeEmbed],
-    components: [closeRow],
-  });
+  await ticketChannel.send({ content: `<@${user.id}>${staffPing ? ` ${staffPing}` : ""}`, embeds: [welcomeEmbed], components: [closeRow] });
 
-  await sendLog(client, new EmbedBuilder()
-    .setColor(0x6366f1)
-    .setTitle("🎫 Ticket ouvert")
-    .addFields(
-      { name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true },
-      { name: "Salon", value: `<#${ticketChannel.id}>`, inline: true },
-    ).setTimestamp(),
-    { guildId: guild.id }
-  );
+  await sendLog(client, new EmbedBuilder().setColor(0x6366f1).setTitle("🎫 Ticket ouvert")
+    .addFields({ name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true }, { name: "Salon", value: `<#${ticketChannel.id}>`, inline: true }).setTimestamp(),
+    { guildId: guild.id });
 
   return ticketChannel;
 }
@@ -700,24 +776,11 @@ async function createTicketForUser(client: Client, guild: Guild, user: User): Pr
 async function handleTicketCreate(client: Client, interaction: ButtonInteraction): Promise<void> {
   const guild = interaction.guild!;
   const user = interaction.user;
-
   const existingChannelId = getTicketChannelByUser(guild.id, user.id);
-  if (existingChannelId) {
-    await interaction.reply({
-      content: `❌ Tu as déjà un ticket ouvert : <#${existingChannelId}>`,
-      ephemeral: true,
-    });
-    return;
-  }
-
+  if (existingChannelId) { await interaction.reply({ content: `❌ Tu as déjà un ticket ouvert : <#${existingChannelId}>`, ephemeral: true }); return; }
   await interaction.deferReply({ ephemeral: true });
-
   const ticketChannel = await createTicketForUser(client, guild, user);
-  if (!ticketChannel) {
-    await interaction.editReply({ content: "❌ Impossible de créer le salon ticket. Vérifie les permissions du bot." });
-    return;
-  }
-
+  if (!ticketChannel) { await interaction.editReply({ content: "❌ Impossible de créer le salon ticket. Vérifie les permissions du bot." }); return; }
   await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${ticketChannel.id}>` });
 }
 
@@ -726,63 +789,34 @@ async function handleTicketClose(interaction: ButtonInteraction): Promise<void> 
   const guild = interaction.guild!;
   const user = interaction.user;
   const config = getConfig(guild.id);
-
-  if (!isTicketChannel(channel.id)) {
-    await interaction.reply({ content: "❌ Ce n'est pas un salon ticket.", ephemeral: true });
-    return;
-  }
-
+  if (!isTicketChannel(channel.id)) { await interaction.reply({ content: "❌ Ce n'est pas un salon ticket.", ephemeral: true }); return; }
   const ticket = getTicketByChannel(channel.id);
   const member = await guild.members.fetch(user.id).catch(() => null);
-
-  const isStaff = config.ticketStaffRoleId
-    ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
-    : member?.permissions.has(PermissionFlagsBits.ManageChannels) ?? false;
-
+  const isStaff = config.ticketStaffRoleId ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false : member?.permissions.has(PermissionFlagsBits.ManageChannels) ?? false;
   const isOwner = ticket?.userId === user.id;
-
-  if (!isStaff && !isOwner) {
-    await interaction.reply({ content: "❌ Seul le staff ou le créateur du ticket peut le fermer.", ephemeral: true });
-    return;
-  }
-
+  if (!isStaff && !isOwner) { await interaction.reply({ content: "❌ Seul le staff ou le créateur du ticket peut le fermer.", ephemeral: true }); return; }
   await interaction.reply({ content: "🔒 Fermeture du ticket...", ephemeral: true });
-
-  const embed = new EmbedBuilder()
-    .setColor(0xef4444)
-    .setTitle("🔒 Ticket fermé")
-    .addFields(
-      { name: "Fermé par", value: user.tag, inline: true },
-      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : [])
-    )
-    .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." })
-    .setTimestamp();
-
+  const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔒 Ticket fermé")
+    .addFields({ name: "Fermé par", value: user.tag, inline: true }, ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []))
+    .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." }).setTimestamp();
   await channel.send({ embeds: [embed] });
   await interaction.message.edit({ components: [] }).catch(() => null);
-
   closeTicket(channel.id);
-
-  await sendLog(interaction.client, logEmbed(
-    0xef4444, "🔒 Ticket fermé (bouton)",
-    [
-      { name: "Salon", value: channel.name, inline: true },
-      { name: "Fermé par", value: user.tag, inline: true },
-      ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
-      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
-      ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : []),
-    ],
-    { tag: user.tag, id: user.id }
-  ), { guildId: guild.id });
-
-  setTimeout(async () => {
-    await channel.delete("Ticket fermé").catch(() => null);
-  }, 5000);
+  await sendLog(interaction.client, logEmbed(0xef4444, "🔒 Ticket fermé (bouton)", [
+    { name: "Salon", value: channel.name, inline: true }, { name: "Fermé par", value: user.tag, inline: true },
+    ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+    ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+    ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : []),
+  ], { tag: user.tag, id: user.id }), { guildId: guild.id });
+  setTimeout(async () => { await channel.delete("Ticket fermé").catch(() => null); }, 5000);
 }
+
+// ──── DASHBOARD BUTTON ────
 
 async function handleDashboardButton(client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
+  void client;
 
   const member = await guild.members.fetch(interaction.user.id).catch(() => null);
   if (!member?.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -792,255 +826,136 @@ async function handleDashboardButton(client: Client, interaction: ButtonInteract
 
   const guildId = guild.id;
 
-  if (customId === "dash_welcome_toggle") {
-    const cfg = getConfig(guildId);
-    setWelcomeEnabled(guildId, !cfg.welcomeEnabled);
+  async function updateDashboard() {
     const newCfg = getConfig(guildId);
-    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
-    return;
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild!)], components: buildDashboardRows(newCfg) });
   }
 
-  if (customId === "dash_leave_toggle") {
-    const cfg = getConfig(guildId);
-    setLeaveEnabled(guildId, !cfg.leaveEnabled);
-    const newCfg = getConfig(guildId);
-    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
-    return;
-  }
+  async function showModal(id: string, title: string, label: string, placeholder: string, value?: string, paragraph = false) {
+    const input = new TextInputBuilder()
+      .setCustomId("value")
+      .setLabel(label)
+      .setStyle(paragraph ? TextInputStyle.Paragraph : TextInputStyle.Short)
+      .setRequired(false)
+      .setPlaceholder(placeholder)
+      .setMaxLength(paragraph ? 500 : 100);
+    if (value !== undefined) input.setValue(value);
 
-  if (customId === "dash_captcha_toggle") {
-    const cfg = getConfig(guildId);
-    setCaptchaEnabled(guildId, !cfg.captchaEnabled);
-    const newCfg = getConfig(guildId);
-    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
-    return;
-  }
-
-  if (customId === "dash_reset_welcome_msg") {
-    setWelcomeMessage(guildId, DEFAULT_WELCOME_MSG);
-    const newCfg = getConfig(guildId);
-    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
-    return;
-  }
-
-  if (customId === "dash_reset_leave_msg") {
-    setLeaveMessage(guildId, DEFAULT_LEAVE_MSG);
-    const newCfg = getConfig(guildId);
-    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
-    return;
-  }
-
-  if (customId === "dash_welcome_channel") {
     const modal = new ModalBuilder()
-      .setCustomId("dash_modal_welcome_channel")
-      .setTitle("Salon des messages d'arrivée")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("channel_id")
-            .setLabel("ID ou mention du salon (#salon ou ID)")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setPlaceholder("ex : 123456789012345678 ou <#123456789012345678>")
-        )
-      );
+      .setCustomId(id)
+      .setTitle(title)
+      .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+
     await interaction.showModal(modal);
-    return;
   }
 
-  if (customId === "dash_welcome_msg") {
-    const cfg = getConfig(guildId);
-    const modal = new ModalBuilder()
-      .setCustomId("dash_modal_welcome_msg")
-      .setTitle("Message d'arrivée")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("message")
-            .setLabel("Message ({user} {username} {server} {count})")
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-            .setValue(cfg.welcomeMessage)
-            .setMaxLength(500)
-        )
-      );
-    await interaction.showModal(modal);
-    return;
-  }
+  switch (customId) {
+    case "dash_welcome_toggle":
+      setWelcomeEnabled(guildId, !getConfig(guildId).welcomeEnabled);
+      return updateDashboard();
 
-  if (customId === "dash_leave_channel") {
-    const modal = new ModalBuilder()
-      .setCustomId("dash_modal_leave_channel")
-      .setTitle("Salon des messages de départ")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("channel_id")
-            .setLabel("ID ou mention du salon (#salon ou ID)")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setPlaceholder("ex : 123456789012345678 ou <#123456789012345678>")
-        )
-      );
-    await interaction.showModal(modal);
-    return;
-  }
+    case "dash_leave_toggle":
+      setLeaveEnabled(guildId, !getConfig(guildId).leaveEnabled);
+      return updateDashboard();
 
-  if (customId === "dash_leave_msg") {
-    const cfg = getConfig(guildId);
-    const modal = new ModalBuilder()
-      .setCustomId("dash_modal_leave_msg")
-      .setTitle("Message de départ")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("message")
-            .setLabel("Message ({user} {username} {server} {count})")
-            .setStyle(TextInputStyle.Paragraph)
-            .setRequired(true)
-            .setValue(cfg.leaveMessage)
-            .setMaxLength(500)
-        )
-      );
-    await interaction.showModal(modal);
-    return;
-  }
+    case "dash_captcha_toggle":
+      setCaptchaEnabled(guildId, !getConfig(guildId).captchaEnabled);
+      return updateDashboard();
 
-  if (customId === "dash_captcha_unverified_role") {
-    const modal = new ModalBuilder()
-      .setCustomId("dash_modal_captcha_unverified_role")
-      .setTitle("Rôle non-vérifié (captcha)")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("role_id")
-            .setLabel("ID du rôle (vide = désactiver)")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false)
-            .setPlaceholder("ex : 123456789012345678")
-        )
-      );
-    await interaction.showModal(modal);
-    return;
-  }
+    case "dash_sanction_dm_toggle":
+      setSanctionDmEnabled(guildId, !getConfig(guildId).sanctionDmEnabled);
+      return updateDashboard();
 
-  if (customId === "dash_captcha_verified_role") {
-    const modal = new ModalBuilder()
-      .setCustomId("dash_modal_captcha_verified_role")
-      .setTitle("Rôle vérifié (captcha)")
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("role_id")
-            .setLabel("ID du rôle (vide = désactiver)")
-            .setStyle(TextInputStyle.Short)
-            .setRequired(false)
-            .setPlaceholder("ex : 123456789012345678")
-        )
-      );
-    await interaction.showModal(modal);
-    return;
-  }
+    case "dash_reset_welcome_msg":
+      setWelcomeMessage(guildId, DEFAULT_WELCOME_MSG);
+      return updateDashboard();
 
-  void client;
+    case "dash_reset_leave_msg":
+      setLeaveMessage(guildId, DEFAULT_LEAVE_MSG);
+      return updateDashboard();
+
+    case "dash_welcome_channel":
+      return showModal("dash_modal_welcome_channel", "Salon messages d'arrivée", "ID ou mention du salon", "123456789012345678 ou <#123456789>");
+
+    case "dash_welcome_msg":
+      return showModal("dash_modal_welcome_msg", "Message d'arrivée", "Message ({user} {username} {server} {count})", "Bienvenue {user} !", getConfig(guildId).welcomeMessage, true);
+
+    case "dash_leave_channel":
+      return showModal("dash_modal_leave_channel", "Salon messages de départ", "ID ou mention du salon", "123456789012345678 ou <#123456789>");
+
+    case "dash_leave_msg":
+      return showModal("dash_modal_leave_msg", "Message de départ", "Message ({user} {username} {server} {count})", "Au revoir {username} !", getConfig(guildId).leaveMessage, true);
+
+    case "dash_captcha_channel":
+      return showModal("dash_modal_captcha_channel", "Salon de vérification (captcha)", "ID ou mention du salon (vide = désactiver)", "123456789012345678 ou <#123456789>");
+
+    case "dash_captcha_unverified_role":
+      return showModal("dash_modal_captcha_unverified_role", "Rôle non-vérifié", "ID du rôle (vide = désactiver)", "123456789012345678 ou <@&123456789>");
+
+    case "dash_captcha_verified_role":
+      return showModal("dash_modal_captcha_verified_role", "Rôle vérifié", "ID du rôle (vide = désactiver)", "123456789012345678 ou <@&123456789>");
+  }
 }
+
+// ──── MODAL SUBMIT ────
 
 async function handleModalSubmit(client: Client, interaction: ModalSubmitInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
+  void client;
 
   const guildId = guild.id;
+  const raw = interaction.fields.getTextInputValue("value").trim();
+  const channelId = parseId(raw);
+  const roleId = parseId(raw);
 
-  function parseChannelId(raw: string): string {
-    return raw.replace(/[<#>]/g, "").trim();
-  }
-
-  function parseRoleId(raw: string): string | null {
-    const cleaned = raw.trim().replace(/[<@&>]/g, "");
-    return cleaned && /^\d+$/.test(cleaned) ? cleaned : null;
-  }
-
-  if (customId === "dash_modal_welcome_channel") {
-    const raw = interaction.fields.getTextInputValue("channel_id");
-    const channelId = parseChannelId(raw);
-    setWelcomeChannel(guildId, channelId);
+  async function replyAndRefresh(content: string) {
     const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: `✅ Salon d'arrivée défini sur <#${channelId}>.`,
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
+    // Try to update the original dashboard message
+    if (interaction.message) {
+      await interaction.message.edit({ embeds: [buildDashboardEmbed(newCfg, guild!)], components: buildDashboardRows(newCfg) }).catch(() => null);
+      await interaction.reply({ content, ephemeral: true });
+    } else {
+      await interaction.reply({ content, embeds: [buildDashboardEmbed(newCfg, guild!)], components: buildDashboardRows(newCfg), ephemeral: true });
+    }
   }
 
-  if (customId === "dash_modal_welcome_msg") {
-    const msg = interaction.fields.getTextInputValue("message");
-    setWelcomeMessage(guildId, msg);
-    const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: "✅ Message d'arrivée mis à jour.",
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
-  }
+  switch (customId) {
+    case "dash_modal_welcome_channel":
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide. Utilise l'ID numérique ou une mention `<#id>`.", ephemeral: true }); return; }
+      if (raw) setWelcomeChannel(guildId, channelId);
+      return replyAndRefresh(raw ? `✅ Salon d'arrivée → <#${channelId}>` : "✅ Salon d'arrivée retiré.");
 
-  if (customId === "dash_modal_leave_channel") {
-    const raw = interaction.fields.getTextInputValue("channel_id");
-    const channelId = parseChannelId(raw);
-    setLeaveChannel(guildId, channelId);
-    const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: `✅ Salon de départ défini sur <#${channelId}>.`,
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
-  }
+    case "dash_modal_welcome_msg":
+      setWelcomeMessage(guildId, raw || DEFAULT_WELCOME_MSG);
+      return replyAndRefresh("✅ Message d'arrivée mis à jour.");
 
-  if (customId === "dash_modal_leave_msg") {
-    const msg = interaction.fields.getTextInputValue("message");
-    setLeaveMessage(guildId, msg);
-    const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: "✅ Message de départ mis à jour.",
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
-  }
+    case "dash_modal_leave_channel":
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      if (raw) setLeaveChannel(guildId, channelId);
+      return replyAndRefresh(raw ? `✅ Salon de départ → <#${channelId}>` : "✅ Salon de départ retiré.");
 
-  if (customId === "dash_modal_captcha_unverified_role") {
-    const raw = interaction.fields.getTextInputValue("role_id");
-    const roleId = parseRoleId(raw);
-    setCaptchaUnverifiedRole(guildId, roleId);
-    const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: roleId ? `✅ Rôle non-vérifié défini sur <@&${roleId}>.` : "✅ Rôle non-vérifié retiré.",
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
-  }
+    case "dash_modal_leave_msg":
+      setLeaveMessage(guildId, raw || DEFAULT_LEAVE_MSG);
+      return replyAndRefresh("✅ Message de départ mis à jour.");
 
-  if (customId === "dash_modal_captcha_verified_role") {
-    const raw = interaction.fields.getTextInputValue("role_id");
-    const roleId = parseRoleId(raw);
-    setCaptchaVerifiedRole(guildId, roleId);
-    const newCfg = getConfig(guildId);
-    await interaction.reply({
-      content: roleId ? `✅ Rôle vérifié défini sur <@&${roleId}>.` : "✅ Rôle vérifié retiré.",
-      embeds: [buildDashboardEmbed(newCfg, guild)],
-      components: buildDashboardRows(newCfg),
-      ephemeral: true,
-    });
-    return;
-  }
+    case "dash_modal_captcha_channel": {
+      const id = raw ? channelId : null;
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      setCaptchaChannel(guildId, id);
+      return replyAndRefresh(id ? `✅ Salon de vérification → <#${id}>.` : "✅ Salon de vérification retiré (fallback DM).");
+    }
 
-  void client;
+    case "dash_modal_captcha_unverified_role": {
+      const id = raw && isValidId(roleId) ? roleId : null;
+      setCaptchaUnverifiedRole(guildId, id);
+      return replyAndRefresh(id ? `✅ Rôle non-vérifié → <@&${id}>.` : "✅ Rôle non-vérifié retiré.");
+    }
+
+    case "dash_modal_captcha_verified_role": {
+      const id = raw && isValidId(roleId) ? roleId : null;
+      setCaptchaVerifiedRole(guildId, id);
+      return replyAndRefresh(id ? `✅ Rôle vérifié → <@&${id}>.` : "✅ Rôle vérifié retiré.");
+    }
+  }
 }
