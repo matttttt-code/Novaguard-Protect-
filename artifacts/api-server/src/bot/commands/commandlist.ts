@@ -128,6 +128,17 @@ function buildCommandListEmbed(): EmbedBuilder {
         ].join("\n"),
       },
       {
+        name: "📨 Suivi des invitations",
+        value: [
+          "`/setinvitelog #salon` · `&setinvitelog #salon` (`&setinvlog`) — Définit le salon de logs d'invitations (Admin)",
+          "  → Envoie un embed à chaque arrivée : qui a invité qui, code utilisé, stats de l'inviteur",
+          "`/checkinvite [@membre]` · `&checkinvite [@mention]` (`&ci`) — Stats d'invitations d'un membre",
+          "  → Invités · Partis · Actifs · Par qui le membre a été invité + code",
+          "`/checkinvites` · `&checkinvites` (`&topinvites`) — Classement des invitations du serveur (Admin)",
+          "  → Top 15 inviteurs triés par actifs décroissant",
+        ].join("\n"),
+      },
+      {
         name: "🧪 Tests & diagnostic",
         value: [
           "`/testcaptcha` · `&testcaptcha [--apercu] [@membre]` (`&testcap`) — Teste le captcha",

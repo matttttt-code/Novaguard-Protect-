@@ -48,6 +48,7 @@ import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert } from "./bot-alerts.js";
+import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -99,6 +100,7 @@ export function startBot(): void {
     }
 
     await sendStartupAlert(readyClient).catch(() => null);
+    await initInviteTracker(readyClient).catch(() => null);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -349,6 +351,9 @@ export function startBot(): void {
       }
     }
 
+    // ── Invite tracking ──
+    await onMemberJoin(client, member).catch(() => null);
+
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
     await sendWelcomeMessage(client, member, guildId, cfg);
@@ -356,6 +361,7 @@ export function startBot(): void {
 
   // ──── GUILD MEMBER REMOVE ────
   client.on(Events.GuildMemberRemove, async (member) => {
+    onMemberLeave(member);
     const guildId = member.guild.id;
     const createdTs = Math.floor(member.user.createdTimestamp / 1000);
     const joinedTs = member.joinedTimestamp ? Math.floor(member.joinedTimestamp / 1000) : null;

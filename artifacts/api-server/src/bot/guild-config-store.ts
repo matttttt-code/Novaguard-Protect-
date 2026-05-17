@@ -21,6 +21,7 @@ export interface GuildConfig {
   captchaUnverifiedRoleId: string | null;
   captchaVerifiedRoleId: string | null;
   sanctionDmEnabled: boolean;
+  inviteLogChannelId: string | null;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -47,6 +48,7 @@ function defaults(): GuildConfig {
     captchaUnverifiedRoleId: null,
     captchaVerifiedRoleId: null,
     sanctionDmEnabled: true,
+    inviteLogChannelId: null,
   };
 }
 
@@ -116,3 +118,4 @@ export function setCaptchaChannel(guildId: string, channelId: string | null): vo
 export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaUnverifiedRoleId: roleId }); }
 export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaVerifiedRoleId: roleId }); }
 export function setSanctionDmEnabled(guildId: string, enabled: boolean): void { set(guildId, { sanctionDmEnabled: enabled }); }
+export function setInviteLogChannel(guildId: string, channelId: string | null): void { set(guildId, { inviteLogChannelId: channelId }); }
