@@ -8,7 +8,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
-import { sendSanctionDM } from "../dm-notify.js";
+import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
 
 export const data = new SlashCommandBuilder()
   .setName("ban")
@@ -47,6 +47,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const moderator = interaction.member as GuildMember | null;
   if (member && moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    await sendBlockedActionDM(interaction.client, {
+      command: "/ban", guildName: interaction.guild?.name ?? "Inconnu", guildId: interaction.guildId ?? "?",
+      moderatorTag: interaction.user.tag, moderatorId: interaction.user.id,
+      targetTag: member.user.tag, targetId: member.id,
+      blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+    });
     return interaction.reply({ content: "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
   }
   if (member && !member.bannable) {
@@ -114,6 +120,12 @@ export async function executeMessage(message: Message, args: string[]) {
     const member = await message.guild.members.fetch(rawId);
     inServer = true;
     if (member.roles.highest.position >= message.member!.roles.highest.position) {
+      await sendBlockedActionDM(message.client, {
+        command: "&ban", guildName: message.guild!.name, guildId: message.guild!.id,
+        moderatorTag: message.author.tag, moderatorId: message.author.id,
+        targetTag: member.user.tag, targetId: member.id,
+        blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+      });
       await message.reply("❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre."); return;
     }
     if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien)."); return; }

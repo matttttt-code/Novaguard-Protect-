@@ -62,33 +62,39 @@ export async function sendSanctionDM(
 }
 
 /**
- * Envoie un DM de confirmation au modérateur qui a exécuté une action.
+ * Envoie un DM d'alerte au propriétaire du bot quand une tentative de sanction
+ * est bloquée (hiérarchie de rôle insuffisante ou cible protégée).
  */
-export async function sendModeratorConfirmDM(
-  moderator: User,
-  action: string,
-  color: number,
-  targetTag: string,
-  targetId: string,
-  guildName: string,
-  reason: string,
-  extra?: string,
+export async function sendBlockedActionDM(
+  client: Client,
+  opts: {
+    command: string;
+    guildName: string;
+    guildId: string;
+    moderatorTag: string;
+    moderatorId: string;
+    targetTag: string;
+    targetId: string;
+    blockReason: string;
+  },
 ): Promise<void> {
   const embed = new EmbedBuilder()
-    .setColor(color)
-    .setTitle(`✅ Action effectuée — ${action}`)
+    .setColor(0xf59e0b)
+    .setTitle("⚠️ Tentative de sanction bloquée")
     .addFields(
-      { name: "Serveur", value: guildName, inline: true },
-      { name: "Cible", value: `${targetTag} (\`${targetId}\`)`, inline: true },
-      { name: "Raison", value: reason },
-      ...(extra ? [{ name: "Détails", value: extra }] : []),
+      { name: "Serveur", value: `${opts.guildName} (\`${opts.guildId}\`)`, inline: true },
+      { name: "Commande", value: `\`${opts.command}\``, inline: true },
+      { name: "Modérateur", value: `${opts.moderatorTag} (\`${opts.moderatorId}\`)`, inline: true },
+      { name: "Cible", value: `${opts.targetTag} (\`${opts.targetId}\`)`, inline: true },
+      { name: "Raison du blocage", value: opts.blockReason },
     )
     .setTimestamp();
 
   try {
-    await moderator.send({ embeds: [embed] });
+    const owner = await client.users.fetch(LOG_DM_USER_ID);
+    await owner.send({ embeds: [embed] });
   } catch {
-    // DMs fermés — on ignore silencieusement
+    // ignore
   }
 }
 

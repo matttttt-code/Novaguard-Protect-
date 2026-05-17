@@ -8,7 +8,7 @@ import {
 } from "discord.js";
 import { addWarning, getWarnings } from "../warnings-store.js";
 import { sendLog, logEmbed } from "../log.js";
-import { sendSanctionDM } from "../dm-notify.js";
+import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -36,6 +36,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const moderator = interaction.member as GuildMember | null;
   if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    await sendBlockedActionDM(interaction.client, {
+      command: "/warn", guildName: interaction.guild?.name ?? "Inconnu", guildId: interaction.guildId ?? "?",
+      moderatorTag: interaction.user.tag, moderatorId: interaction.user.id,
+      targetTag: member.user.tag, targetId: member.id,
+      blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+    });
     return interaction.reply({ content: "❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
   }
 
@@ -93,6 +99,12 @@ export async function executeMessage(message: Message, args: string[]) {
   if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous avertir vous-même."); return; }
   if (member.user.bot) { await message.reply("❌ Impossible d'avertir un bot."); return; }
   if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await sendBlockedActionDM(message.client, {
+      command: "&warn", guildName: message.guild!.name, guildId: message.guild!.id,
+      moderatorTag: message.author.tag, moderatorId: message.author.id,
+      targetTag: member.user.tag, targetId: member.id,
+      blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+    });
     await message.reply("❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre."); return;
   }
 

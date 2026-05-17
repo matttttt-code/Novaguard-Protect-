@@ -7,6 +7,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog } from "../log.js";
+import { sendBlockedActionDM } from "../dm-notify.js";
 
 const DURATIONS: Record<string, number> = {
   "1m": 60_000, "5m": 300_000, "10m": 600_000, "30m": 1_800_000,
@@ -99,6 +100,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (target.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me muter moi-même.", ephemeral: true });
 
   if (moderator.roles.highest.position <= target.roles.highest.position) {
+    await sendBlockedActionDM(interaction.client, {
+      command: "/voicemute", guildName: interaction.guild?.name ?? "Inconnu", guildId: interaction.guildId ?? "?",
+      moderatorTag: interaction.user.tag, moderatorId: interaction.user.id,
+      targetTag: target.user.tag, targetId: target.id,
+      blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+    });
     return interaction.reply({ content: "❌ Vous ne pouvez pas muter vocalement un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
   }
   if (target.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: "❌ Impossible de muter un administrateur.", ephemeral: true });
@@ -149,6 +156,12 @@ export async function executeMessage(message: Message, args: string[]) {
   if (!target) { await message.reply("❌ Membre introuvable."); return; }
   if (target.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas me muter moi-même."); return; }
   if (target.roles.highest.position >= message.member!.roles.highest.position) {
+    await sendBlockedActionDM(message.client, {
+      command: "&voicemute", guildName: message.guild!.name, guildId: message.guild!.id,
+      moderatorTag: message.author.tag, moderatorId: message.author.id,
+      targetTag: target.user.tag, targetId: target.id,
+      blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
+    });
     await message.reply("❌ Vous ne pouvez pas muter vocalement un membre dont le rôle est supérieur ou égal au vôtre."); return;
   }
   if (target.permissions.has(PermissionFlagsBits.Administrator)) { await message.reply("❌ Impossible de muter un administrateur."); return; }
