@@ -7,6 +7,7 @@ import { initAuth } from "@/lib/auth";
 import Login from "@/pages/login";
 import Hub from "@/pages/hub";
 import GuildConfigEditor from "@/pages/guild";
+import OwnerPanel from "@/pages/owner";
 
 // Initialize auth token getter
 initAuth();
@@ -26,6 +27,7 @@ function Router() {
       <Route path="/" component={Login} />
       <Route path="/guilds" component={Hub} />
       <Route path="/guilds/:guildId" component={GuildConfigEditor} />
+      <Route path="/owner/:guildId" component={OwnerPanel} />
       <Route component={NotFound} />
     </Switch>
   );

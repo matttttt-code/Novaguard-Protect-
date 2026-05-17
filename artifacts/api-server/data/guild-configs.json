@@ -170,7 +170,11 @@
     "suspiciousCheckEnabled": true,
     "whitelistedInviteCodes": [
       "DTaJmQneQ2"
-    ]
+    ],
+    "vpnCheckEnabled": true,
+    "vpnCheckMinAgeDays": 7,
+    "vpnCheckAction": "flag",
+    "vpnCheckRequireNoAvatar": false
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -341,7 +345,11 @@
     ],
     "antiWebhookEnabled": false,
     "suspiciousCheckEnabled": true,
-    "whitelistedInviteCodes": []
+    "whitelistedInviteCodes": [],
+    "vpnCheckEnabled": false,
+    "vpnCheckMinAgeDays": 30,
+    "vpnCheckAction": "kick",
+    "vpnCheckRequireNoAvatar": false
   },
   "1505649273251954739": {
     "logChannelId": "1505649273738629265",
@@ -512,6 +520,10 @@
     ],
     "antiWebhookEnabled": false,
     "suspiciousCheckEnabled": false,
-    "whitelistedInviteCodes": []
+    "whitelistedInviteCodes": [],
+    "vpnCheckEnabled": false,
+    "vpnCheckMinAgeDays": 30,
+    "vpnCheckAction": "kick",
+    "vpnCheckRequireNoAvatar": false
   }
 }

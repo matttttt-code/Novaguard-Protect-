@@ -3,7 +3,7 @@ import { Link, useLocation } from "wouter";
 import { useGetDashboardStats, useGetDashboardGuilds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Users, Server, Clock, HardDrive, Wifi, LogOut } from "lucide-react";
+import { Activity, Users, Server, Clock, HardDrive, Wifi, LogOut, Shield } from "lucide-react";
 import { clearToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
@@ -103,23 +103,33 @@ export default function Hub() {
         <h2 className="text-xl font-semibold mb-4 uppercase tracking-widest text-muted-foreground text-sm">Serveurs Gérés</h2>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {guilds.map((guild) => (
-            <Link key={guild.id} href={`/guilds/${guild.id}`} className="group block focus:outline-none">
-              <Card className="h-full border-border bg-card hover:border-primary/50 transition-colors cursor-pointer group-focus-visible:ring-2 ring-primary">
-                <CardHeader className="flex flex-row items-center gap-4">
-                  <div className="h-12 w-12 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0 border border-border">
-                    {guild.iconURL ? (
-                      <img src={guild.iconURL} alt={guild.name} className="h-full w-full object-cover" />
-                    ) : (
-                      <span className="text-lg font-mono text-muted-foreground">{guild.name.charAt(0)}</span>
-                    )}
-                  </div>
-                  <div className="overflow-hidden">
-                    <CardTitle className="truncate text-base" title={guild.name}>{guild.name}</CardTitle>
-                    <CardDescription className="font-mono text-xs mt-1">{guild.memberCount.toLocaleString('fr-FR')} membres</CardDescription>
-                  </div>
-                </CardHeader>
-              </Card>
-            </Link>
+            <Card key={guild.id} className="h-full border-border bg-card">
+              <CardHeader className="flex flex-row items-center gap-4 pb-3">
+                <div className="h-12 w-12 rounded-full overflow-hidden bg-muted flex items-center justify-center shrink-0 border border-border">
+                  {guild.iconURL ? (
+                    <img src={guild.iconURL} alt={guild.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <span className="text-lg font-mono text-muted-foreground">{guild.name.charAt(0)}</span>
+                  )}
+                </div>
+                <div className="overflow-hidden flex-1 min-w-0">
+                  <CardTitle className="truncate text-base" title={guild.name}>{guild.name}</CardTitle>
+                  <CardDescription className="font-mono text-xs mt-1">{guild.memberCount.toLocaleString('fr-FR')} membres</CardDescription>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0 flex gap-2">
+                <Link href={`/guilds/${guild.id}`} className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full text-xs gap-1.5">
+                    <Server className="h-3.5 w-3.5" /> Config Bot
+                  </Button>
+                </Link>
+                <Link href={`/owner/${guild.id}`} className="flex-1">
+                  <Button variant="outline" size="sm" className="w-full text-xs gap-1.5 text-primary border-primary/40 hover:bg-primary/10">
+                    <Shield className="h-3.5 w-3.5" /> Panneau Owner
+                  </Button>
+                </Link>
+              </CardContent>
+            </Card>
           ))}
         </div>
       </section>
