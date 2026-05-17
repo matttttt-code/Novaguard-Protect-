@@ -61,6 +61,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         value: [
           "`/ticketpanel` · `&ticketpanel` — Envoie le panel de tickets dans ce salon (Admin)",
           "`/ticket claim` · `&ticket claim` — Prend en charge le ticket (staff)",
+          "`/ticket reset` · `&ticket reset` — Réinitialise le registre interne des tickets (Admin)",
           "`/ticket fermer [raison]` · `&ticket fermer [raison]` — Ferme le ticket actuel",
           "`/ticket ajouter @membre` · `&ticket ajouter @membre` — Ajoute un membre au ticket",
           "`/ticket retirer @membre` · `&ticket retirer @membre` — Retire un membre du ticket",

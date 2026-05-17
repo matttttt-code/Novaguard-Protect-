@@ -14,7 +14,7 @@ import { addWarning } from "./warnings-store.js";
 const SPAM_LIMIT = 5;
 const SPAM_WINDOW_MS = 5000;
 const EMOJI_LIMIT = 5;
-const TIMEOUT_DURATION_MS = 10 * 60 * 1000;
+const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000;
 const MIN_CAPS_LENGTH = 8;
 const AUTOMOD_SLOWMODE_SECONDS = 5;
 
@@ -65,13 +65,13 @@ async function applyTimeout(member: GuildMember, reason: string, message: Messag
   try {
     await message.delete().catch(() => null);
     await member.timeout(TIMEOUT_DURATION_MS, reason);
-    await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, "Durée : 10 minutes");
+    await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, "Durée : 24 heures");
 
     const embed = logEmbed(
       0xa855f7, "🤖 Auto-mod — Timeout",
       [
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Durée", value: "10 minutes", inline: true },
+        { name: "Durée", value: "24 heures", inline: true },
         { name: "Raison", value: reason },
         { name: "Salon", value: `<#${message.channelId}>`, inline: true },
       ],

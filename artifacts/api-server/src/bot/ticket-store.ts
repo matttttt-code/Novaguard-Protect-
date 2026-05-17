@@ -50,3 +50,15 @@ export function closeTicket(channelId: string): TicketData | undefined {
 export function isTicketChannel(channelId: string): boolean {
   return byChannel.has(channelId);
 }
+
+export function resetTickets(guildId: string): number {
+  let count = 0;
+  byChannel.forEach((data, channelId) => {
+    if (data.guildId === guildId) {
+      byChannel.delete(channelId);
+      byUser.delete(`${guildId}-${data.userId}`);
+      count++;
+    }
+  });
+  return count;
+}

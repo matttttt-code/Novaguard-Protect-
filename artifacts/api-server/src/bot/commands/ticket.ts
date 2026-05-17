@@ -7,7 +7,7 @@ import {
   GuildMember,
   TextChannel,
 } from "discord.js";
-import { isTicketChannel, getTicketByChannel, claimTicket } from "../ticket-store.js";
+import { isTicketChannel, getTicketByChannel, claimTicket, resetTickets } from "../ticket-store.js";
 import { getConfig } from "../guild-config-store.js";
 
 async function doClose(channel: TextChannel, closedBy: string, reason: string): Promise<void> {
@@ -55,6 +55,10 @@ export const data = new SlashCommandBuilder()
     sub.setName("retirer")
       .setDescription("Retire un membre de ce ticket")
       .addUserOption((o) => o.setName("membre").setDescription("Le membre à retirer").setRequired(true))
+  )
+  .addSubcommand((sub) =>
+    sub.setName("reset")
+      .setDescription("Réinitialise le registre interne des tickets en cas de bug (Admin uniquement)")
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -71,6 +75,26 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   const ticket = getTicketByChannel(interaction.channelId);
   const isOwner = ticket?.userId === interaction.user.id;
+
+  if (sub === "reset") {
+    if (!guildMember.permissions.has(PermissionFlagsBits.Administrator)) {
+      return interaction.reply({ content: "❌ Seuls les administrateurs peuvent réinitialiser le registre des tickets.", ephemeral: true });
+    }
+    const count = resetTickets(interaction.guild.id);
+    return interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xf97316)
+        .setTitle("🔄 Registre des tickets réinitialisé")
+        .setDescription(
+          `**${count}** ticket(s) ont été supprimés du registre interne.\n\n` +
+          "⚠️ Les salons Discord **ne sont pas supprimés** automatiquement — supprime-les manuellement si nécessaire.\n" +
+          "Les utilisateurs peuvent maintenant créer de nouveaux tickets normalement."
+        )
+        .addFields({ name: "Fait par", value: interaction.user.tag, inline: true })
+        .setTimestamp()],
+      ephemeral: true,
+    });
+  }
 
   if (sub === "fermer") {
     if (!isTicketChannel(interaction.channelId)) {
@@ -153,6 +177,26 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const ticket = getTicketByChannel(message.channelId);
   const isOwner = ticket?.userId === message.author.id;
+
+  if (sub === "reset") {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      await message.reply("❌ Seuls les administrateurs peuvent réinitialiser le registre des tickets."); return;
+    }
+    const count = resetTickets(message.guild.id);
+    await message.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xf97316)
+        .setTitle("🔄 Registre des tickets réinitialisé")
+        .setDescription(
+          `**${count}** ticket(s) ont été supprimés du registre interne.\n\n` +
+          "⚠️ Les salons Discord **ne sont pas supprimés** automatiquement — supprime-les manuellement si nécessaire.\n" +
+          "Les utilisateurs peuvent maintenant créer de nouveaux tickets normalement."
+        )
+        .addFields({ name: "Fait par", value: message.author.tag, inline: true })
+        .setTimestamp()],
+    });
+    return;
+  }
 
   if (sub === "fermer" || sub === "close") {
     if (!isTicketChannel(message.channelId)) { await message.reply("❌ Cette commande ne fonctionne que dans un salon ticket."); return; }
