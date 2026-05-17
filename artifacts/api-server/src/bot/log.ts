@@ -11,17 +11,23 @@ export interface SendLogOptions {
   logType?: "general" | "ban";
 }
 
-function resolveLogChannelId(options?: SendLogOptions): string {
-  if (options?.guildId) {
-    const config = getConfig(options.guildId);
-    if (options.logType === "ban" && config.banLogChannelId) {
-      return config.banLogChannelId;
+async function sendToChannel(
+  client: Client,
+  channelId: string,
+  embed: EmbedBuilder,
+  pingEveryone?: boolean
+): Promise<void> {
+  try {
+    const channel = await client.channels.fetch(channelId);
+    if (channel && channel.isTextBased()) {
+      await (channel as TextChannel).send({
+        content: pingEveryone ? "@everyone" : undefined,
+        embeds: [embed],
+      });
     }
-    if (config.logChannelId) {
-      return config.logChannelId;
-    }
+  } catch (err) {
+    logger.error({ err, channelId }, "Impossible d'envoyer le log dans le salon");
   }
-  return LOG_CHANNEL_ID;
 }
 
 export async function sendLog(
@@ -29,22 +35,26 @@ export async function sendLog(
   embed: EmbedBuilder,
   options?: SendLogOptions
 ): Promise<void> {
-  const channelId = resolveLogChannelId(options);
+  const targets: string[] = [];
+
+  if (options?.guildId) {
+    const config = getConfig(options.guildId);
+
+    if (options.logType === "ban" && config.banLogChannelId) {
+      targets.push(config.banLogChannelId);
+    }
+
+    if (config.logChannelId && !targets.includes(config.logChannelId)) {
+      targets.push(config.logChannelId);
+    }
+  }
+
+  if (targets.length === 0) {
+    targets.push(LOG_CHANNEL_ID);
+  }
 
   await Promise.allSettled([
-    (async () => {
-      try {
-        const channel = await client.channels.fetch(channelId);
-        if (channel && channel.isTextBased()) {
-          await (channel as TextChannel).send({
-            content: options?.pingEveryone ? "@everyone" : undefined,
-            embeds: [embed],
-          });
-        }
-      } catch (err) {
-        logger.error({ err, channelId }, "Impossible d'envoyer le log dans le salon");
-      }
-    })(),
+    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone)),
     sendLogDM(client, embed),
   ]);
 }
