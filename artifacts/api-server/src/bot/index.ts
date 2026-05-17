@@ -251,6 +251,9 @@ export function startBot(): void {
 
     const cfg = getConfig(guildId);
 
+    // ── Invite tracking (toujours en premier, avant tout return) ──
+    await onMemberJoin(client, member).catch(() => null);
+
     // ── Captcha anti-bot ──
     if (cfg.captchaEnabled) {
       if (cfg.captchaUnverifiedRoleId) {
@@ -353,9 +356,6 @@ export function startBot(): void {
         return;
       }
     }
-
-    // ── Invite tracking ──
-    await onMemberJoin(client, member).catch(() => null);
 
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
