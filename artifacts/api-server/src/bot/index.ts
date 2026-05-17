@@ -1033,9 +1033,19 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       return;
     }
 
+    // Tentative via l'API batch setPositions
+    const allRoles = [...hoistGuild.roles.cache.values()]
+      .filter(r => r.id !== hoistGuild.roles.everyone.id)
+      .sort((a, b) => a.position - b.position);
+    const targetPosition = allRoles.length; // juste en dessous du rôle @owner
+    let success = false;
+
     try {
-      const maxPos = hoistGuild.roles.cache.size - 1;
-      await botRole.setPosition(maxPos, { reason: "Hoistrole — confirmé par le propriétaire du bot" });
+      await hoistGuild.roles.setPositions([{ role: botRole.id, position: targetPosition }]);
+      success = true;
+    } catch { /* Discord limite la position selon la hiérarchie */ }
+
+    if (success) {
       await interaction.update({
         content: `✅ Le rôle **${botRole.name}** a été hissé au-dessus de tous les rôles sur **${hoistGuild.name}**.`,
         embeds: [],
@@ -1053,8 +1063,30 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
             .setTimestamp()],
         }).catch(() => null);
       }
-    } catch (err) {
-      await interaction.update({ content: `❌ Impossible de déplacer le rôle : \`${(err as Error).message}\``, embeds: [], components: [] });
+    } else {
+      // Limitation Discord : le bot ne peut pas se hisser lui-même via l'API
+      const rolesAbove = allRoles.filter(r => r.position > botRole.position).length;
+      await interaction.update({
+        embeds: [new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("⚠️ Action manuelle requise — Limitation Discord")
+          .setDescription(
+            `Discord ne permet pas au bot de déplacer son propre rôle via l'API si d'autres rôles sont au-dessus de lui.\n\n` +
+            `**Le propriétaire du serveur doit le faire manuellement :**\n` +
+            `1. Ouvre **Paramètres du serveur → Rôles**\n` +
+            `2. Repère le rôle **${botRole.name}**\n` +
+            `3. Glisse-le **tout en haut** de la liste\n` +
+            `4. Clique sur **Enregistrer les modifications**`
+          )
+          .addFields(
+            { name: "Rôle actuel du bot", value: `**${botRole.name}** (position \`${botRole.position}\`)`, inline: true },
+            { name: "Rôles au-dessus", value: `**${rolesAbove}** rôle(s) à passer`, inline: true },
+          )
+          .setFooter({ text: hoistGuild.name })
+          .setTimestamp()],
+        content: "",
+        components: [],
+      });
     }
     return;
   }
