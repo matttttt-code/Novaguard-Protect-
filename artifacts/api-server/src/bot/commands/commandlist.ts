@@ -31,7 +31,7 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/slowmode` · `&slowmode secondes [#salon]` (`&sm`) — Slowmode d'un salon",
           "`/lock` · `&lock [#salon] [raison]` — Verrouille un salon + ajoute 🔒 au nom",
           "`/unlock` · `&unlock [#salon] [raison]` — Déverrouille un salon + retire le 🔒",
-          "`/lockserver lock|unlock [raison]` · `&lockserver lock|unlock` — Verrouille/déverrouille **tous** les salons (urgence)",
+          "`/lockserver lock|unlock [raison]` · `&lockserver lock|unlock` — Verrouille/déverrouille **tous** les salons",
           "`/nuke [#salon] [raison]` · `&nuke [#salon]` — Recrée un salon (supprime l'historique)",
           "`/role ajouter|retirer` · `&role ajouter|retirer @membre @rôle` — Gère les rôles",
           "`/nickname` · `&nickname @membre [surnom]` (`&nick`) — Change le surnom",
@@ -41,19 +41,21 @@ function buildCommandListEmbed(): EmbedBuilder {
         ].join("\n"),
       },
       {
-        name: "⛔ Liste noire (Blacklist)",
+        name: "⛔ Blacklist globale",
         value: [
-          "`/blacklist @membre|<id> raison` · `&blacklist @membre|<id> raison` (`&bl`) — Blacklist définitif par mention ou ID",
+          "`/blacklist @membre|<id> raison` · `&blacklist @membre|<id> raison` (`&bl`) — **Blacklist global** : banni sur **tous** les serveurs du bot",
           "`/blacklistinfo` · `&blacklistinfo` (`&bli`) — Voir la liste noire",
-          "🤖 **AntiDC** — Ban automatique si un membre blacklisté tente de rejoindre",
+          "🤖 **AntiDC local** — Ban automatique si blacklisté localement tente de rejoindre",
+          "🌐 **AntiDC global** — Ban automatique si blacklisté sur n'importe quel serveur du bot",
         ].join("\n"),
       },
       {
         name: "📋 Configuration",
         value: [
-          "`/dashboard` · `&dashboard` (`&config`, `&panel`) — Panneau interactif : messages d'arrivée/départ, statuts sécurité (Admin)",
+          "`/dashboard` · `&dashboard` (`&config`, `&panel`) — Panneau interactif : arrivée/départ, captcha, logs (Admin)",
           "`/setlog #salon` · `&setlog #salon` — Définit le salon de logs principal",
           "`/setbanlog <id_salon>` · `&setbanlog <id>` — Salon de logs bans (autre serveur supporté)",
+          "`/settranscript #salon` · `&settranscript #salon` — Salon où les transcripts de tickets sont envoyés",
           "`/ticketconfig role @role` · `&ticketconfig role @role` — Rôle staff des tickets",
           "`/ticketconfig categorie` · `&ticketconfig categorie <id>` — Catégorie des tickets",
           "`/ticketconfig voir` · `&ticketconfig voir` — Voir la config des tickets",
@@ -68,8 +70,20 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/ticket fermer [raison]` · `&ticket fermer [raison]` — Ferme le ticket actuel",
           "`/ticket ajouter @membre` · `&ticket ajouter @membre` — Ajoute un membre au ticket",
           "`/ticket retirer @membre` · `&ticket retirer @membre` — Retire un membre du ticket",
+          "`/transcript` · `&transcript` (`&trs`) — Génère un transcript .txt du ticket (staff)",
           "🔘 **Bouton** — Les membres cliquent sur 🎫 dans le panel pour créer leur ticket privé",
           "🔢 Les tickets sont numérotés automatiquement : `🎫-username-42`",
+        ].join("\n"),
+      },
+      {
+        name: "🤖 Captcha anti-bot",
+        value: [
+          "**Activé/désactivé via `/dashboard`**",
+          "📨 Math challenge envoyé en DM à chaque nouveau membre",
+          "⏱️ **5 minutes** pour répondre · **3 tentatives** maximum",
+          "✅ Réponse correcte → accès accordé, rôle vérifié attribué",
+          "❌ Trop d'erreurs ou délai dépassé → expulsion automatique",
+          "📱 DMs fermés → accès accordé sans captcha (configurable via rôles)",
         ].join("\n"),
       },
       {
@@ -104,7 +118,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         ].join("\n"),
       }
     )
-    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns • 1 ticket par utilisateur • Config persistante par serveur" })
+    .setFooter({ text: "Captcha configurable via Dashboard • Blacklist global cross-serveurs • Transcripts .txt • Config persistante par serveur" })
     .setTimestamp();
 }
 

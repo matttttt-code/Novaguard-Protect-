@@ -19,6 +19,7 @@ import {
 export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBuilder {
   const bool = (v: boolean) => (v ? "✅ Activé" : "❌ Désactivé");
   const chan = (id: string | null) => (id ? `<#${id}>` : "Non défini");
+  const role = (id: string | null) => (id ? `<@&${id}>` : "Non défini");
   const truncate = (s: string, n = 60) => (s.length > n ? s.slice(0, n) + "…" : s);
 
   return new EmbedBuilder()
@@ -43,6 +44,15 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
         inline: false,
       },
       {
+        name: "🤖 Captcha anti-bot",
+        value:
+          `**Statut :** ${bool(config.captchaEnabled)}\n` +
+          `**Rôle non-vérifié :** ${role(config.captchaUnverifiedRoleId)}\n` +
+          `**Rôle vérifié :** ${role(config.captchaVerifiedRoleId)}\n` +
+          `*Math challenge en DM — 3 tentatives, 5 min*`,
+        inline: false,
+      },
+      {
         name: "🛡️ Sécurité",
         value:
           `**Join Lock :** ${bool(config.joinLock)}\n` +
@@ -55,7 +65,8 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
         name: "🎫 Tickets",
         value:
           `**Rôle staff :** ${config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "Non défini"}\n` +
-          `**Catégorie :** ${config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : "Non définie"}`,
+          `**Catégorie :** ${config.ticketCategoryId ? `<#${config.ticketCategoryId}>` : "Non définie"}\n` +
+          `**Transcripts :** ${chan(config.transcriptChannelId)}`,
         inline: false,
       },
       {
@@ -101,6 +112,21 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
 
   const row3 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
+      .setCustomId("dash_captcha_toggle")
+      .setLabel(config.captchaEnabled ? "🤖 Captcha ON" : "🤖 Captcha OFF")
+      .setStyle(config.captchaEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("dash_captcha_unverified_role")
+      .setLabel("🔴 Rôle non-vérifié")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_captcha_verified_role")
+      .setLabel("🟢 Rôle vérifié")
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
       .setCustomId("dash_reset_welcome_msg")
       .setLabel("🔄 Reset msg arrivée")
       .setStyle(ButtonStyle.Danger),
@@ -110,7 +136,7 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setStyle(ButtonStyle.Danger),
   );
 
-  return [row1, row2, row3];
+  return [row1, row2, row3, row4];
 }
 
 export const data = new SlashCommandBuilder()

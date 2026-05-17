@@ -19,6 +19,8 @@ export interface PendingUnban {
 const store = new Map<string, Map<string, BlacklistEntry>>();
 const pendingUnbans = new Map<string, PendingUnban>();
 
+const globalBlacklist = new Map<string, BlacklistEntry>();
+
 export function addToBlacklist(guildId: string, entry: BlacklistEntry): void {
   if (!store.has(guildId)) store.set(guildId, new Map());
   store.get(guildId)!.set(entry.userId, entry);
@@ -38,6 +40,26 @@ export function getBlacklistEntry(guildId: string, userId: string): BlacklistEnt
 
 export function getBlacklist(guildId: string): BlacklistEntry[] {
   return [...(store.get(guildId)?.values() ?? [])];
+}
+
+export function addToGlobalBlacklist(entry: BlacklistEntry): void {
+  globalBlacklist.set(entry.userId, entry);
+}
+
+export function removeFromGlobalBlacklist(userId: string): boolean {
+  return globalBlacklist.delete(userId);
+}
+
+export function isGloballyBlacklisted(userId: string): boolean {
+  return globalBlacklist.has(userId);
+}
+
+export function getGlobalBlacklistEntry(userId: string): BlacklistEntry | undefined {
+  return globalBlacklist.get(userId);
+}
+
+export function getAllGlobalBlacklisted(): BlacklistEntry[] {
+  return [...globalBlacklist.values()];
 }
 
 export function addPendingUnban(entry: PendingUnban): void {

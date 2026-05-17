@@ -1,0 +1,16 @@
+{
+  "1504463605163364573": {
+    "logChannelId": "1505255721988657322",
+    "banLogChannelId": "1505158615567302747",
+    "raidMode": false,
+    "joinLock": false,
+    "ticketStaffRoleId": "1505490829513457745",
+    "ticketCategoryId": "1505522715044347935",
+    "welcomeEnabled": true,
+    "welcomeChannelId": null,
+    "welcomeMessage": "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉",
+    "leaveEnabled": true,
+    "leaveChannelId": "1504513292247240820",
+    "leaveMessage": "👋 **{username}** a quitté le serveur. Il reste **{count}** membres."
+  }
+}

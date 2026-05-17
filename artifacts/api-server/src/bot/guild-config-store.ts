@@ -8,12 +8,16 @@ export interface GuildConfig {
   joinLock: boolean;
   ticketStaffRoleId: string | null;
   ticketCategoryId: string | null;
+  transcriptChannelId: string | null;
   welcomeEnabled: boolean;
   welcomeChannelId: string | null;
   welcomeMessage: string;
   leaveEnabled: boolean;
   leaveChannelId: string | null;
   leaveMessage: string;
+  captchaEnabled: boolean;
+  captchaUnverifiedRoleId: string | null;
+  captchaVerifiedRoleId: string | null;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -27,12 +31,16 @@ function defaults(): GuildConfig {
     joinLock: false,
     ticketStaffRoleId: null,
     ticketCategoryId: null,
+    transcriptChannelId: null,
     welcomeEnabled: false,
     welcomeChannelId: null,
     welcomeMessage: DEFAULT_WELCOME_MSG,
     leaveEnabled: false,
     leaveChannelId: null,
     leaveMessage: DEFAULT_LEAVE_MSG,
+    captchaEnabled: false,
+    captchaUnverifiedRoleId: null,
+    captchaVerifiedRoleId: null,
   };
 }
 
@@ -113,6 +121,10 @@ export function setTicketCategory(guildId: string, categoryId: string): void {
   set(guildId, { ticketCategoryId: categoryId });
 }
 
+export function setTranscriptChannel(guildId: string, channelId: string): void {
+  set(guildId, { transcriptChannelId: channelId });
+}
+
 export function setWelcomeEnabled(guildId: string, enabled: boolean): void {
   set(guildId, { welcomeEnabled: enabled });
 }
@@ -135,4 +147,16 @@ export function setLeaveChannel(guildId: string, channelId: string): void {
 
 export function setLeaveMessage(guildId: string, message: string): void {
   set(guildId, { leaveMessage: message });
+}
+
+export function setCaptchaEnabled(guildId: string, enabled: boolean): void {
+  set(guildId, { captchaEnabled: enabled });
+}
+
+export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null): void {
+  set(guildId, { captchaUnverifiedRoleId: roleId });
+}
+
+export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void {
+  set(guildId, { captchaVerifiedRoleId: roleId });
 }

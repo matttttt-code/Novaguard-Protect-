@@ -25,6 +25,7 @@ import { registerPrefixHandler } from "./prefix-handler.js";
 import { logger } from "../lib/logger.js";
 import {
   isBlacklisted,
+  isGloballyBlacklisted,
   getPendingUnban,
   removePendingUnban,
   removeFromBlacklist,
@@ -34,7 +35,11 @@ import {
   isRaidMode, isJoinLocked, getConfig,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
   setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
+  setCaptchaEnabled, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
 } from "./guild-config-store.js";
+import {
+  getCaptcha, setCaptcha, deleteCaptcha, hasCaptcha, decrementAttempts, generateChallenge,
+} from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
@@ -59,6 +64,8 @@ export function startBot(): void {
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
   });
+
+  const captchaTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   client.once(Events.ClientReady, async (readyClient) => {
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
@@ -102,6 +109,87 @@ export function startBot(): void {
 
   client.on(Events.MessageCreate, async (message) => {
     if (!message.author.bot && message.channel.isDMBased()) {
+      // Captcha DM response — check before support
+      if (hasCaptcha(message.author.id)) {
+        const challenge = getCaptcha(message.author.id)!;
+        const answer = message.content.trim();
+
+        if (answer === challenge.answer) {
+          deleteCaptcha(message.author.id);
+          const tid = captchaTimeouts.get(message.author.id);
+          if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+
+          const guild = client.guilds.cache.get(challenge.guildId);
+          if (guild) {
+            const gMember = await guild.members.fetch(message.author.id).catch(() => null);
+            if (gMember) {
+              const cfg = getConfig(guild.id);
+              if (cfg.captchaUnverifiedRoleId) {
+                await gMember.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
+              }
+              if (cfg.captchaVerifiedRoleId) {
+                await gMember.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
+              }
+
+              await sendLog(client, new EmbedBuilder()
+                .setColor(0x22c55e)
+                .setTitle("✅ Captcha résolu — Accès accordé")
+                .setThumbnail(message.author.displayAvatarURL())
+                .addFields(
+                  { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+                  { name: "Membres", value: String(guild.memberCount), inline: true },
+                )
+                .setTimestamp(),
+              { guildId: guild.id });
+
+              const welcomeCfg = getConfig(guild.id);
+              if (welcomeCfg.welcomeEnabled && welcomeCfg.welcomeChannelId) {
+                try {
+                  const wCh = await client.channels.fetch(welcomeCfg.welcomeChannelId);
+                  if (wCh && wCh.isTextBased()) {
+                    const text = welcomeCfg.welcomeMessage
+                      .replace(/\{user\}/g, `<@${message.author.id}>`)
+                      .replace(/\{username\}/g, message.author.username)
+                      .replace(/\{server\}/g, guild.name)
+                      .replace(/\{count\}/g, String(guild.memberCount));
+                    const wEmbed = new EmbedBuilder()
+                      .setColor(0x22c55e)
+                      .setDescription(text)
+                      .setThumbnail(message.author.displayAvatarURL())
+                      .setTimestamp();
+                    await (wCh as TextChannel).send({ embeds: [wEmbed] });
+                  }
+                } catch (err) {
+                  logger.error({ err }, "Erreur envoi message d'arrivée post-captcha");
+                }
+              }
+            }
+          }
+          await message.reply("✅ **Captcha résolu !** Tu as maintenant accès au serveur. Bienvenue ! 🎉");
+        } else {
+          const remaining = decrementAttempts(message.author.id);
+          if (remaining <= 0) {
+            deleteCaptcha(message.author.id);
+            const tid = captchaTimeouts.get(message.author.id);
+            if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+
+            const guild = client.guilds.cache.get(challenge.guildId);
+            if (guild) {
+              const gMember = await guild.members.fetch(message.author.id).catch(() => null);
+              await gMember?.kick("Captcha échoué — trop de tentatives incorrectes").catch(() => null);
+            }
+            await message.reply("❌ Trop de mauvaises réponses. Tu as été **expulsé** du serveur. Tu peux rejoindre et réessayer.");
+          } else {
+            await message.reply(
+              `❌ Mauvaise réponse ! Il te reste **${remaining}** tentative(s).\n` +
+              `Rappel : **${challenge.question}**`
+            );
+          }
+        }
+        return;
+      }
+
+      // Support DM response
       const pending = getSupportRequest(message.author.id);
       if (pending) {
         removeSupportRequest(message.author.id);
@@ -134,10 +222,11 @@ export function startBot(): void {
     const createdTs = Math.floor(member.user.createdTimestamp / 1000);
     const isSuspect = accountAgeHours < 24;
 
+    // Per-guild blacklist
     if (isBlacklisted(guildId, member.id)) {
       try {
         await member.ban({ reason: "[ANTIDC] Membre blacklisté — ban automatique à la reconnexion" });
-        logger.info({ user: member.user.tag }, "AntiDC : membre blacklisté banni automatiquement");
+        logger.info({ user: member.user.tag }, "AntiDC : membre blacklisté (local) banni automatiquement");
 
         await sendLog(
           client,
@@ -150,6 +239,27 @@ export function startBot(): void {
         );
       } catch (err) {
         logger.error({ err, user: member.user.tag }, "AntiDC : impossible de bannir le membre blacklisté");
+      }
+      return;
+    }
+
+    // Global blacklist (cross-guild)
+    if (isGloballyBlacklisted(member.id)) {
+      try {
+        await member.ban({ reason: "[ANTIDC GLOBAL] Membre blacklisté sur un autre serveur" });
+        logger.info({ user: member.user.tag }, "AntiDC global : membre blacklisté banni automatiquement");
+
+        await sendLog(
+          client,
+          logEmbed(0x0f0f0f, "🤖 AntiDC Global — Ban automatique", [
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+            { name: "Raison", value: "Membre blacklisté globalement (via un autre serveur du bot)" },
+          ], { tag: client.user!.tag, id: client.user!.id }),
+          { guildId, pingEveryone: true, logType: "ban" }
+        );
+      } catch (err) {
+        logger.error({ err, user: member.user.tag }, "AntiDC global : impossible de bannir");
       }
       return;
     }
@@ -192,6 +302,79 @@ export function startBot(): void {
       return;
     }
 
+    const cfg = getConfig(guildId);
+
+    // Captcha anti-bot
+    if (cfg.captchaEnabled) {
+      if (cfg.captchaUnverifiedRoleId) {
+        await member.roles.add(cfg.captchaUnverifiedRoleId).catch(() => null);
+      }
+
+      const challenge = generateChallenge();
+      let dmSent = true;
+
+      try {
+        await member.user.send(
+          `👋 Bienvenue sur **${member.guild.name}** !\n\n` +
+          `🤖 Pour accéder au serveur, résous ce captcha **en répondant dans ce DM** :\n\n` +
+          `> **${challenge.question}**\n\n` +
+          `⏱️ Tu as **5 minutes** et **3 tentatives**.\n` +
+          `*(Réponds uniquement avec le nombre, ex: \`42\`)*`
+        );
+      } catch {
+        dmSent = false;
+        logger.warn({ user: member.user.tag }, "Captcha : DMs fermés — accès accordé sans captcha");
+        if (cfg.captchaUnverifiedRoleId) {
+          await member.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
+        }
+        if (cfg.captchaVerifiedRoleId) {
+          await member.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
+        }
+      }
+
+      if (dmSent) {
+        setCaptcha(member.id, {
+          question: challenge.question,
+          answer: challenge.answer,
+          guildId,
+          attempts: 3,
+        });
+
+        const timeoutId = setTimeout(async () => {
+          if (!hasCaptcha(member.id)) return;
+          deleteCaptcha(member.id);
+          captchaTimeouts.delete(member.id);
+
+          const gMember = await member.guild.members.fetch(member.id).catch(() => null);
+          if (gMember) {
+            await gMember.kick("Captcha non résolu dans les 5 minutes").catch(() => null);
+            try {
+              await member.user.send(
+                "⏰ Tu as été **expulsé** de **" + member.guild.name + "** pour n'avoir pas résolu le captcha dans les 5 minutes.\n" +
+                "Tu peux rejoindre à nouveau pour réessayer."
+              );
+            } catch { /* DMs closed */ }
+          }
+        }, 5 * 60 * 1000);
+
+        captchaTimeouts.set(member.id, timeoutId);
+
+        await sendLog(client, new EmbedBuilder()
+          .setColor(0xf97316)
+          .setTitle("🤖 Captcha envoyé")
+          .setThumbnail(member.user.displayAvatarURL())
+          .addFields(
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
+          )
+          .setTimestamp(),
+        { guildId });
+
+        return; // Don't send join log or welcome until captcha resolved
+      }
+    }
+
+    // Normal join log + welcome
     const joinEmbed = new EmbedBuilder()
       .setColor(isSuspect ? 0xef4444 : 0x22c55e)
       .setTitle(isSuspect ? "⚠️ Nouveau membre — Compte suspect" : "✅ Nouveau membre")
@@ -210,7 +393,6 @@ export function startBot(): void {
 
     await sendLog(client, joinEmbed, { guildId, pingEveryone: isSuspect });
 
-    const cfg = getConfig(guildId);
     if (cfg.welcomeEnabled && cfg.welcomeChannelId) {
       try {
         const wCh = await client.channels.fetch(cfg.welcomeChannelId);
@@ -626,6 +808,14 @@ async function handleDashboardButton(client: Client, interaction: ButtonInteract
     return;
   }
 
+  if (customId === "dash_captcha_toggle") {
+    const cfg = getConfig(guildId);
+    setCaptchaEnabled(guildId, !cfg.captchaEnabled);
+    const newCfg = getConfig(guildId);
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
+    return;
+  }
+
   if (customId === "dash_reset_welcome_msg") {
     setWelcomeMessage(guildId, DEFAULT_WELCOME_MSG);
     const newCfg = getConfig(guildId);
@@ -715,6 +905,44 @@ async function handleDashboardButton(client: Client, interaction: ButtonInteract
     await interaction.showModal(modal);
     return;
   }
+
+  if (customId === "dash_captcha_unverified_role") {
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_captcha_unverified_role")
+      .setTitle("Rôle non-vérifié (captcha)")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("role_id")
+            .setLabel("ID du rôle (vide = désactiver)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setPlaceholder("ex : 123456789012345678")
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (customId === "dash_captcha_verified_role") {
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_captcha_verified_role")
+      .setTitle("Rôle vérifié (captcha)")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("role_id")
+            .setLabel("ID du rôle (vide = désactiver)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setPlaceholder("ex : 123456789012345678")
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  void client;
 }
 
 async function handleModalSubmit(client: Client, interaction: ModalSubmitInteraction): Promise<void> {
@@ -725,6 +953,11 @@ async function handleModalSubmit(client: Client, interaction: ModalSubmitInterac
 
   function parseChannelId(raw: string): string {
     return raw.replace(/[<#>]/g, "").trim();
+  }
+
+  function parseRoleId(raw: string): string | null {
+    const cleaned = raw.trim().replace(/[<@&>]/g, "");
+    return cleaned && /^\d+$/.test(cleaned) ? cleaned : null;
   }
 
   if (customId === "dash_modal_welcome_channel") {
@@ -780,4 +1013,34 @@ async function handleModalSubmit(client: Client, interaction: ModalSubmitInterac
     });
     return;
   }
+
+  if (customId === "dash_modal_captcha_unverified_role") {
+    const raw = interaction.fields.getTextInputValue("role_id");
+    const roleId = parseRoleId(raw);
+    setCaptchaUnverifiedRole(guildId, roleId);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: roleId ? `✅ Rôle non-vérifié défini sur <@&${roleId}>.` : "✅ Rôle non-vérifié retiré.",
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (customId === "dash_modal_captcha_verified_role") {
+    const raw = interaction.fields.getTextInputValue("role_id");
+    const roleId = parseRoleId(raw);
+    setCaptchaVerifiedRole(guildId, roleId);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: roleId ? `✅ Rôle vérifié défini sur <@&${roleId}>.` : "✅ Rôle vérifié retiré.",
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  void client;
 }
