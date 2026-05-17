@@ -40,6 +40,7 @@ function buildEmbeds(): EmbedBuilder[] {
           "`/revokeinvites` · `&revokeinvites` — Révoque toutes les invitations",
           "`/raidmode activer|désactiver|niveau2-activer|niveau2-désactiver` · `&raidmode` — Anti-raid N1/N2",
           "`/joinlock activer|désactiver` · `&joinlock` — Bloque les arrivées",
+          "`/hoistrole` · `&hoistrole` (`&hisser`) — Demande au owner du bot de hisser le bot au-dessus de tous les rôles",
         ].join("\n"),
       },
       {
@@ -123,21 +124,23 @@ function buildEmbeds(): EmbedBuilder[] {
         name: "🔐 Sécurité avancée",
         value: [
           "`/secure voir|niveau <1|2|3>|suspicieux activer|désactiver` · `&secure`",
+          "`/secureinfo` · `&secureinfo` (`&niveaux`) — **Explications détaillées** de chaque niveau",
           "`/antiinsult activer|désactiver|ajouter|retirer|liste|charger-defaults` · `&antiinsult`",
           "`/antiwebhook activer|désactiver|statut` · `&antiwebhook`",
           "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`)",
-          "**N1** Automod standard · **N2** +comptes <3j suspects, anti-insulte 1h",
-          "**N3** Maximum (double validation owner+admin) · anti-insulte 24h · anti-webhook auto",
+          "**N1** Automod standard (anti-insulte → warn) · **N2** +comptes <3j suspects",
+          "**N3** Maximum — double validation owner+admin · DM admins · gel vocaux · vérif Très haute",
+          "**Raid N2** — invitations révoquées · webhooks supprimés · timeout 10min nouveaux membres · spam 3/3s",
         ].join("\n"),
       },
       {
         name: "🤖 Auto-modération",
         value: [
-          "👢 **Spam** (5 msg/5s) → Expulsion + slowmode 5s",
-          "🔇 **Emojis** (+5) / **Lien** / **MAJUSCULES** (+8, 100%) → Timeout 24h",
-          "🤬 **Insulte** → Warn/Timeout 1h-24h (selon niveau sécurité)",
+          "👢 **Spam** : N1/N2/N3 → 5 msg/5s · Raid N2 → 3 msg/3s — Expulsion",
+          "🔇 **Emojis** (+5) / **Lien** / **MAJUSCULES** (100%) → Timeout 24h",
+          "🤬 **Insulte** → Warn (N1 uniquement — désactivé en N2 et N3)",
           "🔗 **Webhook** non autorisé → Suppression + alerte DM owner",
-          "*Modérateurs (ManageMessages) exemptés*",
+          "*Modérateurs (ManageMessages) exemptés de tout l'automod*",
         ].join("\n"),
       },
       {
@@ -158,7 +161,7 @@ function buildEmbeds(): EmbedBuilder[] {
         ].join("\n"),
       },
     )
-    .setFooter({ text: "55 commandes slash · 55 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "57 commandes slash · 57 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];
