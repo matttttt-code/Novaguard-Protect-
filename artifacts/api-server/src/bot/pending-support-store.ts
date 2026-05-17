@@ -1,7 +1,7 @@
 export interface PendingSupportRequest {
   guildId: string;
   guildName: string;
-  channelId: string;
+  channelId: string | null;
   expiresAt: number;
 }
 

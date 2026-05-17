@@ -3,8 +3,6 @@ import { logger } from "../lib/logger.js";
 import { sendLogDM } from "./dm-notify.js";
 import { getConfig } from "./guild-config-store.js";
 
-export const LOG_CHANNEL_ID = "1505255721988657322";
-
 export interface SendLogOptions {
   pingEveryone?: boolean;
   guildId?: string;
@@ -47,10 +45,6 @@ export async function sendLog(
     if (config.logChannelId && !targets.includes(config.logChannelId)) {
       targets.push(config.logChannelId);
     }
-  }
-
-  if (targets.length === 0) {
-    targets.push(LOG_CHANNEL_ID);
   }
 
   await Promise.allSettled([

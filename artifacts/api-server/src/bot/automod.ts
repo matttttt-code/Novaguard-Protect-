@@ -7,7 +7,8 @@ import {
   TextChannel,
 } from "discord.js";
 import { logger } from "../lib/logger.js";
-import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
+import { sendLog, logEmbed } from "./log.js";
+import { getConfig } from "./guild-config-store.js";
 import { sendSanctionDM } from "./dm-notify.js";
 import { addWarning } from "./warnings-store.js";
 
@@ -123,7 +124,7 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
 export function registerAutoMod(client: Client, contentIntentEnabled: boolean): void {
   client.on(Events.MessageCreate, async (message: Message) => {
     if (!message.guild || message.author.bot) return;
-    if (message.channelId === LOG_CHANNEL_ID) return;
+    if (message.guildId && message.channelId === getConfig(message.guildId).logChannelId) return;
     if (message.content.startsWith("&")) return;
 
     const member = message.member as GuildMember | null;

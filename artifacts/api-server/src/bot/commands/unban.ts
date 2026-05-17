@@ -8,7 +8,8 @@ import {
   ActionRowBuilder,
   Message,
 } from "discord.js";
-import { sendLog, logEmbed, LOG_CHANNEL_ID } from "../log.js";
+import { sendLog, logEmbed } from "../log.js";
+import { getConfig } from "../guild-config-store.js";
 import { logger } from "../../lib/logger.js";
 import {
   isBlacklisted,
@@ -59,8 +60,11 @@ async function sendUnbanApproval(
 
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(approveBtn, denyBtn);
 
+  const logChannelId = getConfig(guild.id).logChannelId;
+  if (!logChannelId) return;
+
   try {
-    const channel = await client.channels.fetch(LOG_CHANNEL_ID);
+    const channel = await client.channels.fetch(logChannelId);
     if (channel && channel.isTextBased()) {
       await (channel as import("discord.js").TextChannel).send({
         content: "@everyone",

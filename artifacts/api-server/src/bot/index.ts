@@ -29,7 +29,7 @@ import {
   removePendingUnban,
   removeFromBlacklist,
 } from "./blacklist-store.js";
-import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
+import { sendLog, logEmbed } from "./log.js";
 import {
   isRaidMode, isJoinLocked, getConfig,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
@@ -106,7 +106,7 @@ export function startBot(): void {
       if (pending) {
         removeSupportRequest(message.author.id);
         const config = getConfig(pending.guildId);
-        const channelId = config.logChannelId ?? LOG_CHANNEL_ID;
+        const channelId = config.logChannelId;
         await handleSupportResponse(
           client,
           message.author.id,

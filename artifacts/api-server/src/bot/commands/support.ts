@@ -10,7 +10,7 @@ import {
   ButtonStyle,
 } from "discord.js";
 import { addSupportRequest, hasSupportRequest } from "../pending-support-store.js";
-import { sendLog, LOG_CHANNEL_ID } from "../log.js";
+import { sendLog } from "../log.js";
 import { getConfig } from "../guild-config-store.js";
 
 const SUPPORT_STAFF_ROLE_ID = "1505490829513457745";
@@ -29,7 +29,7 @@ async function sendQuestionnaire(
   userId: string,
   guildId: string,
   guildName: string,
-  channelId: string,
+  channelId: string | null,
   client: Client
 ): Promise<boolean> {
   try {
@@ -59,7 +59,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const config = getConfig(interaction.guildId!);
-  const channelId = config.logChannelId ?? LOG_CHANNEL_ID;
+  const channelId = config.logChannelId;
 
   const sent = await sendQuestionnaire(interaction.user.id, interaction.guildId!, interaction.guild.name, channelId, interaction.client);
 
@@ -81,7 +81,7 @@ export async function executeMessage(message: Message) {
   }
 
   const config = getConfig(message.guild.id);
-  const channelId = config.logChannelId ?? LOG_CHANNEL_ID;
+  const channelId = config.logChannelId;
 
   const sent = await sendQuestionnaire(message.author.id, message.guild.id, message.guild.name, channelId, message.client);
 
@@ -97,7 +97,7 @@ export async function handleSupportResponse(
   userId: string,
   guildId: string,
   guildName: string,
-  logChannelId: string,
+  logChannelId: string | null,
   responseContent: string,
   username: string
 ): Promise<void> {
@@ -122,6 +122,11 @@ export async function handleSupportResponse(
       .setLabel("📩  Message vu — Réponse bientôt")
       .setStyle(ButtonStyle.Secondary)
   );
+
+  if (!logChannelId) {
+    await sendLog(client, embed, { guildId });
+    return;
+  }
 
   try {
     const channel = await client.channels.fetch(logChannelId);
