@@ -5,6 +5,7 @@ import {
   Message,
   TextChannel,
   ChannelType,
+  EmbedBuilder,
 } from "discord.js";
 
 export const data = new SlashCommandBuilder()
@@ -36,9 +37,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   await interaction.deferReply({ ephemeral: true });
 
+  const embed = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setDescription(texte)
+    .setTimestamp();
+
   let sent;
   try {
-    sent = await channel.send(texte);
+    sent = await channel.send({ embeds: [embed] });
   } catch {
     await interaction.editReply({ content: `❌ Impossible d'envoyer le message dans <#${channel.id}>. Vérifie les permissions du bot.` });
     return;
@@ -87,9 +93,14 @@ export async function executeMessage(message: Message, args: string[]): Promise<
     return;
   }
 
+  const embed = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setDescription(texte)
+    .setTimestamp();
+
   let sent;
   try {
-    sent = await channel.send(texte);
+    sent = await channel.send({ embeds: [embed] });
   } catch {
     await message.reply(`❌ Impossible d'envoyer le message dans <#${channel.id}>. Vérifie les permissions du bot.`);
     return;
