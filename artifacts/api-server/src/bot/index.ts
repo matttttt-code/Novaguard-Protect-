@@ -62,7 +62,6 @@ import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
-import { sendToAllMembersSecureDM } from "./commands/sendsecuredm.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 
 function isValidId(s: string): boolean {
@@ -1430,22 +1429,6 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           .setTimestamp(),
           "Anti-Raid Niveau 2 ACTIVÉ"
         );
-        // Bouton envoi DM sécurité → DM owner uniquement
-        await interaction.followUp({
-          embeds: [new EmbedBuilder()
-            .setColor(0xef4444)
-            .setTitle("📨 Envoyer DM sécurité ?")
-            .setDescription(`L'**Anti-Raid Niveau 2** est actif sur **${raid2.guildName}**.\nTu peux envoyer un DM d'information de sécurité à tous les membres.`)
-            .setTimestamp()],
-          components: [
-            new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`send_sec_dm:${r2GuildId}`)
-                .setLabel("📨 Envoyer DM sécurité à tous")
-                .setStyle(ButtonStyle.Danger),
-            ),
-          ],
-        }).catch(() => null);
       }
     } else {
       removePendingRaid2(r2GuildId);
@@ -1500,57 +1483,12 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         .setTimestamp(),
         "Niveau de sécurité 3 — Maximum ACTIVÉ"
       );
-      // Bouton envoi DM sécurité → DM owner uniquement
-      try {
-        const ownerUser = await client.users.fetch(LOG_DM_USER_ID);
-        await ownerUser.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0xef4444)
-            .setTitle("📨 Envoyer DM sécurité ?")
-            .setDescription(`Le **Niveau 3** est actif sur **${sacPending.guildName}**.\nTu peux envoyer un DM d'information de sécurité à tous les membres.`)
-            .setTimestamp()],
-          components: [
-            new ActionRowBuilder<ButtonBuilder>().addComponents(
-              new ButtonBuilder()
-                .setCustomId(`send_sec_dm:${sacGuildId}`)
-                .setLabel("📨 Envoyer DM sécurité à tous")
-                .setStyle(ButtonStyle.Danger),
-            ),
-          ],
-        });
-      } catch { /* DMs owner fermés */ }
     } else {
       removePendingLevel3(sacGuildId);
       await interaction.update({ content: `❌ Niveau 3 **refusé** par ${interaction.user.tag}.`, embeds: [], components: [] });
       const sacReq = await client.users.fetch(sacPending.requesterId).catch(() => null);
       await sacReq?.send(`❌ Ta demande de niveau 3 sur **${sacPending.guildName}** a été refusée par un administrateur du serveur.`).catch(() => null);
     }
-    return;
-  }
-
-  if (customId.startsWith("send_sec_dm:")) {
-    const sdGuildId = customId.split(":")[1] ?? "";
-    if (!sdGuildId) return;
-    // En DM (pas de guild) → seul le propriétaire du bot peut déclencher
-    // En serveur → admin requis
-    const isOwner = interaction.user.id === LOG_DM_USER_ID;
-    if (!isOwner) {
-      const sdMember = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
-      const hasAdmin = sdMember?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
-      if (!hasAdmin) {
-        await interaction.reply({ content: "❌ Seuls les administrateurs peuvent déclencher cette action.", ephemeral: true });
-        return;
-      }
-    }
-    await interaction.update({
-      content: "⏳ Envoi des DMs de sécurité en cours… cela peut prendre plusieurs minutes selon la taille du serveur.",
-      components: [],
-    });
-    sendToAllMembersSecureDM(client, sdGuildId).then(async ({ sent, failed }) => {
-      await interaction.editReply({
-        content: `✅ DM de sécurité envoyé à **${sent}** membre(s).${failed > 0 ? `\n❌ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""}`,
-      }).catch(() => null);
-    }).catch(() => null);
     return;
   }
 
