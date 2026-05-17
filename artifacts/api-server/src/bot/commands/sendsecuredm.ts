@@ -7,29 +7,27 @@ import {
   Client,
   Guild,
 } from "discord.js";
-import { getConfig } from "../guild-config-store.js";
 import { getSecurityLevel } from "../guild-config-store.js";
 
 function buildSecurityDM(guild: Guild): EmbedBuilder {
   const level = getSecurityLevel(guild.id);
-  const cfg = getConfig(guild.id);
 
-  const levelLabels: Record<1 | 2 | 3, string> = {
+  const levelLabel: Record<1 | 2 | 3, string> = {
     1: "🟢 Niveau 1 — Standard",
     2: "🟡 Niveau 2 — Renforcé",
     3: "🔴 Niveau 3 — Maximum",
   };
 
-  const levelDescriptions: Record<1 | 2 | 3, string> = {
+  const levelDesc: Record<1 | 2 | 3, string> = {
     1: "Modération automatique standard : anti-insulte, anti-spam, anti-webhook.",
     2: "Niveau 1 + surveillance renforcée des nouveaux comptes (< 3 jours).",
-    3: "Niveau maximum : gel des salons vocaux, vérification très haute, surveillance totale.",
+    3: "Niveau maximum : gel vocal, vérification très haute, surveillance totale.",
   };
 
   const tips = [
     "Ne clique jamais sur des liens suspects envoyés en DM.",
     "Ne partage jamais tes informations personnelles ou ton token Discord.",
-    "Si tu reçois un DM suspect d'un membre du serveur, signale-le au staff.",
+    "Si tu reçois un message suspect d'un membre, signale-le au staff.",
     "Active l'authentification à deux facteurs (2FA) sur ton compte Discord.",
     "Ne rejoins pas d'autres serveurs via des liens non vérifiés.",
   ];
@@ -40,21 +38,12 @@ function buildSecurityDM(guild: Guild): EmbedBuilder {
     .setThumbnail(guild.iconURL() ?? null)
     .setDescription(
       `Voici un rappel des mesures de sécurité en vigueur sur **${guild.name}**.\n\n` +
-      `**Niveau de sécurité actif :** ${levelLabels[level]}\n` +
-      `${levelDescriptions[level]}`
+      `**Niveau actif :** ${levelLabel[level]}\n${levelDesc[level]}`,
     )
-    .addFields(
-      {
-        name: "✅ Conseils de sécurité",
-        value: tips.map(t => `• ${t}`).join("\n"),
-      },
-      {
-        name: "📋 Règles du serveur",
-        value: cfg.logChannelId
-          ? "Consulte le règlement du serveur dans les salons d'information."
-          : "Consulte les règles du serveur avant de participer.",
-      },
-    )
+    .addFields({
+      name: "✅ Conseils de sécurité",
+      value: tips.map(t => `• ${t}`).join("\n"),
+    })
     .setFooter({ text: `${guild.name} • Message officiel du staff`, iconURL: guild.iconURL() ?? undefined })
     .setTimestamp();
 }
@@ -85,14 +74,14 @@ export const data = new SlashCommandBuilder()
   .setName("sendsecuredm")
   .setDescription("Envoie un DM d'information de sécurité à un membre ou à tous les membres.")
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addSubcommand((s) =>
+  .addSubcommand(s =>
     s.setName("membre")
       .setDescription("Envoie un DM de sécurité à un membre spécifique.")
-      .addUserOption((o) =>
+      .addUserOption(o =>
         o.setName("cible").setDescription("Le membre à qui envoyer le DM.").setRequired(true),
       ),
   )
-  .addSubcommand((s) =>
+  .addSubcommand(s =>
     s.setName("everyone")
       .setDescription("Envoie un DM de sécurité à tous les membres du serveur."),
   );
@@ -109,31 +98,24 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     const embed = buildSecurityDM(guild);
     try {
       await target.send({ embeds: [embed] });
-      await interaction.reply({
-        content: `✅ DM de sécurité envoyé à **${target.tag}**.`,
-        flags: 64,
-      });
+      await interaction.reply({ content: `✅ DM de sécurité envoyé à **${target.tag}**.`, flags: 64 });
     } catch {
-      await interaction.reply({
-        content: `❌ Impossible d'envoyer le DM à **${target.tag}** (DMs désactivés).`,
-        flags: 64,
-      });
+      await interaction.reply({ content: `❌ Impossible d'envoyer le DM à **${target.tag}** (DMs désactivés).`, flags: 64 });
     }
     return;
   }
 
-  if (sub === "everyone") {
-    await interaction.reply({
-      content: "⏳ Envoi en cours… cela peut prendre plusieurs minutes selon la taille du serveur.",
-      flags: 64,
-    });
-    const { sent, failed } = await sendToAllMembersSecureDM(interaction.client, guild.id);
-    await interaction.editReply({
-      content:
-        `✅ DM de sécurité envoyé à **${sent}** membre(s).` +
-        (failed > 0 ? `\n❌ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""),
-    });
-  }
+  // everyone
+  await interaction.reply({
+    content: "⏳ Envoi en cours… cela peut prendre quelques minutes selon la taille du serveur.",
+    flags: 64,
+  });
+  const { sent, failed } = await sendToAllMembersSecureDM(interaction.client, guild.id);
+  await interaction.editReply({
+    content:
+      `✅ DM de sécurité envoyé à **${sent}** membre(s).` +
+      (failed > 0 ? `\n⚠️ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""),
+  });
 }
 
 export async function executeMessage(message: Message, args: string[]): Promise<void> {
@@ -144,18 +126,20 @@ export async function executeMessage(message: Message, args: string[]): Promise<
     return;
   }
 
-  const sub = args[0]?.toLowerCase();
+  const arg = args[0]?.toLowerCase();
 
-  if (!sub || sub === "everyone") {
-    const reply = await message.reply("⏳ Envoi en cours… cela peut prendre plusieurs minutes selon la taille du serveur.");
+  // everyone (ou pas d'argument)
+  if (!arg || arg === "everyone") {
+    const reply = await message.reply("⏳ Envoi en cours… cela peut prendre quelques minutes.");
     const { sent, failed } = await sendToAllMembersSecureDM(message.client, message.guild.id);
     await reply.edit(
       `✅ DM de sécurité envoyé à **${sent}** membre(s).` +
-      (failed > 0 ? `\n❌ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""),
+      (failed > 0 ? `\n⚠️ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""),
     );
     return;
   }
 
+  // membre spécifique (mention ou ID)
   const targetId = args[0]?.replace(/[<@!>]/g, "");
   if (targetId) {
     try {
@@ -164,7 +148,7 @@ export async function executeMessage(message: Message, args: string[]): Promise<
       await target.send({ embeds: [embed] });
       await message.reply(`✅ DM de sécurité envoyé à **${target.tag}**.`);
     } catch {
-      await message.reply("❌ Impossible d'envoyer le DM (utilisateur introuvable ou DMs désactivés).");
+      await message.reply("❌ Utilisateur introuvable ou DMs désactivés.");
     }
   }
 }

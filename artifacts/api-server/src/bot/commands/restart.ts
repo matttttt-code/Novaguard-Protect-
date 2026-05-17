@@ -1,7 +1,6 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
-  PermissionFlagsBits,
   EmbedBuilder,
   Message,
 } from "discord.js";
@@ -10,7 +9,7 @@ import { LOG_DM_USER_ID } from "../dm-notify.js";
 export const data = new SlashCommandBuilder()
   .setName("restart")
   .setDescription("Redémarre le bot (propriétaire uniquement)")
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(0n);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
   if (interaction.user.id !== LOG_DM_USER_ID) {

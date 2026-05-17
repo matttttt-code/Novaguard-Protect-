@@ -155,7 +155,6 @@ function buildEmbeds(): EmbedBuilder[] {
       {
         name: "🔧 Admin & diagnostic",
         value: [
-          "`/restart` · `&restart` — **Redémarre le bot** (propriétaire uniquement)",
           "`/notify [@utilisateur|@rôle]` · `&notify` (`&notif`) — Notifie par ping + DM depuis un ticket",
           "`/testcaptcha [simulation|apercu] [@m]` · `&testcaptcha` (`&testcap`)",
           "`/errortest` · `&errortest` (`&testalerte`) — Teste les alertes DM",
