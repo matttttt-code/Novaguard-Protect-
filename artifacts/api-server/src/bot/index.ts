@@ -51,6 +51,7 @@ import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert } from "./bot-alerts.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
+import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -408,6 +409,26 @@ export function startBot(): void {
         }
       } catch (err) { logger.error({ err }, "Erreur envoi message de départ"); }
     }
+  });
+
+  // ── Blacklist invitations : supprimer auto toute invitation créée par un membre restreint ──
+  client.on(Events.InviteCreate, async (invite) => {
+    if (!invite.guild || !invite.inviter) return;
+    if (!isInviteBlacklisted(invite.guild.id, invite.inviter.id)) return;
+    try {
+      await invite.delete("Invite blacklist — membre restreint de créer des invitations");
+      await invite.inviter.send(
+        `🚫 **${invite.guild.name}** — Tu as été restreint de créer des invitations sur ce serveur par un modérateur. Ton invitation \`${invite.code}\` a été supprimée automatiquement.`
+      ).catch(() => null);
+      await sendLog(client, new EmbedBuilder()
+        .setColor(0xf97316)
+        .setTitle("🚫 Invitation supprimée — blacklist invite")
+        .addFields(
+          { name: "Membre", value: `${invite.inviter.tag} (\`${invite.inviter.id}\`)`, inline: true },
+          { name: "Code supprimé", value: `\`${invite.code}\``, inline: true },
+        )
+        .setTimestamp(), { guildId: invite.guild.id });
+    } catch { /* ignore */ }
   });
 
   client.login(token).catch((err) => {

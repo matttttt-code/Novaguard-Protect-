@@ -8,7 +8,7 @@ import {
 function buildCommandListEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x6366f1)
-    .setTitle("📋 Liste des commandes — 47 commandes")
+    .setTitle("📋 Liste des commandes — 49 commandes")
     .setDescription("Toutes les commandes disponibles en slash `/` et préfixe `&`")
     .addFields(
       {
@@ -48,6 +48,8 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/blacklistinfo` · `&blacklistinfo` (`&bli`) — Affiche la liste noire du serveur",
           "`/sanctioninfo @membre` · `&sanctioninfo @mention` (`&si`) — Toutes les sanctions d'un membre",
           "🌐 **AntiDC global** — Ban automatique si un blacklisté tente de rejoindre n'importe quel serveur du bot",
+          "`/blacklistinvite ajouter|retirer|liste` · `&bliv ajouter|retirer|liste` (`&ibl`, `&invitebl`) — **Blacklist invitation** : empêche un membre d'inviter sans l'expulser",
+          "  → Révoque les invitations existantes · Supprime automatiquement toute nouvelle invitation créée · Le membre reste sur le serveur",
         ].join("\n"),
       },
       {
@@ -105,6 +107,8 @@ function buildCommandListEmbed(): EmbedBuilder {
         value: [
           "`/userinfo [@membre]` · `&userinfo [@mention]` (`&ui`) — Infos complètes d'un membre",
           "`/serverinfo` · `&serverinfo` (`&sv`) — Infos du serveur (membres, boost, etc.)",
+          "`/serverstats` · `&serverstats` (`&stats`, `&ss`, `&statistiques`) — Statistiques détaillées du serveur",
+          "  → Membres (humains/bots/en ligne) · Salons par type · Rôles · Boosts · Sécurité · Config bot · Top inviteurs",
           "`/infome` · `&infome` (`&im`) — Mes propres infos",
           "`/getid [@mention | #salon | @rôle]` · `&getid` (`&id`) — ID d'un utilisateur, salon ou rôle",
           "`/info` · `&info` (`&botinfo`) — Infos du bot (version, uptime, ping, serveurs)",
@@ -156,7 +160,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         ].join("\n"),
       },
     )
-    .setFooter({ text: "47 commandes slash · 47 préfixes · Config persistante par serveur · Blacklist globale cross-serveurs" })
+    .setFooter({ text: "49 commandes slash · 49 préfixes · Config persistante · Blacklist globale + blacklist invitation" })
     .setTimestamp();
 }
 
