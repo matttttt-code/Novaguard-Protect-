@@ -328,35 +328,6 @@ export function registerGeneralLog(client: Client): void {
     await sendGenLog(client, newMember.guild.id, embed);
   });
 
-  // ── BANS ──
-  client.on(Events.GuildBanAdd, async (ban) => {
-    const executor = await getAuditExecutor(ban.guild, AuditLogEvent.MemberBanAdd, ban.user.id);
-    await sendGenLog(client, ban.guild.id, new EmbedBuilder()
-      .setColor(0xef4444).setTitle("🔨 Membre banni")
-      .setThumbnail(ban.user.displayAvatarURL())
-      .addFields(
-        { name: "Membre", value: `${ban.user.tag} (\`${ban.user.id}\`)`, inline: true },
-        userField(executor, "Banni par"),
-        { name: "Raison", value: ban.reason ?? "Aucune raison fournie" },
-      )
-      .setFooter({ text: `ID banni : ${ban.user.id}${executor ? ` • ID modérateur : ${executor.id}` : ""}` })
-      .setTimestamp());
-  });
-
-  // ── DÉBANS ──
-  client.on(Events.GuildBanRemove, async (ban) => {
-    const executor = await getAuditExecutor(ban.guild, AuditLogEvent.MemberBanRemove, ban.user.id);
-    await sendGenLog(client, ban.guild.id, new EmbedBuilder()
-      .setColor(0x22c55e).setTitle("🔓 Membre débanni")
-      .setThumbnail(ban.user.displayAvatarURL())
-      .addFields(
-        { name: "Membre", value: `${ban.user.tag} (\`${ban.user.id}\`)`, inline: true },
-        userField(executor, "Débanni par"),
-      )
-      .setFooter({ text: `ID débanni : ${ban.user.id}${executor ? ` • ID modérateur : ${executor.id}` : ""}` })
-      .setTimestamp());
-  });
-
   // ── INVITATIONS CRÉÉES ──
   client.on(Events.InviteCreate, async (invite) => {
     if (!invite.guild?.id) return;
