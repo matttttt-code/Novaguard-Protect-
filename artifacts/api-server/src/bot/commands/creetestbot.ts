@@ -69,7 +69,7 @@ export const data = new SlashCommandBuilder()
     .setDescription("Supprime un bot de test")
     .addStringOption(o => o.setName("nom").setDescription("Nom du bot de test à supprimer").setRequired(true))
   )
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(0n);
 
 export const prefixName = "creetestbot";
 export const prefixAliases = ["ctb", "testbot"];
@@ -240,6 +240,10 @@ async function handleSupprimer(
 // ─── Slash execute ─────────────────────────────────────────────────────────
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  if (interaction.user.id !== "1209963350218248203") {
+    await interaction.reply({ content: "❌ Commande réservée au développeur du bot.", ephemeral: true });
+    return;
+  }
   if (!interaction.guild) {
     await interaction.reply({ content: "❌ Commande serveur uniquement.", ephemeral: true });
     return;
@@ -285,8 +289,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
 export async function executeMessage(message: Message, args: string[]): Promise<void> {
   if (!message.guild || !message.member) return;
-  if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
-    await message.reply("❌ Permission insuffisante (Administrateur requis).");
+  if (message.author.id !== "1209963350218248203") {
+    await message.reply("❌ Commande réservée au développeur du bot.");
     return;
   }
   const channel = message.channel as TextChannel;

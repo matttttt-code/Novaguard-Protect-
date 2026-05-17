@@ -1206,6 +1206,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
               .setDescription(`Approuvé par le propriétaire du bot.\nDemandé par <@${raid2.requesterId}>.`)
               .addFields({ name: "⚠️ Effets actifs", value: "• Tout nouveau **salon** ou **rôle** créé sera supprimé auto\n• Tout membre qui rejoint reçoit un **timeout 10 min**\n• Toutes les **invitations** ont été révoquées\n• Tous les **webhooks** ont été supprimés\n• Vérification Discord → **Haute** (téléphone requis)\n• Anti-spam renforcé : 3 msg en 3s = expulsion" })
+              .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
               .setTimestamp()],
           }).catch(() => null);
         }
@@ -1262,6 +1263,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
           .setDescription(`Approuvé par le propriétaire du bot + confirmé par <@${interaction.user.id}>.\nDemandé par <@${sacPending.requesterId}>.`)
           .addFields({ name: "Effets actifs", value: "• Anti-insulte timeout 24h\n• Anti-webhook auto\n• Comptes < 7 jours suspects\n• Alerte DM owner pour tout compte suspect" })
+          .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
           .setTimestamp()],
       }).catch(() => null);
       // Bouton envoi DM sécurité → DM owner uniquement

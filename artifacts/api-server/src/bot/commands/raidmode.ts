@@ -47,6 +47,7 @@ async function enableRaidMode(
       { name: "Vérification", value: "Élevée", inline: true },
       { name: "Pour désactiver", value: "`/raidmode désactiver` ou `&raidmode off`" }
     )
+    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
     .setTimestamp();
 }
 
@@ -76,6 +77,7 @@ async function disableRaidMode(
       { name: "Vérification", value: "Faible (remise à la normale)", inline: true },
       { name: "Note", value: "Recréez vos invitations si nécessaire." }
     )
+    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
     .setTimestamp();
 }
 
@@ -130,6 +132,7 @@ export async function requestRaidMode2(
     .setColor(0xf59e0b)
     .setTitle("⏳ Demande envoyée — Anti-Raid Niveau 2")
     .setDescription("Une demande d'approbation a été envoyée au propriétaire du bot en DM.\nLe niveau 2 sera activé dès validation.")
+    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
     .setTimestamp();
 }
 
@@ -170,6 +173,7 @@ async function disableRaidMode2(
     .setColor(0x22c55e)
     .setTitle("✅ Anti-Raid Niveau 2 DÉSACTIVÉ")
     .setDescription("Les nouveaux salons et rôles ne seront plus supprimés automatiquement.")
+    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
     .setTimestamp();
 }
 
