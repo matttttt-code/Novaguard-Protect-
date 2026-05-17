@@ -20,7 +20,7 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
   const bool = (v: boolean, on = "✅ Activé", off = "❌ Désactivé") => (v ? on : off);
   const chan = (id: string | null) => (id ? `<#${id}>` : "*Non défini*");
   const role = (id: string | null) => (id ? `<@&${id}>` : "*Non défini*");
-  const truncate = (s: string, n = 55) => (s.length > n ? s.slice(0, n) + "…" : s);
+  const truncate = (s: string, n = 50) => (s.length > n ? s.slice(0, n) + "…" : s);
 
   return new EmbedBuilder()
     .setColor(0x6366f1)
@@ -54,15 +54,23 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
         inline: true,
       },
       {
-        name: "🛡️ Sécurité & Logs",
+        name: "🛡️ Sécurité",
         value:
-          `**Join Lock :** ${bool(config.joinLock)}\n` +
-          `**Mode Raid :** ${bool(config.raidMode)}\n` +
-          `**DM sanctions :** ${bool(config.sanctionDmEnabled, "✅ ON", "❌ OFF")}\n` +
-          `**Logs :** ${chan(config.logChannelId)} · Ban-logs : ${chan(config.banLogChannelId)}`,
+          `**Join Lock :** ${bool(config.joinLock, "🔒 Actif — arrivées bloquées", "🔓 Inactif")}\n` +
+          `**Mode Raid :** ${bool(config.raidMode, "🚨 Actif — nouveaux membres expulsés", "✅ Inactif")}\n` +
+          `**DM Sanctions :** ${bool(config.sanctionDmEnabled, "📨 ON", "🔕 OFF")}`,
         inline: true,
       },
       { name: "\u200B", value: "\u200B", inline: false },
+      {
+        name: "📋 Logs & Salons",
+        value:
+          `**Logs principal :** ${chan(config.logChannelId)}\n` +
+          `**Logs bans :** ${chan(config.banLogChannelId)}\n` +
+          `**Logs généraux :** ${chan(config.generalLogChannelId)}\n` +
+          `**Logs invitations :** ${chan(config.inviteLogChannelId)}`,
+        inline: true,
+      },
       {
         name: "🎫 Tickets",
         value:
@@ -71,13 +79,11 @@ export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBui
           `**Transcripts :** ${chan(config.transcriptChannelId)}`,
         inline: true,
       },
-      {
-        name: "💡 Variables messages",
-        value: "`{user}` mention · `{username}` nom · `{server}` serveur · `{count}` membres",
-        inline: true,
-      },
     )
-    .setFooter({ text: "Config persistante par serveur • Utilisez les boutons ci-dessous", iconURL: guild.iconURL() ?? undefined })
+    .setFooter({
+      text: `Config persistante par serveur · ${guild.memberCount} membres · Utilisez les boutons`,
+      iconURL: guild.iconURL() ?? undefined,
+    })
     .setTimestamp();
 }
 
@@ -141,12 +147,39 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
 
   const row4 = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
+      .setCustomId("dash_raid_toggle")
+      .setLabel(config.raidMode ? "🚨 Raid ON" : "🛡️ Raid OFF")
+      .setStyle(config.raidMode ? ButtonStyle.Danger : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("dash_joinlock_toggle")
+      .setLabel(config.joinLock ? "🔒 JoinLock ON" : "🔓 JoinLock OFF")
+      .setStyle(config.joinLock ? ButtonStyle.Danger : ButtonStyle.Secondary),
+    new ButtonBuilder()
       .setCustomId("dash_sanction_dm_toggle")
       .setLabel(config.sanctionDmEnabled ? "📨 DM Sanctions ON" : "🔕 DM Sanctions OFF")
       .setStyle(config.sanctionDmEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
   );
 
-  return [row1, row2, row3, row4];
+  const row5 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("dash_log_channel")
+      .setLabel("📋 Logs principal")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_banlog_channel")
+      .setLabel("🔨 Logs bans")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_genlog_channel")
+      .setLabel("🗂️ Logs généraux")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("dash_invitelog_channel")
+      .setLabel("📨 Logs invitations")
+      .setStyle(ButtonStyle.Primary),
+  );
+
+  return [row1, row2, row3, row4, row5];
 }
 
 export const data = new SlashCommandBuilder()

@@ -18,7 +18,8 @@
     "captchaChannelId": "1504533905770811504",
     "captchaUnverifiedRoleId": "1504819202090074203",
     "captchaVerifiedRoleId": "1504474629878710414",
-    "sanctionDmEnabled": true
+    "sanctionDmEnabled": true,
+    "inviteLogChannelId": "1504513378591309954"
   },
   "1504534006253883463": {
     "logChannelId": null,
@@ -39,6 +40,7 @@
     "captchaChannelId": "1505559059364057159",
     "captchaUnverifiedRoleId": "1505559435433742346",
     "captchaVerifiedRoleId": "1504538153900572672",
-    "sanctionDmEnabled": true
+    "sanctionDmEnabled": true,
+    "inviteLogChannelId": null
   }
 }

@@ -11,6 +11,7 @@ import {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { getConfig } from "./guild-config-store.js";
+import { sendLogDM } from "./dm-notify.js";
 import { logger } from "../lib/logger.js";
 
 // ──── Types ────
@@ -107,15 +108,12 @@ async function cacheGuildInvites(guild: { id: string; invites: { fetch: () => Pr
 
 // ──── Initialisation (à appeler sur ClientReady) ────
 export async function initInviteTracker(client: Client): Promise<void> {
-  // Cache les invitations de tous les serveurs au démarrage
   await Promise.allSettled(client.guilds.cache.map((g) => cacheGuildInvites(g)));
 
-  // Nouveau serveur rejoint
   client.on(Events.GuildCreate, async (guild) => {
     await cacheGuildInvites(guild);
   });
 
-  // Invite créée
   client.on(Events.InviteCreate, (invite) => {
     if (!invite.guild) return;
     const cache = inviteCache.get(invite.guild.id) ?? new Map();
@@ -127,7 +125,6 @@ export async function initInviteTracker(client: Client): Promise<void> {
     inviteCache.set(invite.guild.id, cache);
   });
 
-  // Invite supprimée
   client.on(Events.InviteDelete, (invite) => {
     if (!invite.guild) return;
     inviteCache.get(invite.guild.id)?.delete(invite.code);
@@ -141,15 +138,15 @@ export async function onMemberJoin(client: Client, member: GuildMember): Promise
   const guildId = member.guild.id;
   const cache = inviteCache.get(guildId) ?? new Map<string, CachedInvite>();
 
-  // Fetch invitations actuelles
-  let currentInvites: Collection<string, Invite>;
+  // Tenter de fetch les invitations — continuer même en cas d'échec (permission manquante)
+  let currentInvites: Collection<string, Invite> = new Collection();
   try {
     currentInvites = await member.guild.invites.fetch();
   } catch {
-    return;
+    // Pas la permission MANAGE_GUILD : on loguera quand même sans info d'invite
   }
 
-  // Trouver l'invitation utilisée (celle dont uses a augmenté)
+  // Trouver l'invitation utilisée
   let usedCode: string | null = null;
   let inviterId: string | null = null;
 
@@ -184,7 +181,7 @@ export async function onMemberJoin(client: Client, member: GuildMember): Promise
   }
   inviteCache.set(guildId, newCache);
 
-  // Mettre à jour les stats et le mapping
+  // Mettre à jour les stats
   if (inviterId && usedCode) {
     const guildStatsMap = inviteStats.get(guildId) ?? new Map<string, InviteStats>();
     const prev = guildStatsMap.get(inviterId) ?? { invited: 0, left: 0 };
@@ -194,50 +191,64 @@ export async function onMemberJoin(client: Client, member: GuildMember): Promise
     const guildMappingMap = memberInviter.get(guildId) ?? new Map<string, MemberInviterEntry>();
     guildMappingMap.set(member.id, { inviterId, code: usedCode });
     memberInviter.set(guildId, guildMappingMap);
-
     saveToDisk();
   }
 
-  // Envoyer le log d'invitation
-  const cfg = getConfig(guildId);
-  if (!cfg.inviteLogChannelId) return;
-
+  // Construire l'embed (toujours, même sans info d'invite)
   const inviterUser = inviterId ? await client.users.fetch(inviterId).catch(() => null) : null;
-  const iStats = inviterId ? (inviteStats.get(guildId)?.get(inviterId) ?? { invited: 0, left: 0 }) : null;
+  const iStats = inviterId ? (inviteStats.get(guildId)?.get(inviterId) ?? { invited: 1, left: 0 }) : null;
   const active = iStats ? iStats.invited - iStats.left : 0;
 
+  const accountAgeMs = Date.now() - member.user.createdTimestamp;
+  const accountAgeDays = Math.floor(accountAgeMs / 86_400_000);
+  const accountAgeHours = Math.floor(accountAgeMs / 3_600_000);
+  const ageStr = accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`;
+
   const embed = new EmbedBuilder()
-    .setColor(0x22c55e)
-    .setTitle("📨 Nouveau membre — Invitation détectée")
+    .setColor(inviterId ? 0x22c55e : 0x6b7280)
+    .setTitle("📨 Nouveau membre — Arrivée")
     .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
     .addFields(
       { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-      { name: "Compte créé", value: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:R>`, inline: true },
+      { name: "Âge du compte", value: ageStr, inline: true },
+      { name: "Arrivée", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
       {
         name: "Invité par",
         value: inviterUser
           ? `${inviterUser.tag} (\`${inviterId}\`)`
-          : inviterId ? `ID \`${inviterId}\`` : "Inconnu (vanity/OAuth/bot)",
+          : inviterId
+            ? `\`${inviterId}\``
+            : currentInvites.size === 0
+              ? "Indéterminable (permission manquante)"
+              : "Inconnu (vanity URL / OAuth / bot)",
         inline: true,
       },
       ...(usedCode ? [{ name: "Code utilisé", value: `\`${usedCode}\``, inline: true }] : []),
-      ...(iStats
-        ? [{
-          name: "Stats de l'inviteur",
-          value: `✅ **${iStats.invited}** invités · ❌ **${iStats.left}** partis · 🟢 **${active}** actifs`,
-          inline: false,
-        }]
-        : []),
+      { name: "Membres", value: `**${member.guild.memberCount}**`, inline: true },
+      ...(iStats ? [{
+        name: "Stats inviteur",
+        value: `✅ **${iStats.invited}** invités · ❌ **${iStats.left}** partis · 🟢 **${Math.max(0, active)}** actifs`,
+        inline: false,
+      }] : []),
     )
     .setFooter({ text: `${member.guild.name} · ID membre : ${member.id}${inviterId ? ` · ID inviteur : ${inviterId}` : ""}` })
     .setTimestamp();
 
-  try {
-    const ch = await client.channels.fetch(cfg.inviteLogChannelId);
-    if (ch?.isTextBased()) await (ch as TextChannel).send({ embeds: [embed] });
-  } catch (err) {
-    logger.error({ err }, "[invite-tracker] Erreur envoi embed arrivée");
+  // Envoyer dans le salon configuré
+  const cfg = getConfig(guildId);
+  if (cfg.inviteLogChannelId) {
+    try {
+      const ch = await client.channels.fetch(cfg.inviteLogChannelId);
+      if (ch?.isTextBased()) await (ch as TextChannel).send({ embeds: [embed] });
+    } catch (err) {
+      logger.error({ err }, "[invite-tracker] Erreur envoi salon invite log");
+    }
   }
+
+  // Envoyer en DM au propriétaire du bot
+  await sendLogDM(client, EmbedBuilder.from(embed.toJSON())
+    .setTitle(`📨 [${member.guild.name}] Nouveau membre`)
+  ).catch(() => null);
 }
 
 // ──── Quand un membre quitte ────
@@ -255,7 +266,7 @@ export function onMemberLeave(member: GuildMember | PartialGuildMember): void {
   saveToDisk();
 }
 
-// ──── Getters publics pour les commandes ────
+// ──── Getters publics ────
 export function getInviteStats(guildId: string, userId: string): InviteStats {
   return inviteStats.get(guildId)?.get(userId) ?? { invited: 0, left: 0 };
 }

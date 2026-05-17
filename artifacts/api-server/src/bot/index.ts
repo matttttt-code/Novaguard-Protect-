@@ -34,6 +34,8 @@ import {
 import { sendLog, logEmbed } from "./log.js";
 import {
   isRaidMode, isJoinLocked, getConfig,
+  setRaidMode, setJoinLock,
+  setLogChannel, setBanLogChannel, setGeneralLogChannel, setInviteLogChannel,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
   setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
   setCaptchaEnabled, setCaptchaChannel, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
@@ -902,10 +904,9 @@ async function handleTicketClose(interaction: ButtonInteraction): Promise<void> 
 
 // ──── DASHBOARD BUTTON ────
 
-async function handleDashboardButton(client: Client, interaction: ButtonInteraction): Promise<void> {
+async function handleDashboardButton(_client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
-  void client;
 
   const member = await guild.members.fetch(interaction.user.id).catch(() => null);
   if (!member?.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -955,6 +956,26 @@ async function handleDashboardButton(client: Client, interaction: ButtonInteract
       setSanctionDmEnabled(guildId, !getConfig(guildId).sanctionDmEnabled);
       return updateDashboard();
 
+    case "dash_raid_toggle":
+      setRaidMode(guildId, !getConfig(guildId).raidMode);
+      return updateDashboard();
+
+    case "dash_joinlock_toggle":
+      setJoinLock(guildId, !getConfig(guildId).joinLock);
+      return updateDashboard();
+
+    case "dash_log_channel":
+      return showModal("dash_modal_log_channel", "Salon de logs principal", "ID ou mention du salon", "123456789012345678 ou <#123456789>");
+
+    case "dash_banlog_channel":
+      return showModal("dash_modal_banlog_channel", "Salon de logs bans", "ID ou mention du salon", "123456789012345678 ou <#123456789>");
+
+    case "dash_genlog_channel":
+      return showModal("dash_modal_genlog_channel", "Salon de logs généraux", "ID ou mention (vide = désactiver)", "123456789012345678 ou <#123456789>");
+
+    case "dash_invitelog_channel":
+      return showModal("dash_modal_invitelog_channel", "Salon de logs invitations", "ID ou mention (vide = désactiver)", "123456789012345678 ou <#123456789>");
+
     case "dash_reset_welcome_msg":
       setWelcomeMessage(guildId, DEFAULT_WELCOME_MSG);
       return updateDashboard();
@@ -996,8 +1017,6 @@ async function handleModalSubmit(client: Client, interaction: ModalSubmitInterac
     await handleRoleRequestModal(client, interaction);
     return;
   }
-
-  void client;
 
   const guildId = guild.id;
   const raw = interaction.fields.getTextInputValue("value").trim();
@@ -1050,6 +1069,30 @@ async function handleModalSubmit(client: Client, interaction: ModalSubmitInterac
       const id = raw && isValidId(roleId) ? roleId : null;
       setCaptchaVerifiedRole(guildId, id);
       return replyAndRefresh(id ? `✅ Rôle vérifié → <@&${id}>.` : "✅ Rôle vérifié retiré.");
+    }
+
+    case "dash_modal_log_channel":
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      if (raw) setLogChannel(guildId, channelId);
+      return replyAndRefresh(raw ? `✅ Logs principal → <#${channelId}>` : "✅ Salon de logs non modifié (champ vide).");
+
+    case "dash_modal_banlog_channel":
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      if (raw) setBanLogChannel(guildId, channelId);
+      return replyAndRefresh(raw ? `✅ Logs bans → <#${channelId}>` : "✅ Salon de logs bans non modifié.");
+
+    case "dash_modal_genlog_channel": {
+      const id = raw && isValidId(channelId) ? channelId : null;
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      setGeneralLogChannel(guildId, id);
+      return replyAndRefresh(id ? `✅ Logs généraux → <#${id}>` : "✅ Logs généraux désactivés.");
+    }
+
+    case "dash_modal_invitelog_channel": {
+      const id = raw && isValidId(channelId) ? channelId : null;
+      if (raw && !isValidId(channelId)) { await interaction.reply({ content: "❌ ID invalide.", ephemeral: true }); return; }
+      setInviteLogChannel(guildId, id);
+      return replyAndRefresh(id ? `✅ Logs invitations → <#${id}>` : "✅ Logs invitations désactivés.");
     }
   }
 }
