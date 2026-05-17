@@ -409,16 +409,44 @@ export function registerGeneralLog(client: Client): void {
     await sendGenLog(client, newRole.guild.id, embed);
 
     if (adminJustGranted) {
+      // Membres déjà porteurs de ce rôle → ils ont admin depuis cette modif
+      const affectedMembers = newRole.members.filter((m) => !m.user.bot);
+
       // Alerte propriétaire bot
+      const memberList = affectedMembers.size > 0
+        ? affectedMembers.map((m) => `${m.user.tag} (\`${m.id}\`)`).slice(0, 10).join("\n")
+        : "Aucun membre";
       const alertOwner = new EmbedBuilder()
         .setColor(0xef4444).setTitle("🚨 Alerte sécurité — Permission Admin sur un rôle")
         .addFields(
           { name: "Serveur", value: `${newRole.guild.name} (\`${newRole.guild.id}\`)`, inline: true },
           { name: "Rôle", value: `${newRole.name} (\`${newRole.id}\`)`, inline: true },
           userField(executor, "Modifié par"),
+          { name: `👥 Membres impactés (${affectedMembers.size})`, value: memberList },
         )
         .setTimestamp();
       await sendLogDM(client, alertOwner);
+
+      // DM à chaque membre porteur du rôle
+      for (const member of affectedMembers.values()) {
+        const dmEmbed = new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("⚠️ Alerte sécurité — Tu possèdes maintenant un rôle Administrateur")
+          .setThumbnail(newRole.guild.iconURL())
+          .setDescription(
+            `Le rôle **${newRole.name}** sur **${newRole.guild.name}** vient de recevoir la permission **Administrateur**.\n` +
+            `Tu possèdes ce rôle — tu as donc désormais accès aux permissions Admin.\n` +
+            `Si tu ne t'attendais pas à cette action, contacte immédiatement un administrateur du serveur.`,
+          )
+          .addFields(
+            { name: "Serveur", value: newRole.guild.name, inline: true },
+            { name: "Rôle concerné", value: `\`${newRole.name}\``, inline: true },
+            ...(executor ? [userField(executor, "Modifié par")] : []),
+          )
+          .setTimestamp();
+        try { await member.user.send({ embeds: [dmEmbed] }); }
+        catch { /* DMs fermés */ }
+      }
     }
   });
 
