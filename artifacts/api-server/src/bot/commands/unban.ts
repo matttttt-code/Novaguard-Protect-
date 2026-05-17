@@ -9,6 +9,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { getAlertPing } from "../alert-ping.js";
 import { getConfig } from "../guild-config-store.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -67,7 +68,7 @@ async function sendUnbanApproval(
     const channel = await client.channels.fetch(logChannelId);
     if (channel && channel.isTextBased()) {
       await (channel as import("discord.js").TextChannel).send({
-        content: "@here",
+        content: getAlertPing(guild.id),
         embeds: [embed],
         components: [row],
       });

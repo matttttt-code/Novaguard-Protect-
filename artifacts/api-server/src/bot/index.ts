@@ -63,6 +63,7 @@ import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
+import { getAlertPing } from "./alert-ping.js";
 
 function isValidId(s: string): boolean {
   return /^\d{17,20}$/.test(s.trim());
@@ -1352,7 +1353,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setStyle(ButtonStyle.Secondary),
           );
           await logCh?.send({
-            content: "@here",
+            content: getAlertPing(guildId),
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🔴 Niveau 3 — Validation admin requise")

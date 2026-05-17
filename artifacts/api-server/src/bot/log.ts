@@ -2,6 +2,7 @@ import { EmbedBuilder, TextChannel, Client } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { sendLogDM } from "./dm-notify.js";
 import { getConfig } from "./guild-config-store.js";
+import { getAlertPing } from "./alert-ping.js";
 
 export interface SendLogOptions {
   pingEveryone?: boolean;
@@ -17,12 +18,13 @@ async function sendToChannel(
   embed: EmbedBuilder,
   pingEveryone?: boolean,
   pingContent?: string,
+  guildId?: string,
 ): Promise<void> {
   try {
     const channel = await client.channels.fetch(channelId);
     if (channel && channel.isTextBased()) {
       await (channel as TextChannel).send({
-        content: pingEveryone ? "@here" : (pingContent ?? undefined),
+        content: pingEveryone ? getAlertPing(guildId) : (pingContent ?? undefined),
         embeds: [embed],
       });
     }
@@ -64,7 +66,7 @@ export async function sendLog(
   }
 
   await Promise.allSettled([
-    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone, options?.pingContent)),
+    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone, options?.pingContent, options?.guildId)),
     sendLogDM(client, dmEmbed),
   ]);
 }
