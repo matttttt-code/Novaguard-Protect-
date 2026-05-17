@@ -1,10 +1,10 @@
 import { EmbedBuilder, GuildTextBasedChannel, Message } from "discord.js";
 
-function genCode(): string {
+export function genCode(): string {
   return Math.random().toString(36).slice(2, 8).toUpperCase();
 }
 
-function captchaEmbed(code: string, label: string): EmbedBuilder {
+export function captchaEmbed(code: string, label: string): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0xf59e0b)
     .setTitle(`🔐 Confirmation requise — ${label}`)
@@ -31,29 +31,37 @@ export function captchaFailEmbed(): EmbedBuilder {
 }
 
 /**
- * Attend la saisie du code par `userId` dans `channel` (interaction déjà reply-ée).
- * Retourne true si validé dans les 2 minutes.
+ * Collecte la réponse via createMessageCollector pour s'arrêter IMMÉDIATEMENT
+ * dès que le bon code est tapé (sans attendre le timeout).
+ * Retourne true si validé dans les 2 minutes, false sinon.
  */
-export async function collectCaptchaResponse(
+export function collectCaptchaResponse(
   channel: GuildTextBasedChannel,
   userId: string,
   expectedCode: string,
 ): Promise<boolean> {
-  const collected = await channel
-    .awaitMessages({
+  return new Promise((resolve) => {
+    let attempts = 0;
+
+    const collector = channel.createMessageCollector({
       filter: (m: Message) => m.author.id === userId,
-      max: 3,
       time: 2 * 60 * 1000,
-    })
-    .catch(() => null);
+    });
 
-  return (
-    collected != null &&
-    [...collected.values()].some((m) => m.content.trim().toUpperCase() === expectedCode)
-  );
+    collector.on("collect", (m: Message) => {
+      attempts++;
+      if (m.content.trim().toUpperCase() === expectedCode) {
+        collector.stop("success");
+      } else if (attempts >= 3) {
+        collector.stop("max_attempts");
+      }
+    });
+
+    collector.on("end", (_collected, reason) => {
+      resolve(reason === "success");
+    });
+  });
 }
-
-export { genCode, captchaEmbed };
 
 /**
  * Version complète pour les commandes préfixe :
@@ -66,12 +74,8 @@ export async function awaitPrefixCaptcha(
   label: string,
 ): Promise<boolean> {
   const code = genCode();
-
   const msg = await channel.send({ embeds: [captchaEmbed(code, label)] });
-
   const ok = await collectCaptchaResponse(channel, userId, code);
-
   await msg.edit({ embeds: [ok ? captchaSuccessEmbed() : captchaFailEmbed()] }).catch(() => null);
-
   return ok;
 }

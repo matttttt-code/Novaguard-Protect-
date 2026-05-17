@@ -16,14 +16,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     return interaction.reply({ content: "❌ Cette commande est réservée au propriétaire du bot.", ephemeral: true });
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(0x22c55e)
-    .setTitle("🔄 Redémarrage en cours...")
-    .setDescription("Le bot va redémarrer dans quelques secondes.")
-    .setTimestamp();
+  await interaction.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("🔄 Redémarrage en cours...")
+      .setDescription("Le bot va redémarrer dans quelques secondes.")
+      .setTimestamp()],
+  });
 
-  await interaction.reply({ embeds: [embed] });
-  setTimeout(() => process.exit(0), 1500);
+  setTimeout(() => process.exit(1), 1500);
   return;
 }
 
@@ -37,13 +38,13 @@ export async function executeMessage(message: Message, _args: string[]) {
     return;
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(0x22c55e)
-    .setTitle("🔄 Redémarrage en cours...")
-    .setDescription("Le bot va redémarrer dans quelques secondes.")
-    .setTimestamp();
+  await message.reply({
+    embeds: [new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("🔄 Redémarrage en cours...")
+      .setDescription("Le bot va redémarrer dans quelques secondes.")
+      .setTimestamp()],
+  });
 
-  await message.reply({ embeds: [embed] });
-
-  setTimeout(() => process.exit(0), 1500);
+  setTimeout(() => process.exit(1), 1500);
 }
