@@ -13,8 +13,7 @@ import { LOG_DM_USER_ID } from "../dm-notify.js";
 
 export const data = new SlashCommandBuilder()
   .setName("hoistrole")
-  .setDescription("Demande au propriétaire du bot de hisser le bot au-dessus de tous les rôles")
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  .setDescription("Demande au propriétaire du bot de hisser le bot au-dessus de tous les rôles");
 
 export const prefixName = "hoistrole";
 export const prefixAliases = ["hisser"];
@@ -54,6 +53,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const { client, guild, user } = interaction;
   if (!guild) {
     await interaction.reply({ content: "❌ Cette commande doit être utilisée dans un serveur.", ephemeral: true });
+    return;
+  }
+  const member = interaction.member as import("discord.js").GuildMember | null;
+  if (!member?.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "❌ Tu dois être **administrateur** du serveur pour utiliser cette commande.", ephemeral: true });
     return;
   }
   await interaction.deferReply({ ephemeral: true });

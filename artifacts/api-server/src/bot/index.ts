@@ -1094,7 +1094,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setStyle(ButtonStyle.Secondary),
           );
           await logCh?.send({
-            content: "@everyone",
+            content: "@here",
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🔴 Niveau 3 — Validation admin requise")
@@ -1152,7 +1152,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         if (cfg.logChannelId) {
           const lCh = tGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
           await lCh?.send({
-            content: "@everyone",
+            content: "@here",
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
@@ -1195,7 +1195,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       await activateLevel3Effects(client, sacGuildId);
       const sacLogCh = interaction.channel as TextChannel | null;
       await sacLogCh?.send({
-        content: "@everyone",
+        content: "@here",
         embeds: [new EmbedBuilder()
           .setColor(0xef4444)
           .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")

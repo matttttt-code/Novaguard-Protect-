@@ -67,7 +67,7 @@ async function sendUnbanApproval(
     const channel = await client.channels.fetch(logChannelId);
     if (channel && channel.isTextBased()) {
       await (channel as import("discord.js").TextChannel).send({
-        content: "@everyone",
+        content: "@here",
         embeds: [embed],
         components: [row],
       });
@@ -105,7 +105,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (isBlacklisted(interaction.guild.id, userId)) {
     await interaction.reply({
-      content: "⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @everyone. Un administrateur doit valider.",
+      content: "⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.",
       ephemeral: true,
     });
     await sendUnbanApproval(
@@ -165,7 +165,7 @@ export async function executeMessage(message: Message, args: string[]) {
   }
 
   if (isBlacklisted(message.guild.id, userId)) {
-    await message.reply("⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @everyone. Un administrateur doit valider.");
+    await message.reply("⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.");
     await sendUnbanApproval(
       message.client, message.guild, userId, ban.user.tag,
       reason, message.author.tag, message.author.id

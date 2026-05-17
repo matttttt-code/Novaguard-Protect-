@@ -22,7 +22,7 @@ async function sendToChannel(
     const channel = await client.channels.fetch(channelId);
     if (channel && channel.isTextBased()) {
       await (channel as TextChannel).send({
-        content: pingEveryone ? "@everyone" : (pingContent ?? undefined),
+        content: pingEveryone ? "@here" : (pingContent ?? undefined),
         embeds: [embed],
       });
     }
