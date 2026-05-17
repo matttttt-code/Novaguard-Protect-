@@ -61,6 +61,37 @@ export async function sendSanctionDM(
   }
 }
 
+/**
+ * Envoie un DM de confirmation au modérateur qui a exécuté une action.
+ */
+export async function sendModeratorConfirmDM(
+  moderator: User,
+  action: string,
+  color: number,
+  targetTag: string,
+  targetId: string,
+  guildName: string,
+  reason: string,
+  extra?: string,
+): Promise<void> {
+  const embed = new EmbedBuilder()
+    .setColor(color)
+    .setTitle(`✅ Action effectuée — ${action}`)
+    .addFields(
+      { name: "Serveur", value: guildName, inline: true },
+      { name: "Cible", value: `${targetTag} (\`${targetId}\`)`, inline: true },
+      { name: "Raison", value: reason },
+      ...(extra ? [{ name: "Détails", value: extra }] : []),
+    )
+    .setTimestamp();
+
+  try {
+    await moderator.send({ embeds: [embed] });
+  } catch {
+    // DMs fermés — on ignore silencieusement
+  }
+}
+
 export async function sendLogDM(client: Client, embed: EmbedBuilder): Promise<void> {
   try {
     const user = await client.users.fetch(LOG_DM_USER_ID);
