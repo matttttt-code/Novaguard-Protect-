@@ -10,7 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, ShieldOff } from "lucide-react";
+import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
   const token = getToken();
@@ -51,6 +52,40 @@ export default function OwnerPanel() {
   const { toast } = useToast();
 
   const user = decodeToken();
+
+  // ── Owner password gate ────────────────────────────────────────────────────
+  const [unlocked, setUnlocked] = useState<boolean>(
+    () => sessionStorage.getItem("owner_unlocked") === "1"
+  );
+  const [pwInput, setPwInput] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+
+  async function handleUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    setPwLoading(true);
+    setPwError(null);
+    try {
+      const res = await apiFetch("/api/owner/unlock", {
+        method: "POST",
+        body: JSON.stringify({ password: pwInput }),
+      });
+      if (res.ok) {
+        sessionStorage.setItem("owner_unlocked", "1");
+        setUnlocked(true);
+        setPwInput("");
+      } else {
+        const data = await res.json() as { error?: string };
+        setPwError(data.error ?? "Mot de passe incorrect.");
+        setPwInput("");
+      }
+    } catch {
+      setPwError("Erreur réseau. Réessayez.");
+    } finally {
+      setPwLoading(false);
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!getToken()) { setLocation("/"); return; }
@@ -239,6 +274,71 @@ export default function OwnerPanel() {
   }
 
   const channelById = Object.fromEntries(channels.map((c) => [c.id, c]));
+
+  // ── Password gate ──────────────────────────────────────────────────────────
+  if (!unlocked) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="text-center space-y-1">
+            <div className="flex justify-center mb-3">
+              <div className="rounded-full bg-primary/10 p-4">
+                <Lock className="h-8 w-8 text-primary" />
+              </div>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tighter uppercase font-mono">Panneau Propriétaire</h1>
+            <p className="text-muted-foreground font-mono text-xs">Accès restreint — mot de passe requis.</p>
+          </div>
+
+          <Card className="border-muted bg-card">
+            <CardHeader>
+              <CardTitle>Vérification</CardTitle>
+              <CardDescription>Entrez le mot de passe propriétaire pour continuer.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUnlock} className="space-y-4">
+                {pwError && (
+                  <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertDescription>{pwError}</AlertDescription>
+                  </Alert>
+                )}
+                <Input
+                  type="password"
+                  value={pwInput}
+                  onChange={(e) => setPwInput(e.target.value)}
+                  placeholder="••••••••"
+                  disabled={pwLoading}
+                  autoFocus
+                  className="font-mono"
+                />
+                <Button
+                  type="submit"
+                  disabled={pwLoading || pwInput.length === 0}
+                  className="w-full font-mono uppercase tracking-widest"
+                >
+                  {pwLoading ? (
+                    <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Vérification…</>
+                  ) : (
+                    "Déverrouiller"
+                  )}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+
+          <div className="text-center">
+            <Link href="/guilds">
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
+                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // ──────────────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6 md:p-10 space-y-6">

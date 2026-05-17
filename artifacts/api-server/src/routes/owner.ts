@@ -13,6 +13,15 @@ const router = Router();
 router.use(authMiddleware);
 router.use(ownerMiddleware);
 
+// ── POST /api/owner/unlock ────────────────────────────────────────────────────
+router.post("/owner/unlock", (req, res) => {
+  const expected = process.env["OWNER_PASSWORD"];
+  if (!expected) { res.status(500).json({ error: "OWNER_PASSWORD non configuré." }); return; }
+  const given = String(req.body?.password ?? "");
+  if (given !== expected) { res.status(401).json({ error: "Mot de passe incorrect." }); return; }
+  res.json({ ok: true });
+});
+
 // ── GET /api/owner/guilds/:guildId/channels ──────────────────────────────────
 router.get("/owner/guilds/:guildId/channels", async (req, res) => {
   const { guildId } = req.params as { guildId: string };
