@@ -22,6 +22,11 @@ function getRedirectUri(req: import("express").Request): string {
 const SCOPES = "identify guilds";
 const ADMIN_PERMISSION = BigInt(0x8);
 
+// ── GET /api/auth/redirect-uri ────────────────────────────────────────────────
+router.get("/auth/redirect-uri", (req, res) => {
+  res.json({ redirectUri: getRedirectUri(req) });
+});
+
 // ── GET /api/auth/login ───────────────────────────────────────────────────────
 router.get("/auth/login", (req, res) => {
   if (!CLIENT_ID) {

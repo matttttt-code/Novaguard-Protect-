@@ -4,9 +4,7 @@ import { setToken, getToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { AlertCircle } from "lucide-react";
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+import { AlertCircle, Copy, Check, ExternalLink } from "lucide-react";
 
 function DiscordIcon() {
   return (
@@ -19,22 +17,19 @@ function DiscordIcon() {
 export default function Login() {
   const [, setLocation] = useLocation();
   const [error, setError] = useState<string | null>(null);
+  const [redirectUri, setRedirectUri] = useState<string>("");
+  const [copied, setCopied] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
 
   useEffect(() => {
-    // Check if already logged in
-    if (getToken()) {
-      setLocation("/guilds");
-      return;
-    }
+    if (getToken()) { setLocation("/guilds"); return; }
 
-    // Check for token in URL params (after OAuth callback redirect)
     const params = new URLSearchParams(window.location.search);
     const token = params.get("token");
     const err = params.get("error");
 
     if (token) {
       setToken(token);
-      // Clean up URL
       window.history.replaceState({}, "", window.location.pathname);
       setLocation("/guilds");
       return;
@@ -43,25 +38,36 @@ export default function Login() {
     if (err) {
       const messages: Record<string, string> = {
         no_code: "Autorisation Discord annulée.",
-        token_exchange: "Échec de l'échange du code Discord.",
+        token_exchange: "Échec de l'échange du code Discord. Vérifiez que l'URL de redirection est bien ajoutée dans le portail Discord.",
         discord_api: "Erreur lors de la communication avec Discord.",
         server: "Erreur serveur interne.",
       };
       setError(messages[err] ?? "Erreur inconnue.");
+      setShowSetup(true);
       window.history.replaceState({}, "", window.location.pathname);
     }
+
+    // Fetch the exact redirect URI from the server
+    fetch("/api/auth/redirect-uri")
+      .then((r) => r.json())
+      .then((data: { redirectUri: string }) => setRedirectUri(data.redirectUri))
+      .catch(() => {});
   }, [setLocation]);
 
-  const handleDiscordLogin = () => {
-    window.location.href = "/api/auth/login";
+  const handleCopy = () => {
+    if (!redirectUri) return;
+    navigator.clipboard.writeText(redirectUri).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background selection:bg-primary selection:text-primary-foreground">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="space-y-2 text-center">
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background">
+      <div className="w-full max-w-md space-y-4">
+        <div className="space-y-1 text-center">
           <h1 className="text-3xl font-bold tracking-tighter uppercase font-mono">Terminal Autorisé</h1>
-          <p className="text-muted-foreground font-mono text-xs">Accès restreint. Connectez-vous via Discord.</p>
+          <p className="text-muted-foreground font-mono text-xs">Accès restreint — connexion via Discord.</p>
         </div>
 
         <Card className="border-muted bg-card">
@@ -78,18 +84,60 @@ export default function Login() {
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             )}
+
             <Button
-              onClick={handleDiscordLogin}
+              onClick={() => { window.location.href = "/api/auth/login"; }}
               className="w-full gap-2 bg-[#5865F2] hover:bg-[#4752c4] text-white font-mono uppercase tracking-widest"
             >
               <DiscordIcon />
               Se connecter avec Discord
             </Button>
-            <p className="text-xs text-center text-muted-foreground">
-              Accès accordé uniquement si vous êtes administrateur sur un serveur avec le bot, ou propriétaire du bot.
-            </p>
+
+            <button
+              onClick={() => setShowSetup((v) => !v)}
+              className="text-xs text-muted-foreground underline underline-offset-2 w-full text-center hover:text-foreground transition-colors"
+            >
+              {showSetup ? "Masquer la configuration" : "Problème de connexion ? Voir la configuration"}
+            </button>
           </CardContent>
         </Card>
+
+        {showSetup && (
+          <Card className="border-muted bg-card">
+            <CardHeader>
+              <CardTitle className="text-sm font-mono uppercase">Configuration Discord requise</CardTitle>
+              <CardDescription>
+                Ajoute cette URL dans ton application Discord pour que la connexion fonctionne.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm">
+              <ol className="space-y-2 text-muted-foreground list-decimal list-inside">
+                <li>Va sur le <a href="https://discord.com/developers/applications" target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2 inline-flex items-center gap-1">Portail Discord Developer <ExternalLink className="h-3 w-3" /></a></li>
+                <li>Clique sur ton application → <strong className="text-foreground">OAuth2</strong> dans le menu gauche</li>
+                <li>Section <strong className="text-foreground">Redirects</strong> → clique <strong className="text-foreground">Add Another</strong></li>
+                <li>Colle cette URL puis clique <strong className="text-foreground">Save Changes</strong></li>
+              </ol>
+
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">URL de redirection à ajouter :</p>
+                <div className="flex items-center gap-2 bg-muted rounded-md px-3 py-2">
+                  <code className="text-xs flex-1 break-all text-foreground">
+                    {redirectUri || "Chargement..."}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleCopy}
+                    disabled={!redirectUri}
+                    className="shrink-0 h-7 w-7 p-0"
+                  >
+                    {copied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );
