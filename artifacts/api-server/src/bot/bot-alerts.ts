@@ -5,6 +5,28 @@ import { logger } from "../lib/logger.js";
 let pingAlertCooldown = false;
 let unhandledRejectionCooldown = false;
 
+const CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+export function generateErrorCode(): string {
+  let code = "ERR-";
+  for (let i = 0; i < 6; i++) code += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return code;
+}
+
+function truncate(s: string, max = 500): string {
+  return s.length > max ? s.slice(0, max) + "…" : s;
+}
+
+function errorFields(err: unknown, errorCode: string) {
+  const message = err instanceof Error ? err.message : String(err);
+  const stack = err instanceof Error ? (err.stack ?? "").slice(0, 700) : "";
+  return [
+    { name: "🔖 Code erreur", value: `\`${errorCode}\``, inline: true },
+    { name: "Erreur", value: `\`\`\`${truncate(message)}\`\`\`` },
+    ...(stack ? [{ name: "Stack (extrait)", value: `\`\`\`${stack}\`\`\`` }] : []),
+  ];
+}
+
 export async function sendStartupAlert(client: Client): Promise<void> {
   const guilds = client.guilds.cache.size;
   const totalMembers = client.guilds.cache.reduce((acc, g) => acc + (g.memberCount ?? 0), 0);
@@ -28,20 +50,94 @@ export async function sendCommandErrorAlert(
   guildName: string | null,
   userId: string,
   err: unknown,
+  errorCode: string,
 ): Promise<void> {
-  const message = err instanceof Error ? err.message : String(err);
-  const stack = err instanceof Error ? (err.stack ?? "").slice(0, 700) : "";
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
-    .setTitle("❌ Erreur de commande")
+    .setTitle("❌ Erreur — Commande slash")
     .addFields(
+      { name: "🔖 Code erreur", value: `\`${errorCode}\``, inline: true },
       { name: "Commande", value: `\`/${commandName}\``, inline: true },
       { name: "Serveur", value: guildName ?? "Inconnu", inline: true },
       { name: "Utilisateur", value: `\`${userId}\``, inline: true },
-      { name: "Erreur", value: `\`\`\`${message.slice(0, 500)}\`\`\`` },
-      ...(stack ? [{ name: "Stack (extrait)", value: `\`\`\`${stack}\`\`\`` }] : []),
+      ...errorFields(err, errorCode).slice(1),
     )
     .setTimestamp());
+}
+
+export async function sendPrefixErrorAlert(
+  client: Client,
+  commandName: string,
+  guildName: string | null,
+  userId: string,
+  err: unknown,
+  errorCode: string,
+): Promise<void> {
+  await sendLogDM(client, new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle("❌ Erreur — Commande préfixe")
+    .addFields(
+      { name: "🔖 Code erreur", value: `\`${errorCode}\``, inline: true },
+      { name: "Commande", value: `\`&${commandName}\``, inline: true },
+      { name: "Serveur", value: guildName ?? "Inconnu", inline: true },
+      { name: "Utilisateur", value: `\`${userId}\``, inline: true },
+      ...errorFields(err, errorCode).slice(1),
+    )
+    .setTimestamp());
+}
+
+export async function sendButtonErrorAlert(
+  client: Client,
+  customId: string,
+  guildName: string | null,
+  userId: string,
+  err: unknown,
+  errorCode: string,
+): Promise<void> {
+  await sendLogDM(client, new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle("❌ Erreur — Interaction bouton")
+    .addFields(
+      { name: "🔖 Code erreur", value: `\`${errorCode}\``, inline: true },
+      { name: "Custom ID", value: `\`${truncate(customId, 100)}\``, inline: true },
+      { name: "Serveur", value: guildName ?? "Inconnu", inline: true },
+      { name: "Utilisateur", value: `\`${userId}\``, inline: true },
+      ...errorFields(err, errorCode).slice(1),
+    )
+    .setTimestamp());
+}
+
+export async function sendModalErrorAlert(
+  client: Client,
+  customId: string,
+  guildName: string | null,
+  userId: string,
+  err: unknown,
+  errorCode: string,
+): Promise<void> {
+  await sendLogDM(client, new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle("❌ Erreur — Soumission modal")
+    .addFields(
+      { name: "🔖 Code erreur", value: `\`${errorCode}\``, inline: true },
+      { name: "Custom ID", value: `\`${truncate(customId, 100)}\``, inline: true },
+      { name: "Serveur", value: guildName ?? "Inconnu", inline: true },
+      { name: "Utilisateur", value: `\`${userId}\``, inline: true },
+      ...errorFields(err, errorCode).slice(1),
+    )
+    .setTimestamp());
+}
+
+export async function sendClientErrorAlert(
+  client: Client,
+  err: unknown,
+  errorCode: string,
+): Promise<void> {
+  await sendLogDM(client, new EmbedBuilder()
+    .setColor(0xdc2626)
+    .setTitle("🔴 Erreur client Discord")
+    .addFields(...errorFields(err, errorCode))
+    .setTimestamp()).catch(() => null);
 }
 
 export function registerBotAlerts(client: Client): void {
@@ -62,11 +158,9 @@ export function registerBotAlerts(client: Client): void {
         .setFooter({ text: "Cooldown 5 minutes — les alertes suivantes seront ignorées." })
         .setTimestamp()
       ).catch(() => null);
-      // Cooldown 5 min pour éviter le spam
       setTimeout(() => { pingAlertCooldown = false; }, 5 * 60_000);
     }
   }, 30_000);
-  // Ne pas bloquer la fin du process
   if (typeof pingInterval.unref === "function") pingInterval.unref();
 
   // ── Promesses rejetées non gérées ──
@@ -74,11 +168,17 @@ export function registerBotAlerts(client: Client): void {
     logger.error({ reason }, "Promesse rejetée non gérée");
     if (unhandledRejectionCooldown) return;
     unhandledRejectionCooldown = true;
+    const errCode = generateErrorCode();
     const msg = reason instanceof Error ? reason.message : String(reason);
+    const stack = reason instanceof Error ? (reason.stack ?? "").slice(0, 700) : "";
     await sendLogDM(client, new EmbedBuilder()
       .setColor(0xef4444)
       .setTitle("💥 Promesse rejetée non gérée")
-      .addFields({ name: "Détail", value: `\`\`\`${msg.slice(0, 800)}\`\`\`` })
+      .addFields(
+        { name: "🔖 Code erreur", value: `\`${errCode}\``, inline: true },
+        { name: "Détail", value: `\`\`\`${msg.slice(0, 600)}\`\`\`` },
+        ...(stack ? [{ name: "Stack (extrait)", value: `\`\`\`${stack}\`\`\`` }] : []),
+      )
       .setTimestamp()
     ).catch(() => null);
     setTimeout(() => { unhandledRejectionCooldown = false; }, 2 * 60_000);

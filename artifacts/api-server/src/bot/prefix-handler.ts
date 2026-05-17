@@ -1,5 +1,6 @@
 import { Client, Events, Message } from "discord.js";
 import { logger } from "../lib/logger.js";
+import { generateErrorCode, sendPrefixErrorAlert } from "./bot-alerts.js";
 
 export const PREFIX = "&";
 
@@ -28,8 +29,19 @@ export function registerPrefixHandler(
     try {
       await command.execute(message, args);
     } catch (err) {
-      logger.error({ err, command: commandName }, "Erreur commande préfixe");
-      await message.reply("❌ Une erreur est survenue lors de l'exécution de cette commande.");
+      const errCode = generateErrorCode();
+      logger.error({ err, errCode, command: commandName }, "Erreur commande préfixe");
+      void sendPrefixErrorAlert(
+        client,
+        commandName,
+        message.guild?.name ?? null,
+        message.author.id,
+        err,
+        errCode,
+      ).catch(() => null);
+      try {
+        await message.reply(`❌ Une erreur est survenue (code : \`${errCode}\`). Transmets ce code au support.`);
+      } catch { /* message supprimé */ }
     }
   });
 

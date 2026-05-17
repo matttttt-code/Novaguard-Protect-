@@ -55,7 +55,7 @@ import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js
 import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
-import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert } from "./bot-alerts.js";
+import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
 import { sendLogDM } from "./dm-notify.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
@@ -97,7 +97,11 @@ export function startBot(): void {
   });
 
   // Empêche le crash du process sur erreur non gérée du client
-  client.on("error", (err) => { logger.error({ err }, "Erreur non gérée du client Discord"); });
+  client.on("error", (err) => {
+    const errCode = generateErrorCode();
+    logger.error({ err, errCode }, "Erreur non gérée du client Discord");
+    void sendClientErrorAlert(client, err, errCode).catch(() => null);
+  });
   registerBotAlerts(client);
 
   client.once(Events.ClientReady, async (readyClient) => {
@@ -118,11 +122,35 @@ export function startBot(): void {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
-      await handleButtonInteraction(client, interaction as ButtonInteraction);
+      const btn = interaction as ButtonInteraction;
+      try {
+        await handleButtonInteraction(client, btn);
+      } catch (err) {
+        const errCode = generateErrorCode();
+        logger.error({ err, errCode, customId: btn.customId }, "Erreur bouton");
+        void sendButtonErrorAlert(client, btn.customId, interaction.guild?.name ?? null, interaction.user.id, err, errCode).catch(() => null);
+        try {
+          const msg = `❌ Une erreur est survenue (code : \`${errCode}\`). Transmets ce code au support.`;
+          if (btn.replied || btn.deferred) await btn.followUp({ content: msg, ephemeral: true });
+          else await btn.reply({ content: msg, ephemeral: true });
+        } catch { /* interaction expirée */ }
+      }
       return;
     }
     if (interaction.isModalSubmit()) {
-      await handleModalSubmit(client, interaction as ModalSubmitInteraction);
+      const modal = interaction as ModalSubmitInteraction;
+      try {
+        await handleModalSubmit(client, modal);
+      } catch (err) {
+        const errCode = generateErrorCode();
+        logger.error({ err, errCode, customId: modal.customId }, "Erreur modal");
+        void sendModalErrorAlert(client, modal.customId, interaction.guild?.name ?? null, interaction.user.id, err, errCode).catch(() => null);
+        try {
+          const msg = `❌ Une erreur est survenue (code : \`${errCode}\`). Transmets ce code au support.`;
+          if (modal.replied || modal.deferred) await modal.followUp({ content: msg, ephemeral: true });
+          else await modal.reply({ content: msg, ephemeral: true });
+        } catch { /* interaction expirée */ }
+      }
       return;
     }
     if (!interaction.isChatInputCommand()) return;
@@ -133,16 +161,18 @@ export function startBot(): void {
     try {
       await command.execute(interaction);
     } catch (err) {
-      logger.error({ err, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
+      const errCode = generateErrorCode();
+      logger.error({ err, errCode, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
       void sendCommandErrorAlert(
         client,
         interaction.commandName,
         interaction.guild?.name ?? null,
         interaction.user.id,
         err,
+        errCode,
       ).catch(() => null);
       try {
-        const msg = "Une erreur est survenue lors de l'exécution de cette commande.";
+        const msg = `❌ Une erreur est survenue (code : \`${errCode}\`). Transmets ce code au support.`;
         if (interaction.replied || interaction.deferred) {
           await interaction.followUp({ content: msg, ephemeral: true });
         } else {
