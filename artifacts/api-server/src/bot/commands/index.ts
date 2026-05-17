@@ -41,6 +41,7 @@ import * as testcaptcha from "./testcaptcha.js";
 import * as voicemute from "./voicemute.js";
 import * as rolerequest from "./rolerequest.js";
 import * as suggestion from "./suggestion.js";
+import * as errortest from "./errortest.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -60,7 +61,7 @@ export const commands: Command[] = [
   dashboard, nuke, lockserver,
   transcript, settranscript,
   setgenlog, testcaptcha,
-  voicemute, rolerequest, suggestion,
+  voicemute, rolerequest, suggestion, errortest,
 ];
 
 type PrefixModule = {
@@ -80,7 +81,7 @@ const prefixModules: PrefixModule[] = [
   dashboard, nuke, lockserver,
   transcript, settranscript,
   setgenlog, testcaptcha,
-  voicemute, rolerequest, suggestion,
+  voicemute, rolerequest, suggestion, errortest,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

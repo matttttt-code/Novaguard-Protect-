@@ -5,6 +5,7 @@ import { getConfig } from "./guild-config-store.js";
 
 export interface SendLogOptions {
   pingEveryone?: boolean;
+  pingContent?: string;
   guildId?: string;
   logType?: "general" | "ban";
   commandChannelId?: string;
@@ -14,13 +15,14 @@ async function sendToChannel(
   client: Client,
   channelId: string,
   embed: EmbedBuilder,
-  pingEveryone?: boolean
+  pingEveryone?: boolean,
+  pingContent?: string,
 ): Promise<void> {
   try {
     const channel = await client.channels.fetch(channelId);
     if (channel && channel.isTextBased()) {
       await (channel as TextChannel).send({
-        content: pingEveryone ? "@everyone" : undefined,
+        content: pingEveryone ? "@everyone" : (pingContent ?? undefined),
         embeds: [embed],
       });
     }
@@ -62,7 +64,7 @@ export async function sendLog(
   }
 
   await Promise.allSettled([
-    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone)),
+    ...targets.map((id) => sendToChannel(client, id, embed, options?.pingEveryone, options?.pingContent)),
     sendLogDM(client, dmEmbed),
   ]);
 }

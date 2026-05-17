@@ -133,6 +133,8 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/testcaptcha` · `&testcaptcha [--apercu] [@membre]` (`&testcap`) — Teste le captcha",
           "  → Sans option : simulation complète dans le salon captcha (aucun kick réel)",
           "  → `apercu:True` / `--apercu` : aperçu visuel éphémère de l'embed captcha",
+          "`/errortest` · `&errortest` (`&testalerte`) — Envoie les 5 types d'alertes DM en simulation (Admin)",
+          "  → 🟢 Démarrage · ❌ Erreur commande · ⚠️ Ping élevé · 💥 Rejet non géré · 🔴 Arrêt",
         ].join("\n"),
       }
     )
