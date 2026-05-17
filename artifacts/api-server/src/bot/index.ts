@@ -44,6 +44,7 @@ import {
   generateChallenge, setChallengeMessageId,
 } from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
+import { registerGeneralLog } from "./general-log.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -71,11 +72,18 @@ export function startBot(): void {
       GatewayIntentBits.GuildMessages,
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildVoiceStates,
+      GatewayIntentBits.GuildInvites,
+      GatewayIntentBits.GuildModeration,
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
   });
 
   const captchaTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+
+  // Empêche le crash du process sur erreur non gérée du client
+  client.on("error", (err) => { logger.error({ err }, "Erreur non gérée du client Discord"); });
+  process.on("unhandledRejection", (reason) => { logger.error({ reason }, "Promesse rejetée non gérée"); });
 
   client.once(Events.ClientReady, async (readyClient) => {
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
@@ -108,12 +116,14 @@ export function startBot(): void {
       await command.execute(interaction);
     } catch (err) {
       logger.error({ err, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
-      const msg = "Une erreur est survenue lors de l'exécution de cette commande.";
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp({ content: msg, ephemeral: true });
-      } else {
-        await interaction.reply({ content: msg, ephemeral: true });
-      }
+      try {
+        const msg = "Une erreur est survenue lors de l'exécution de cette commande.";
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp({ content: msg, ephemeral: true });
+        } else {
+          await interaction.reply({ content: msg, ephemeral: true });
+        }
+      } catch { /* salon supprimé ou interaction expirée — on ignore */ }
     }
   });
 
@@ -162,6 +172,7 @@ export function startBot(): void {
 
   registerAutoMod(client, hasMessageContent);
   registerPrefixHandler(client, prefixCommands);
+  registerGeneralLog(client);
 
   // ──── GUILD MEMBER ADD ────
   client.on(Events.GuildMemberAdd, async (member) => {
@@ -439,6 +450,16 @@ async function resolveCaptchaSuccess(
   const createdTs = Math.floor(gMember.user.createdTimestamp / 1000);
   const isSuspect = accountAgeHours < 24;
 
+  await sendLog(client, new EmbedBuilder()
+    .setColor(0x22c55e)
+    .setTitle("✅ Captcha réussi")
+    .setThumbnail(gMember.user.displayAvatarURL())
+    .addFields(
+      { name: "Membre", value: `${gMember.user.tag} (\`${gMember.user.id}\`)`, inline: true },
+      { name: "Serveur", value: guild.name, inline: true },
+    )
+    .setTimestamp(), { guildId });
+
   await sendJoinLog(client, gMember.user, guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
   await sendWelcomeMessage(client, gMember, guildId, cfg);
 }
@@ -488,6 +509,17 @@ async function handleCaptchaChannelMessage(
       const guild = client.guilds.cache.get(challenge.guildId);
       const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
       await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+
+      await sendLog(client, new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("❌ Captcha échoué")
+        .setThumbnail(message.author.displayAvatarURL())
+        .addFields(
+          { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+          { name: "Raison", value: "Trop de mauvaises tentatives — expulsé", inline: true },
+        )
+        .setTimestamp(), { guildId: challenge.guildId });
+
       // Feedback visible pour l'utilisateur
       const cfg2 = getConfig(challenge.guildId);
       if (cfg2.captchaChannelId) {

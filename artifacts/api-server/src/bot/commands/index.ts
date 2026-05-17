@@ -36,6 +36,7 @@ import * as nuke from "./nuke.js";
 import * as lockserver from "./lockserver.js";
 import * as transcript from "./transcript.js";
 import * as settranscript from "./settranscript.js";
+import * as setgenlog from "./setgenlog.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -54,6 +55,7 @@ export const commands: Command[] = [
   joinlock, reglement,
   dashboard, nuke, lockserver,
   transcript, settranscript,
+  setgenlog,
 ];
 
 type PrefixModule = {
@@ -72,6 +74,7 @@ const prefixModules: PrefixModule[] = [
   joinlock, reglement,
   dashboard, nuke, lockserver,
   transcript, settranscript,
+  setgenlog,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

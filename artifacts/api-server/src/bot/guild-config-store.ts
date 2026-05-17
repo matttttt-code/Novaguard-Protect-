@@ -4,6 +4,7 @@ import { join } from "path";
 export interface GuildConfig {
   logChannelId: string | null;
   banLogChannelId: string | null;
+  generalLogChannelId: string | null;
   raidMode: boolean;
   joinLock: boolean;
   ticketStaffRoleId: string | null;
@@ -29,6 +30,7 @@ function defaults(): GuildConfig {
   return {
     logChannelId: null,
     banLogChannelId: null,
+    generalLogChannelId: null,
     raidMode: false,
     joinLock: false,
     ticketStaffRoleId: null,
@@ -95,6 +97,7 @@ function set(guildId: string, patch: Partial<GuildConfig>): void {
 
 export function setLogChannel(guildId: string, channelId: string): void { set(guildId, { logChannelId: channelId }); }
 export function setBanLogChannel(guildId: string, channelId: string): void { set(guildId, { banLogChannelId: channelId }); }
+export function setGeneralLogChannel(guildId: string, channelId: string | null): void { set(guildId, { generalLogChannelId: channelId }); }
 export function setRaidMode(guildId: string, enabled: boolean): void { set(guildId, { raidMode: enabled }); }
 export function isRaidMode(guildId: string): boolean { return configs.get(guildId)?.raidMode ?? false; }
 export function setJoinLock(guildId: string, enabled: boolean): void { set(guildId, { joinLock: enabled }); }
