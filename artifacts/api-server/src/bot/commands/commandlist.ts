@@ -29,8 +29,10 @@ function buildCommandListEmbed(): EmbedBuilder {
         name: "⚙️ Gestion du serveur",
         value: [
           "`/slowmode` · `&slowmode secondes [#salon]` (`&sm`) — Slowmode d'un salon",
-          "`/lock` · `&lock [#salon] [raison]` — Verrouille un salon",
-          "`/unlock` · `&unlock [#salon] [raison]` — Déverrouille un salon",
+          "`/lock` · `&lock [#salon] [raison]` — Verrouille un salon + ajoute 🔒 au nom",
+          "`/unlock` · `&unlock [#salon] [raison]` — Déverrouille un salon + retire le 🔒",
+          "`/lockserver lock|unlock [raison]` · `&lockserver lock|unlock` — Verrouille/déverrouille **tous** les salons (urgence)",
+          "`/nuke [#salon] [raison]` · `&nuke [#salon]` — Recrée un salon (supprime l'historique)",
           "`/role ajouter|retirer` · `&role ajouter|retirer @membre @rôle` — Gère les rôles",
           "`/nickname` · `&nickname @membre [surnom]` (`&nick`) — Change le surnom",
           "`/revokeinvites` · `&revokeinvites` — Révoque toutes les invitations",
@@ -49,6 +51,7 @@ function buildCommandListEmbed(): EmbedBuilder {
       {
         name: "📋 Configuration",
         value: [
+          "`/dashboard` · `&dashboard` (`&config`, `&panel`) — Panneau interactif : messages d'arrivée/départ, statuts sécurité (Admin)",
           "`/setlog #salon` · `&setlog #salon` — Définit le salon de logs principal",
           "`/setbanlog <id_salon>` · `&setbanlog <id>` — Salon de logs bans (autre serveur supporté)",
           "`/ticketconfig role @role` · `&ticketconfig role @role` — Rôle staff des tickets",
@@ -101,7 +104,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         ].join("\n"),
       }
     )
-    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns • 1 ticket par utilisateur" })
+    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns • 1 ticket par utilisateur • Config persistante par serveur" })
     .setTimestamp();
 }
 

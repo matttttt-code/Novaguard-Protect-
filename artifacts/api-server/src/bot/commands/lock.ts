@@ -8,9 +8,16 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 
+async function lockChannel(channel: TextChannel, guildId: string): Promise<void> {
+  await channel.permissionOverwrites.edit(guildId, { SendMessages: false });
+  if (!channel.name.startsWith("🔒")) {
+    await channel.setName("🔒" + channel.name).catch(() => null);
+  }
+}
+
 export const data = new SlashCommandBuilder()
   .setName("lock")
-  .setDescription("Verrouille un salon (empêche l'envoi de messages)")
+  .setDescription("Verrouille un salon (empêche l'envoi de messages, ajoute 🔒 au nom)")
   .addChannelOption((o) => o.setName("salon").setDescription("Salon à verrouiller (défaut : actuel)"))
   .addStringOption((o) => o.setName("raison").setDescription("Raison du verrouillage"))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
@@ -21,7 +28,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (!targetChannel || !interaction.guild) return interaction.reply({ content: "Salon introuvable.", ephemeral: true });
 
-  await targetChannel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: false });
+  await lockChannel(targetChannel, interaction.guild.id);
 
   const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔒 Salon verrouillé")
     .addFields(
@@ -35,7 +42,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   return sendLog(interaction.client, logEmbed(0xef4444, "🔒 Salon verrouillé", [
     { name: "Salon", value: `<#${targetChannel.id}>`, inline: true },
     { name: "Raison", value: reason },
-  ], { tag: interaction.user.tag, id: interaction.user.id }));
+  ], { tag: interaction.user.tag, id: interaction.user.id }), { guildId: interaction.guild.id });
 }
 
 export const prefixName = "lock";
@@ -58,7 +65,7 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const reason = args.slice(reasonStart).join(" ") || "Aucune raison fournie";
 
-  await channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: false });
+  await lockChannel(channel, message.guild.id);
 
   const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔒 Salon verrouillé")
     .addFields(
@@ -73,5 +80,5 @@ export async function executeMessage(message: Message, args: string[]) {
     { name: "Salon", value: `<#${channel.id}>`, inline: true },
     { name: "Raison", value: reason },
     { name: "Via", value: "Commande préfixe", inline: true },
-  ], { tag: message.author.tag, id: message.author.id }));
+  ], { tag: message.author.tag, id: message.author.id }), { guildId: message.guild.id });
 }

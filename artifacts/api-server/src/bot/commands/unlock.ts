@@ -8,9 +8,16 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 
+async function unlockChannel(channel: TextChannel, guildId: string): Promise<void> {
+  await channel.permissionOverwrites.edit(guildId, { SendMessages: null });
+  if (channel.name.startsWith("🔒")) {
+    await channel.setName(channel.name.slice(2)).catch(() => null);
+  }
+}
+
 export const data = new SlashCommandBuilder()
   .setName("unlock")
-  .setDescription("Déverrouille un salon")
+  .setDescription("Déverrouille un salon (retire le 🔒 du nom)")
   .addChannelOption((o) => o.setName("salon").setDescription("Salon à déverrouiller (défaut : actuel)"))
   .addStringOption((o) => o.setName("raison").setDescription("Raison du déverrouillage"))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
@@ -21,7 +28,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (!targetChannel || !interaction.guild) return interaction.reply({ content: "Salon introuvable.", ephemeral: true });
 
-  await targetChannel.permissionOverwrites.edit(interaction.guild.roles.everyone, { SendMessages: null });
+  await unlockChannel(targetChannel, interaction.guild.id);
 
   const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("🔓 Salon déverrouillé")
     .addFields(
@@ -35,7 +42,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   return sendLog(interaction.client, logEmbed(0x22c55e, "🔓 Salon déverrouillé", [
     { name: "Salon", value: `<#${targetChannel.id}>`, inline: true },
     { name: "Raison", value: reason },
-  ], { tag: interaction.user.tag, id: interaction.user.id }));
+  ], { tag: interaction.user.tag, id: interaction.user.id }), { guildId: interaction.guild.id });
 }
 
 export const prefixName = "unlock";
@@ -58,7 +65,7 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const reason = args.slice(reasonStart).join(" ") || "Aucune raison fournie";
 
-  await channel.permissionOverwrites.edit(message.guild.roles.everyone, { SendMessages: null });
+  await unlockChannel(channel, message.guild.id);
 
   const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("🔓 Salon déverrouillé")
     .addFields(
@@ -73,5 +80,5 @@ export async function executeMessage(message: Message, args: string[]) {
     { name: "Salon", value: `<#${channel.id}>`, inline: true },
     { name: "Raison", value: reason },
     { name: "Via", value: "Commande préfixe", inline: true },
-  ], { tag: message.author.tag, id: message.author.id }));
+  ], { tag: message.author.tag, id: message.author.id }), { guildId: message.guild.id });
 }

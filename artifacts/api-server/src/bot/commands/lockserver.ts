@@ -46,6 +46,11 @@ async function applyLockdown(
       await ch.permissionOverwrites.edit(guild.roles.everyone, {
         SendMessages: lock ? false : null,
       });
+      if (lock && !ch.name.startsWith("🔒")) {
+        await ch.setName("🔒" + ch.name).catch(() => null);
+      } else if (!lock && ch.name.startsWith("🔒")) {
+        await ch.setName(ch.name.slice(2)).catch(() => null);
+      }
       count++;
     } catch {
       errors.push(ch.name);
