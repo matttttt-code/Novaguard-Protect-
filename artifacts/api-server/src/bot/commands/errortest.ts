@@ -20,20 +20,40 @@ async function delay(): Promise<void> {
 
 async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: string): Promise<void> {
   const guild = client.guilds.cache.first();
+  const guilds = client.guilds.cache.size;
+  const totalMembers = client.guilds.cache.reduce((a, g) => a + (g.memberCount ?? 0), 0);
+  const mem = process.memoryUsage();
+  const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
+  const rssMB  = (mem.rss  / 1024 / 1024).toFixed(1);
+  const uptimeSec = Math.floor(process.uptime());
 
-  // 1. Démarrage simulé
+  // 1. Démarrage simulé (format réel sendStartupAlert)
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0x22c55e)
     .setTitle("🟢 [TEST] Bot démarré")
     .setThumbnail(client.user?.displayAvatarURL() ?? null)
     .addFields(
       { name: "Tag", value: client.user?.tag ?? "Inconnu", inline: true },
-      { name: "Serveurs", value: String(client.guilds.cache.size), inline: true },
-      { name: "Membres total", value: String(client.guilds.cache.reduce((a, g) => a + (g.memberCount ?? 0), 0)), inline: true },
-      { name: "Ping WebSocket", value: `${client.ws.ping}ms`, inline: true },
-      { name: "Déclenché par", value: triggeredBy, inline: true },
+      { name: "ID", value: `\`${client.user?.id ?? "?"}\``, inline: true },
+      { name: "\u200b", value: "\u200b", inline: true },
+      { name: "Serveurs", value: `**${guilds}**`, inline: true },
+      { name: "Membres total", value: `**${totalMembers.toLocaleString("fr-FR")}**`, inline: true },
+      { name: "\u200b", value: "\u200b", inline: true },
+      { name: "Ping WebSocket", value: client.ws.ping >= 0 ? `**${client.ws.ping} ms**` : "en attente…", inline: true },
+      { name: "Mémoire", value: `Heap : **${heapMB} MB** · RSS : **${rssMB} MB**`, inline: true },
+      { name: "Node.js", value: `\`${process.version}\``, inline: true },
+      { name: "Commandes slash", value: "**59**", inline: true },
+      { name: "Commandes préfixe", value: "**60**", inline: true },
+      { name: "Uptime process", value: uptimeSec < 60 ? `${uptimeSec}s` : `${Math.floor(uptimeSec / 60)} min`, inline: true },
+      { name: "📊 Fonctionnalités actives", value:
+        `• Logs configurés : **1**/${guilds} serveurs\n` +
+        `• Mode raid actif : **0**/${guilds} serveurs\n` +
+        `• Captcha actif : **1**/${guilds} serveurs\n` +
+        `• Sécurité N2+ : **0**/${guilds} serveurs\n` +
+        `• Anti-insulte actif : **1**/${guilds} serveurs`,
+      },
     )
-    .setFooter({ text: "Ceci est un message de test — aucun redémarrage réel." })
+    .setFooter({ text: "59 slash + 60 préfixe enregistrées — Ceci est un message de test." })
     .setTimestamp());
   await delay();
 
@@ -42,6 +62,7 @@ async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: str
     .setColor(0xef4444)
     .setTitle("❌ [TEST] Erreur de commande")
     .addFields(
+      { name: "🔖 Code erreur", value: "`ERR-TEST42`", inline: true },
       { name: "Commande", value: "`/errortest`", inline: true },
       { name: "Serveur", value: guild?.name ?? "Inconnu", inline: true },
       { name: "Utilisateur", value: `\`${triggeredBy}\``, inline: true },
@@ -69,24 +90,29 @@ async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: str
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("💥 [TEST] Promesse rejetée non gérée")
-    .addFields({ name: "Détail", value: "```ReferenceError: Cannot access 'channel' before initialization\n    at processTicksAndRejections (node:internal/process/task_queues:95:5)```" })
+    .addFields(
+      { name: "🔖 Code erreur", value: "`ERR-TESTAB`", inline: true },
+      { name: "Détail", value: "```ReferenceError: Cannot access 'channel' before initialization\n    at processTicksAndRejections (node:internal/process/task_queues:95:5)```" },
+    )
     .setFooter({ text: "Ceci est un message de test — cooldown 2 min en production." })
     .setTimestamp());
   await delay();
 
-  // 5. Arrêt simulé
+  // 5. Arrêt simulé (format réel shutdownHandler)
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("🔴 [TEST] Bot arrêté")
     .setDescription("Signal `SIGTERM` reçu — le bot s'arrête maintenant.")
     .addFields(
-      { name: "Uptime", value: `${Math.floor(process.uptime() / 60)} min`, inline: true },
-      { name: "Note", value: "Ceci est un message de test — le bot continue de fonctionner.", inline: false },
+      { name: "Uptime", value: `**${Math.floor(process.uptime() / 60)} min**`, inline: true },
+      { name: "Mémoire", value: `**${heapMB} MB** heap`, inline: true },
+      { name: "Ping WS", value: client.ws.ping >= 0 ? `**${client.ws.ping} ms**` : "N/A", inline: true },
     )
+    .setFooter({ text: "Ceci est un message de test — le bot continue de fonctionner." })
     .setTimestamp());
   await delay();
 
-  // 6. Captcha admin — Déclenché
+  // 6. Captcha admin — Déclenché (10 min, pas d'auto-rétablissement)
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xf59e0b)
     .setTitle("🔑 [TEST] Captcha admin — Vérification déclenchée")
@@ -94,7 +120,7 @@ async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: str
       { name: "Membre", value: `${triggeredBy} (\`000000000000000000\`)`, inline: true },
       { name: "Serveur", value: guild?.name ?? "Inconnu", inline: true },
       { name: "Rôle", value: "`Administrateur`", inline: true },
-      { name: "Délai", value: "5 min · auto-rétablissement si pas de réponse", inline: false },
+      { name: "Délai", value: "10 minutes pour répondre", inline: false },
     )
     .setFooter({ text: "Ceci est un message de test." })
     .setTimestamp());
@@ -113,7 +139,7 @@ async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: str
     .setTimestamp());
   await delay();
 
-  // 8. Captcha admin — Échec
+  // 8. Captcha admin — Échec (trop de tentatives)
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("❌ [TEST] Captcha admin — Vérification échouée")
@@ -126,14 +152,14 @@ async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: str
     .setTimestamp());
   await delay();
 
-  // 9. Captcha admin — Auto-rétabli (timeout)
+  // 9. Captcha admin — Expiré (10 min, rôle NON rétabli)
   await sendLogDM(client, new EmbedBuilder()
-    .setColor(0xf59e0b)
-    .setTitle("⏱️ [TEST] Captcha admin — Auto-rétabli (délai expiré)")
+    .setColor(0xef4444)
+    .setTitle("⏱️ [TEST] Captcha admin — Expiré (10 min)")
     .addFields(
       { name: "Membre", value: `${triggeredBy} (\`000000000000000000\`)`, inline: true },
       { name: "Serveur", value: guild?.name ?? "Inconnu", inline: true },
-      { name: "Résultat", value: "Aucune réponse dans les 5 min — rôle rétabli automatiquement", inline: false },
+      { name: "Résultat", value: "Aucune réponse dans les 10 min — rôle **toujours retiré**", inline: false },
     )
     .setFooter({ text: "Ceci est un message de test." })
     .setTimestamp());
@@ -165,8 +191,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       .setTitle("🧪 Test des alertes DM lancé")
       .setDescription(
         "10 messages vont être envoyés en DM dans l'ordre :\n" +
-        "1. 🟢 Démarrage\n2. ❌ Erreur de commande\n3. ⚠️ Ping élevé\n4. 💥 Promesse rejetée\n5. 🔴 Arrêt\n" +
-        "6. 🔑 Captcha admin déclenché\n7. ✅ Captcha admin réussi\n8. ❌ Captcha admin échoué\n9. ⏱️ Captcha admin auto-rétabli\n10. 📨 DM sécurité groupé"
+        "1. 🟢 Démarrage (format complet)\n2. ❌ Erreur de commande\n3. ⚠️ Ping élevé\n4. 💥 Promesse rejetée\n5. 🔴 Arrêt\n" +
+        "6. 🔑 Captcha admin déclenché (10 min)\n7. ✅ Captcha admin réussi\n8. ❌ Captcha admin échoué\n9. ⏱️ Captcha admin expiré (rôle non rétabli)\n10. 📨 DM sécurité groupé"
       )
       .setTimestamp()],
     ephemeral: true,

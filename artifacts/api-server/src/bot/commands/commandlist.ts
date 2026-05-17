@@ -85,8 +85,9 @@ function buildEmbeds(): EmbedBuilder[] {
       {
         name: "🤖 Captcha & Invitations",
         value: [
-          "**Captcha** — Config via `/dashboard` → 🤖 Captcha",
-          "📍 Challenge dans le salon ou DM · ✅ réponse → rôle vérifié · ❌ 3 erreurs/5min → expulsion",
+          "**Captcha membres** — Config via `/dashboard` → 🤖 Captcha",
+          "📍 Challenge dans le salon ou DM · ✅ réponse → rôle vérifié · ❌ 3 erreurs / 5 min → expulsion",
+          "**Captcha admin** — Bouton 🔑 dans le log : retire le rôle admin, envoie un code DM · 10 min pour répondre · expire sans auto-rétablissement",
           "`/checkinvite [@m]` · `&checkinvite` (`&ci`) — Stats invitations",
           "`/checkinvites` · `&checkinvites` (`&topinvites`) — Top 15 (Admin)",
         ].join("\n"),
@@ -162,7 +163,7 @@ function buildEmbeds(): EmbedBuilder[] {
         ].join("\n"),
       },
     )
-    .setFooter({ text: "59 commandes slash · 59 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "59 commandes slash · 60 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];
