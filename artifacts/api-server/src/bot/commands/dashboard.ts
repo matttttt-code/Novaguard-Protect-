@@ -16,6 +16,9 @@ import {
   DEFAULT_LEAVE_MSG,
 } from "../guild-config-store.js";
 
+const DASHBOARD_DOMAIN = process.env["REPLIT_DOMAINS"]?.split(",")[0] ?? "";
+const DASHBOARD_URL = DASHBOARD_DOMAIN ? `https://${DASHBOARD_DOMAIN}/dashboard` : null;
+
 export function buildDashboardEmbed(config: GuildConfig, guild: Guild): EmbedBuilder {
   const bool = (v: boolean, on = "✅ Activé", off = "❌ Désactivé") => (v ? on : off);
   const chan = (id: string | null) => (id ? `<#${id}>` : "*Non défini*");
@@ -194,7 +197,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const embed = buildDashboardEmbed(config, interaction.guild);
   const rows = buildDashboardRows(config);
 
-  return interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+  const webRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setLabel("🌐 Ouvrir le Dashboard Web")
+      .setStyle(ButtonStyle.Link)
+      .setURL(DASHBOARD_URL ?? "https://discord.com")
+      .setDisabled(!DASHBOARD_URL),
+  );
+
+  return interaction.reply({ embeds: [embed], components: [...rows, webRow], ephemeral: true });
 }
 
 export const prefixName = "dashboard";
@@ -211,5 +222,13 @@ export async function executeMessage(message: Message) {
   const embed = buildDashboardEmbed(config, message.guild);
   const rows = buildDashboardRows(config);
 
-  await message.reply({ embeds: [embed], components: rows });
+  const webRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setLabel("🌐 Ouvrir le Dashboard Web")
+      .setStyle(ButtonStyle.Link)
+      .setURL(DASHBOARD_URL ?? "https://discord.com")
+      .setDisabled(!DASHBOARD_URL),
+  );
+
+  await message.reply({ embeds: [embed], components: [...rows, webRow] });
 }

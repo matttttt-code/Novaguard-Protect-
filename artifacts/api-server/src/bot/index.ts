@@ -58,6 +58,9 @@ import { startTempBanScheduler } from "./tempban-store.js";
 import { registerAntiGhostPing } from "./commands/antighostping.js";
 import { getAntilinkConfig } from "./antilink-store.js";
 import { addWarning } from "./warnings-store.js";
+import { registerScamLinkDetection } from "./commands/scamlink.js";
+import { checkAndRenameMember } from "./commands/badname.js";
+import { checkAntiAlt } from "./commands/antialt.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
@@ -244,6 +247,7 @@ export function startBot(): void {
   registerPrefixHandler(client, prefixCommands);
   registerGeneralLog(client);
   registerAntiGhostPing(client);
+  registerScamLinkDetection(client);
 
   // ──── GUILD MEMBER ADD ────
   client.on(Events.GuildMemberAdd, async (member) => {
@@ -339,7 +343,14 @@ export function startBot(): void {
       );
     }
 
+    // Anti-Alt : bloquer les comptes trop récents
+    const antialtKicked = await checkAntiAlt(member).catch(() => false);
+    if (antialtKicked) return;
+
     const cfg = getConfig(guildId);
+
+    // Badname : renommer les pseudos non conformes à l'arrivée
+    void checkAndRenameMember(member).catch(() => null);
 
     // ── Invite tracking (toujours en premier, avant tout return) ──
     await onMemberJoin(client, member).catch(() => null);

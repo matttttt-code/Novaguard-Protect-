@@ -6,7 +6,7 @@ import { UpdateGuildConfigBody } from "@workspace/api-zod";
 const router = Router();
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
-const DASHBOARD_SECRET = process.env["SESSION_SECRET"] ?? "";
+const DASHBOARD_SECRET = process.env["DASHBOARD_PASSWORD"] ?? "";
 
 function authMiddleware(
   req: import("express").Request,

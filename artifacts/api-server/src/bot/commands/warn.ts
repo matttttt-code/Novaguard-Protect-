@@ -9,6 +9,7 @@ import {
 import { addWarning, getWarnings } from "../warnings-store.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
+import { checkAutoAction } from "./autokick.js";
 
 export const data = new SlashCommandBuilder()
   .setName("warn")
@@ -52,6 +53,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     timestamp: new Date(),
   });
   const total = getWarnings(interaction.guildId, member.id).length;
+
+  void checkAutoAction(interaction.client, interaction.guildId, member, interaction.user.tag).catch(() => null);
 
   const embed = new EmbedBuilder()
     .setColor(0xf97316)
@@ -118,6 +121,8 @@ export async function executeMessage(message: Message, args: string[]) {
     timestamp: new Date(),
   });
   const total = getWarnings(message.guild.id, member.id).length;
+
+  void checkAutoAction(message.client, message.guild.id, member, message.author.tag).catch(() => null);
 
   const embed = new EmbedBuilder()
     .setColor(0xf97316)

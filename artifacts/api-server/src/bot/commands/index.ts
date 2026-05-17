@@ -64,6 +64,10 @@ import * as note from "./note.js";
 import * as purge from "./purge.js";
 import * as antilink from "./antilink.js";
 import * as antighostping from "./antighostping.js";
+import * as autokick from "./autokick.js";
+import * as scamlink from "./scamlink.js";
+import * as badname from "./badname.js";
+import * as antialt from "./antialt.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -89,6 +93,7 @@ export const commands: Command[] = [
   secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
   creetestbot, notify,
   tempban, massban, note, purge, antilink, antighostping,
+  autokick, scamlink, badname, antialt,
 ];
 
 type PrefixModule = {
@@ -114,6 +119,7 @@ const prefixModules: PrefixModule[] = [
   secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
   creetestbot, notify,
   tempban, massban, note, purge, antilink, antighostping,
+  autokick, scamlink, badname, antialt,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({
