@@ -50,6 +50,7 @@ import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert } from "./bot-alerts.js";
+import { sendLogDM } from "./dm-notify.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
@@ -72,6 +73,7 @@ export function startBot(): void {
   }
 
   const hasMessageContent = process.env["DISCORD_MESSAGE_CONTENT_INTENT"] === "true";
+  const hasPresenceIntent = process.env["DISCORD_PRESENCE_INTENT"] === "true";
 
   const client = new Client({
     intents: [
@@ -83,6 +85,7 @@ export function startBot(): void {
       GatewayIntentBits.GuildInvites,
       GatewayIntentBits.GuildModeration,
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
+      ...(hasPresenceIntent ? [GatewayIntentBits.GuildPresences] : []),
     ],
   });
 
@@ -710,10 +713,91 @@ async function sendWelcomeMessage(
   } catch (err) { logger.error({ err }, "Erreur envoi message d'arrivée"); }
 }
 
+// ──── ADMIN ALERT DM BUTTONS ────
+
+async function handleAdminAlertButton(client: Client, interaction: ButtonInteraction): Promise<void> {
+  const { customId } = interaction;
+
+  // admin_ok:guildId:memberId
+  if (customId.startsWith("admin_ok:")) {
+    await interaction.update({
+      content: "✅ **Compris** — tu as confirmé avoir reçu ce rôle intentionnellement. Aucune alerte envoyée.",
+      embeds: [],
+      components: [],
+    });
+    return;
+  }
+
+  // admin_deny:guildId:memberId
+  if (customId.startsWith("admin_deny:")) {
+    const parts = customId.split(":");
+    const guildId = parts[1];
+    const memberId = parts[2];
+    let guildName = guildId;
+    try {
+      const g = await client.guilds.fetch(guildId);
+      guildName = g.name;
+    } catch { /* ignore */ }
+
+    await interaction.update({
+      content: "🚨 **Alerte envoyée au staff** — les administrateurs ont été prévenus. Contacte-les si nécessaire.",
+      embeds: [],
+      components: [],
+    });
+
+    // Alerte owner bot
+    const alertEmbed = new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle("🚨 Alerte sécurité — Attribution admin NON ATTENDUE")
+      .setDescription(`Le membre a signalé ne pas avoir demandé ce rôle Admin.`)
+      .addFields(
+        { name: "Serveur", value: `${guildName} (\`${guildId}\`)`, inline: true },
+        { name: "Membre signalant", value: `<@${interaction.user.id}> (\`${memberId}\`)`, inline: true },
+      )
+      .setTimestamp();
+    await sendLogDM(client, alertEmbed).catch(() => null);
+    return;
+  }
+
+  // admin_captcha:guildId:memberId:a:b
+  if (customId.startsWith("admin_captcha:")) {
+    const parts = customId.split(":");
+    const a = parts[3];
+    const b = parts[4];
+    const sum = Number(a) + Number(b);
+
+    const modal = new ModalBuilder()
+      .setCustomId(`admin_captcha_verify:${parts[1]}:${parts[2]}:${sum}`)
+      .setTitle("🔐 Vérification de sécurité")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("captcha_answer")
+            .setLabel(`Combien font ${a} + ${b} ?`)
+            .setStyle(TextInputStyle.Short)
+            .setMinLength(1)
+            .setMaxLength(5)
+            .setRequired(true)
+            .setPlaceholder("Tape le résultat ici"),
+        ),
+      );
+
+    await interaction.showModal(modal);
+    return;
+  }
+}
+
 // ──── BUTTON INTERACTION ────
 
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
+
+  // Boutons DM admin (hors serveur)
+  if (customId.startsWith("admin_ok:") || customId.startsWith("admin_deny:") || customId.startsWith("admin_captcha:")) {
+    await handleAdminAlertButton(client, interaction);
+    return;
+  }
+
   if (!guild) return;
 
   if (customId.startsWith("dash_")) {
@@ -1032,6 +1116,27 @@ async function handleDashboardButton(_client: Client, interaction: ButtonInterac
 
 async function handleModalSubmit(client: Client, interaction: ModalSubmitInteraction): Promise<void> {
   const { customId, guild } = interaction;
+
+  // Modal captcha admin (hors serveur)
+  if (customId.startsWith("admin_captcha_verify:")) {
+    const parts = customId.split(":");
+    const expectedSum = Number(parts[3]);
+    const answer = Number(interaction.fields.getTextInputValue("captcha_answer").trim());
+
+    if (answer === expectedSum) {
+      await interaction.reply({
+        content: "✅ **Vérification réussie** — ton identité est confirmée. Aucune alerte envoyée.",
+        ephemeral: true,
+      });
+    } else {
+      await interaction.reply({
+        content: `❌ **Mauvaise réponse** — réponse attendue : \`${expectedSum}\`. Si tu n'as pas fait cette action, clique sur **❌ Non attendu** dans le message d'alerte.`,
+        ephemeral: true,
+      });
+    }
+    return;
+  }
+
   if (!guild) return;
 
   if (customId === "rolerequest_modal") {

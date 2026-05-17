@@ -25,7 +25,7 @@ function buildInfoEmbed(member: GuildMember): EmbedBuilder {
   if (member.permissions.has("ManageGuild")) badges.push("⚙️ Gestionnaire");
   if (member.permissions.has("ManageMessages")) badges.push("🔧 Modérateur");
 
-  const voiceChannel = member.voice.channel;
+  const voiceChannel = member.guild.voiceStates.cache.get(member.id)?.channel ?? null;
 
   return new EmbedBuilder()
     .setColor(member.displayColor || 0x6366f1)
@@ -56,15 +56,17 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  const member =
+  const rawMember =
     (interaction.options.getMember("membre") as GuildMember | null) ??
     (interaction.member as GuildMember);
 
-  if (!member) {
+  if (!rawMember || !interaction.guild) {
     return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
   }
 
   await interaction.deferReply();
+  // Fetch complet pour avoir le voice state à jour
+  const member = await interaction.guild.members.fetch(rawMember.id).catch(() => rawMember);
   const embed = buildInfoEmbed(member);
   await interaction.editReply({ embeds: [embed] });
 

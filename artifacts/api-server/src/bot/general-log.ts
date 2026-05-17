@@ -8,6 +8,9 @@ import {
   Guild,
   User,
   PermissionFlagsBits,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   type PartialUser,
 } from "discord.js";
 import { getConfig } from "./guild-config-store.js";
@@ -525,7 +528,25 @@ export function registerGeneralLog(client: Client): void {
         )
         .setTimestamp();
 
-      try { await newMember.user.send({ embeds: [dmEmbed] }); }
+      // Boutons de réponse (3 options)
+      const a = Math.floor(Math.random() * 20) + 1;
+      const b = Math.floor(Math.random() * 20) + 1;
+      const alertRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`admin_ok:${newMember.guild.id}:${newMember.id}`)
+          .setLabel("✅ Accordé — je m'y attendais")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`admin_deny:${newMember.guild.id}:${newMember.id}`)
+          .setLabel("❌ Non attendu — alerter")
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(`admin_captcha:${newMember.guild.id}:${newMember.id}:${a}:${b}`)
+          .setLabel("🔐 Vérifier avec captcha")
+          .setStyle(ButtonStyle.Secondary),
+      );
+
+      try { await newMember.user.send({ embeds: [dmEmbed], components: [alertRow] }); }
       catch { /* DMs fermés */ }
 
       // Alerte propriétaire bot

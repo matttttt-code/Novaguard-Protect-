@@ -41,8 +41,12 @@ async function buildServerStatsEmbed(guild: Guild): Promise<EmbedBuilder> {
   const totalMembers = members.size;
   const bots = members.filter((m) => m.user.bot).size;
   const humans = totalMembers - bots;
-  const online = members.filter((m) => m.presence?.status !== undefined && m.presence.status !== "offline").size;
-  const offline = totalMembers - online;
+  const presenceIntentActive = process.env["DISCORD_PRESENCE_INTENT"] === "true";
+  const onlineRaw = presenceIntentActive
+    ? members.filter((m) => m.presence?.status !== undefined && m.presence.status !== "offline").size
+    : -1;
+  const online = onlineRaw;
+  const offline = presenceIntentActive ? totalMembers - online : -1;
 
   const channels = guild.channels.cache;
   const textChannels = channels.filter((c) => c.type === ChannelType.GuildText).size;
@@ -107,8 +111,8 @@ async function buildServerStatsEmbed(guild: Guild): Promise<EmbedBuilder> {
           `👤 **Total :** ${totalMembers}\n` +
           `🧑 **Humains :** ${humans}\n` +
           `🤖 **Bots :** ${bots}\n` +
-          `🟢 **En ligne :** ${online}\n` +
-          `⚫ **Hors ligne :** ${offline}`,
+          `🟢 **En ligne :** ${online === -1 ? "*N/A*" : online}\n` +
+          `⚫ **Hors ligne :** ${offline === -1 ? "*N/A*" : offline}`,
         inline: true,
       },
       {
