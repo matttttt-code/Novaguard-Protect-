@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Bot dashboard operations
 paths:
   /healthz:
     get:
@@ -24,7 +26,123 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /dashboard/auth:
+    post:
+      operationId: dashboardAuth
+      tags: [dashboard]
+      summary: Authenticate with dashboard token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DashboardAuthInput"
+      responses:
+        "200":
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardAuthResult"
+        "401":
+          description: Invalid token
+
+  /dashboard/stats:
+    get:
+      operationId: getDashboardStats
+      tags: [dashboard]
+      summary: Get bot statistics
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Bot statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStats"
+        "401":
+          description: Unauthorized
+
+  /dashboard/guilds:
+    get:
+      operationId: getDashboardGuilds
+      tags: [dashboard]
+      summary: List all guilds the bot is in
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of guilds
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/GuildSummary"
+        "401":
+          description: Unauthorized
+
+  /dashboard/config/{guildId}:
+    get:
+      operationId: getGuildConfig
+      tags: [dashboard]
+      summary: Get config for a guild
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: guildId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Guild config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuildConfig"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Guild not found
+    patch:
+      operationId: updateGuildConfig
+      tags: [dashboard]
+      summary: Update config for a guild
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: guildId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GuildConfigPatch"
+      responses:
+        "200":
+          description: Updated guild config
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuildConfig"
+        "401":
+          description: Unauthorized
+        "404":
+          description: Guild not found
+
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
   schemas:
     HealthStatus:
       type: object
@@ -34,3 +152,202 @@ components:
       required:
         - status
 
+    DashboardAuthInput:
+      type: object
+      required: [token]
+      properties:
+        token:
+          type: string
+
+    DashboardAuthResult:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+
+    BotStats:
+      type: object
+      required: [tag, guildCount, userCount, uptimeSeconds, memoryMB, wsPing, online]
+      properties:
+        tag:
+          type: string
+        guildCount:
+          type: integer
+        userCount:
+          type: integer
+        uptimeSeconds:
+          type: number
+        memoryMB:
+          type: number
+        wsPing:
+          type: integer
+        online:
+          type: boolean
+
+    GuildSummary:
+      type: object
+      required: [id, name, memberCount]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        iconURL:
+          type: ["string", "null"]
+        memberCount:
+          type: integer
+
+    GuildConfig:
+      type: object
+      required:
+        - logChannelId
+        - banLogChannelId
+        - generalLogChannelId
+        - raidMode
+        - raidMode2
+        - joinLock
+        - ticketStaffRoleId
+        - ticketCategoryId
+        - transcriptChannelId
+        - welcomeEnabled
+        - welcomeChannelId
+        - welcomeMessage
+        - leaveEnabled
+        - leaveChannelId
+        - leaveMessage
+        - captchaEnabled
+        - captchaChannelId
+        - captchaUnverifiedRoleId
+        - captchaVerifiedRoleId
+        - sanctionDmEnabled
+        - inviteLogChannelId
+        - securityLevel
+        - antiInsultEnabled
+        - antiInsultWords
+        - antiWebhookEnabled
+        - suspiciousCheckEnabled
+        - whitelistedInviteCodes
+      properties:
+        logChannelId:
+          type: ["string", "null"]
+        banLogChannelId:
+          type: ["string", "null"]
+        generalLogChannelId:
+          type: ["string", "null"]
+        raidMode:
+          type: boolean
+        raidMode2:
+          type: boolean
+        joinLock:
+          type: boolean
+        ticketStaffRoleId:
+          type: ["string", "null"]
+        ticketCategoryId:
+          type: ["string", "null"]
+        transcriptChannelId:
+          type: ["string", "null"]
+        welcomeEnabled:
+          type: boolean
+        welcomeChannelId:
+          type: ["string", "null"]
+        welcomeMessage:
+          type: string
+        leaveEnabled:
+          type: boolean
+        leaveChannelId:
+          type: ["string", "null"]
+        leaveMessage:
+          type: string
+        captchaEnabled:
+          type: boolean
+        captchaChannelId:
+          type: ["string", "null"]
+        captchaUnverifiedRoleId:
+          type: ["string", "null"]
+        captchaVerifiedRoleId:
+          type: ["string", "null"]
+        sanctionDmEnabled:
+          type: boolean
+        inviteLogChannelId:
+          type: ["string", "null"]
+        securityLevel:
+          type: integer
+          enum: [1, 2, 3]
+        antiInsultEnabled:
+          type: boolean
+        antiInsultWords:
+          type: array
+          items:
+            type: string
+        antiWebhookEnabled:
+          type: boolean
+        suspiciousCheckEnabled:
+          type: boolean
+        whitelistedInviteCodes:
+          type: array
+          items:
+            type: string
+
+    GuildConfigPatch:
+      type: object
+      properties:
+        logChannelId:
+          type: ["string", "null"]
+        banLogChannelId:
+          type: ["string", "null"]
+        generalLogChannelId:
+          type: ["string", "null"]
+        raidMode:
+          type: boolean
+        raidMode2:
+          type: boolean
+        joinLock:
+          type: boolean
+        ticketStaffRoleId:
+          type: ["string", "null"]
+        ticketCategoryId:
+          type: ["string", "null"]
+        transcriptChannelId:
+          type: ["string", "null"]
+        welcomeEnabled:
+          type: boolean
+        welcomeChannelId:
+          type: ["string", "null"]
+        welcomeMessage:
+          type: string
+        leaveEnabled:
+          type: boolean
+        leaveChannelId:
+          type: ["string", "null"]
+        leaveMessage:
+          type: string
+        captchaEnabled:
+          type: boolean
+        captchaChannelId:
+          type: ["string", "null"]
+        captchaUnverifiedRoleId:
+          type: ["string", "null"]
+        captchaVerifiedRoleId:
+          type: ["string", "null"]
+        sanctionDmEnabled:
+          type: boolean
+        inviteLogChannelId:
+          type: ["string", "null"]
+        securityLevel:
+          type: integer
+          enum: [1, 2, 3]
+        antiInsultEnabled:
+          type: boolean
+        antiInsultWords:
+          type: array
+          items:
+            type: string
+        antiWebhookEnabled:
+          type: boolean
+        suspiciousCheckEnabled:
+          type: boolean
+        whitelistedInviteCodes:
+          type: array
+          items:
+            type: string

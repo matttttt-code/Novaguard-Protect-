@@ -111,6 +111,10 @@ function set(guildId: string, patch: Partial<GuildConfig>): void {
   saveToDisk();
 }
 
+export function setConfig(guildId: string, patch: Partial<GuildConfig>): void {
+  set(guildId, patch);
+}
+
 export function setLogChannel(guildId: string, channelId: string): void { set(guildId, { logChannelId: channelId }); }
 export function setBanLogChannel(guildId: string, channelId: string): void { set(guildId, { banLogChannelId: channelId }); }
 export function setGeneralLogChannel(guildId: string, channelId: string | null): void { set(guildId, { generalLogChannelId: channelId }); }

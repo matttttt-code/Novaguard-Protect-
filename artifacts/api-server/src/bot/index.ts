@@ -53,6 +53,7 @@ import {
 } from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { registerGeneralLog } from "./general-log.js";
+import { setClient } from "./client-store.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
@@ -106,6 +107,7 @@ export function startBot(): void {
   registerBotAlerts(client);
 
   client.once(Events.ClientReady, async (readyClient) => {
+    setClient(readyClient);
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
     readyClient.user.setActivity("le serveur 🛡️", { type: ActivityType.Watching });
 
