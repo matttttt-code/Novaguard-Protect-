@@ -18,8 +18,9 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/ban` · `&ban @membre|<id>` — Bannit (fonctionne hors serveur par ID)",
           "`/softban` · `&softban @membre|<id>` (`&sb`) — Ban + déban immédiat (supprime les messages)",
           "`/unban` · `&unban <userId>` — Débannit (approbation admin si blacklisté)",
-          "`/timeout` · `&timeout @membre durée` (`&mute`) — Timeout (1m→28j)",
+          "`/timeout` · `&timeout @membre durée` (`&mute`) — Timeout texte (1m→28j)",
           "`/untimeout` · `&untimeout @membre` (`&unmute`) — Retire le timeout",
+          "`/voicemute` · `&voicemute @membre durée` (`&vmute`) — Coupe micro **+** casque en vocal (1m→1j)",
           "`/warn` · `&warn @membre raison` — Avertissement avec Case ID",
           "`/warnings voir|effacer|retirer` · `&warnings @membre [caseId]` — Gère les avertissements",
           "`/clear` · `&clear [nombre]` (`&purge`) — Supprime des messages (1-100)",
@@ -111,13 +112,30 @@ function buildCommandListEmbed(): EmbedBuilder {
       {
         name: "📩 Utilitaires",
         value: [
+          "`/rolerequest` · `&rolerequest <rôle> <raison>` (`&rr`) — Demande de rôle envoyée au staff via formulaire",
           "`/support` · `&support` — Questionnaire d'aide en DM (transmis au staff)",
           "`/reglement #salon texte` · `&reglement` — Envoie le règlement + réaction :verification1:",
           "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
         ].join("\n"),
+      },
+      {
+        name: "🗂️ Logs généraux",
+        value: [
+          "`/setgenlog #salon` · `&setgenlog #salon` — Salon de logs généraux (vide = désactiver)",
+          "📡 **Événements** : rejoindre/quitter vocal · messages édités/supprimés · salons créés/modifiés/supprimés",
+          "🎭 Rôles créés/modifiés/supprimés · 👤 Membres (pseudo, rôles) · 🔗 Invitations · 🔨 Bans/débans",
+        ].join("\n"),
+      },
+      {
+        name: "🧪 Tests & diagnostic",
+        value: [
+          "`/testcaptcha` · `&testcaptcha [--apercu] [@membre]` (`&testcap`) — Teste le captcha",
+          "  → Sans option : simulation complète dans le salon captcha (aucun kick réel)",
+          "  → `apercu:True` / `--apercu` : aperçu visuel éphémère de l'embed captcha",
+        ].join("\n"),
       }
     )
-    .setFooter({ text: "Captcha salon/DM • Blacklist global cross-serveurs • DM sanctions ON/OFF • Transcripts .txt • Config persistante" })
+    .setFooter({ text: "Captcha salon/DM • Blacklist global • Logs généraux • Mute vocal • Demande de rôle • Transcripts .txt" })
     .setTimestamp();
 }
 

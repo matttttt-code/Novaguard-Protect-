@@ -46,6 +46,7 @@ import {
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
+import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -974,6 +975,12 @@ async function handleDashboardButton(client: Client, interaction: ButtonInteract
 async function handleModalSubmit(client: Client, interaction: ModalSubmitInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
+
+  if (customId === "rolerequest_modal") {
+    await handleRoleRequestModal(client, interaction);
+    return;
+  }
+
   void client;
 
   const guildId = guild.id;
