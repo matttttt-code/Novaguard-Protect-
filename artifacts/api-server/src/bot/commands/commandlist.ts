@@ -83,10 +83,10 @@ function buildCommandListEmbed(): EmbedBuilder {
       {
         name: "🤖 Auto-modération",
         value: [
-          "👢 **5 messages en 5s** → Expulsion + slowmode 5s sur le salon (1 min)",
-          "🔇 **+5 emojis** dans un message → Timeout 10min",
-          "🔇 **Lien détecté** → Timeout 10min",
-          "🔇 **100% majuscules** (+8 lettres) → Timeout 10min",
+          "👢 **5 messages en 5s** → Expulsion + slowmode 5s sur le salon (1 heure)",
+          "🔇 **+5 emojis** dans un message → Timeout 24h",
+          "🔇 **Lien détecté** → Timeout 24h",
+          "🔇 **100% majuscules** (+8 lettres) → Timeout 24h",
           "⚠️ **Compte < 24h** à l'arrivée → Ping @everyone dans les logs",
           "🤖 **Blacklisté qui rejoint** → Ban automatique + ping @everyone",
           "*Les modérateurs sont exemptés*",
@@ -96,6 +96,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         name: "📩 Utilitaires",
         value: [
           "`/support` · `&support` — Questionnaire d'aide en DM (transmis au staff avec ping rôle)",
+          "`/reglement #salon texte` · `&reglement #salon texte` — Envoie le règlement dans un salon + réaction :verification1:",
           "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
         ].join("\n"),
       }

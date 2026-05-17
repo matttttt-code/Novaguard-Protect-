@@ -52,7 +52,7 @@ async function applySlowmode(channel: TextChannel, seconds: number): Promise<voi
       await channel.setRateLimitPerUser(seconds, "Auto-Mod — slowmode post-expulsion");
       setTimeout(async () => {
         await channel.setRateLimitPerUser(0, "Auto-Mod — slowmode retiré").catch(() => null);
-      }, 60_000);
+      }, 3_600_000);
     }
   } catch {
     // ignore
@@ -110,7 +110,7 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
         { name: "Raison", value: reason },
         { name: "Salon", value: `<#${message.channelId}>`, inline: true },
-        { name: "Slowmode", value: `${AUTOMOD_SLOWMODE_SECONDS}s activé (1 min)`, inline: true },
+        { name: "Slowmode", value: `${AUTOMOD_SLOWMODE_SECONDS}s activé (1 heure)`, inline: true },
       ],
       { tag: "Auto-Mod", id: message.client.user!.id }
     );
