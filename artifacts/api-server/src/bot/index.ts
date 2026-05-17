@@ -12,6 +12,8 @@ import {
   PermissionFlagsBits,
   ChannelType,
   type ApplicationCommandDataResolvable,
+  Guild,
+  User,
 } from "discord.js";
 import { commands, prefixCommands } from "./commands/index.js";
 import { registerAutoMod } from "./automod.js";
@@ -24,7 +26,7 @@ import {
   removeFromBlacklist,
 } from "./blacklist-store.js";
 import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
-import { isRaidMode, getConfig } from "./guild-config-store.js";
+import { isRaidMode, isJoinLocked, getConfig } from "./guild-config-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -139,6 +141,25 @@ export function startBot(): void {
       return;
     }
 
+    if (isJoinLocked(guildId)) {
+      try {
+        await member.kick("Verrouillage des arrivées actif — rejoins plus tard");
+        logger.info({ user: member.user.tag }, "Join lock : membre expulsé automatiquement");
+
+        await sendLog(
+          client,
+          logEmbed(0xf97316, "🔒 Join Lock — Expulsion automatique", [
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Raison", value: "Verrouillage des arrivées actif" },
+          ], { tag: client.user!.tag, id: client.user!.id }),
+          { guildId }
+        );
+      } catch (err) {
+        logger.error({ err }, "Join lock kick error");
+      }
+      return;
+    }
+
     if (isRaidMode(guildId)) {
       try {
         await member.kick("Mode Raid actif — rejoin bloqué");
@@ -218,6 +239,71 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     return;
   }
 
+  if (customId.startsWith("support_ticket_")) {
+    const targetUserId = customId.slice("support_ticket_".length);
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    const config = getConfig(guild.id);
+    const isStaff = config.ticketStaffRoleId
+      ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
+      : member?.permissions.has(PermissionFlagsBits.ManageMessages) ?? false;
+    if (!isStaff) {
+      await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true });
+      return;
+    }
+    const existingChannelId = getTicketChannelByUser(guild.id, targetUserId);
+    if (existingChannelId) {
+      await interaction.reply({ content: `❌ Cet utilisateur a déjà un ticket ouvert : <#${existingChannelId}>`, ephemeral: true });
+      return;
+    }
+    let targetUser: User;
+    try { targetUser = await client.users.fetch(targetUserId); }
+    catch {
+      await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true });
+      return;
+    }
+    await interaction.deferReply({ ephemeral: true });
+    const ticketCh = await createTicketForUser(client, guild, targetUser);
+    if (!ticketCh) {
+      await interaction.editReply({ content: "❌ Impossible de créer le salon ticket." });
+      return;
+    }
+    await interaction.editReply({ content: `✅ Ticket créé pour <@${targetUserId}> : <#${ticketCh.id}>` });
+    await interaction.message.edit({ components: [] }).catch(() => null);
+    try {
+      await targetUser.send(`📬 Le staff a ouvert un ticket pour ta demande de support sur **${guild.name}**. Rendez-vous dans <#${ticketCh.id}> !`);
+    } catch { /* DMs fermés */ }
+    return;
+  }
+
+  if (customId.startsWith("support_dm_")) {
+    const targetUserId = customId.slice("support_dm_".length);
+    const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+    const config = getConfig(guild.id);
+    const isStaff = config.ticketStaffRoleId
+      ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
+      : member?.permissions.has(PermissionFlagsBits.ManageMessages) ?? false;
+    if (!isStaff) {
+      await interaction.reply({ content: "❌ Réservé au staff.", ephemeral: true });
+      return;
+    }
+    let targetUser: User;
+    try { targetUser = await client.users.fetch(targetUserId); }
+    catch {
+      await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true });
+      return;
+    }
+    try {
+      await targetUser.send(
+        `📬 Bonjour ! Ta demande de support sur **${guild.name}** a bien été vue par le staff. Tu auras une réponse très bientôt ! 😊`
+      );
+      await interaction.reply({ content: `✅ Message envoyé en DM à ${targetUser.tag}.`, ephemeral: true });
+    } catch {
+      await interaction.reply({ content: "❌ Impossible d'envoyer un DM (DMs fermés).", ephemeral: true });
+    }
+    await interaction.message.edit({ components: [] }).catch(() => null);
+    return;
+  }
+
   const isApprove = customId.startsWith("bl_approve_");
   const isDeny = customId.startsWith("bl_deny_");
   if (!isApprove && !isDeny) return;
@@ -287,43 +373,17 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
   }
 }
 
-async function handleTicketCreate(client: Client, interaction: ButtonInteraction): Promise<void> {
-  const guild = interaction.guild!;
-  const user = interaction.user;
+async function createTicketForUser(client: Client, guild: Guild, user: User): Promise<TextChannel | null> {
   const config = getConfig(guild.id);
-
-  const existingChannelId = getTicketChannelByUser(guild.id, user.id);
-  if (existingChannelId) {
-    await interaction.reply({
-      content: `❌ Tu as déjà un ticket ouvert : <#${existingChannelId}>`,
-      ephemeral: true,
-    });
-    return;
-  }
-
-  await interaction.deferReply({ ephemeral: true });
-
   const ticketNumber = nextTicketNumber(guild.id);
   const safeName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20);
   const channelName = `🎫-${safeName}-${ticketNumber}`;
 
   const permOverwrites = [
-    {
-      id: guild.id,
-      deny: [PermissionFlagsBits.ViewChannel],
-    },
-    {
-      id: user.id,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles],
-    },
-    {
-      id: client.user!.id,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory],
-    },
-    ...(config.ticketStaffRoleId ? [{
-      id: config.ticketStaffRoleId,
-      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages],
-    }] : []),
+    { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+    { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles] },
+    { id: client.user!.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory] },
+    ...(config.ticketStaffRoleId ? [{ id: config.ticketStaffRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages] }] : []),
   ];
 
   let ticketChannel: TextChannel;
@@ -337,8 +397,7 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
     }) as TextChannel;
   } catch (err) {
     logger.error({ err }, "Erreur lors de la création du salon ticket");
-    await interaction.editReply({ content: "❌ Impossible de créer le salon ticket. Vérifie les permissions du bot." });
-    return;
+    return null;
   }
 
   openTicket({
@@ -381,8 +440,6 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
     components: [closeRow],
   });
 
-  await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${ticketChannel.id}>` });
-
   await sendLog(client, new EmbedBuilder()
     .setColor(0x6366f1)
     .setTitle("🎫 Ticket ouvert")
@@ -392,6 +449,32 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
     ).setTimestamp(),
     { guildId: guild.id }
   );
+
+  return ticketChannel;
+}
+
+async function handleTicketCreate(client: Client, interaction: ButtonInteraction): Promise<void> {
+  const guild = interaction.guild!;
+  const user = interaction.user;
+
+  const existingChannelId = getTicketChannelByUser(guild.id, user.id);
+  if (existingChannelId) {
+    await interaction.reply({
+      content: `❌ Tu as déjà un ticket ouvert : <#${existingChannelId}>`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const ticketChannel = await createTicketForUser(client, guild, user);
+  if (!ticketChannel) {
+    await interaction.editReply({ content: "❌ Impossible de créer le salon ticket. Vérifie les permissions du bot." });
+    return;
+  }
+
+  await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${ticketChannel.id}>` });
 }
 
 async function handleTicketClose(interaction: ButtonInteraction): Promise<void> {

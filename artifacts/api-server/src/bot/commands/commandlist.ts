@@ -35,6 +35,7 @@ function buildCommandListEmbed(): EmbedBuilder {
           "`/nickname` · `&nickname @membre [surnom]` (`&nick`) — Change le surnom",
           "`/revokeinvites` · `&revokeinvites` — Révoque toutes les invitations",
           "`/raidmode activer|désactiver` · `&raidmode on|off` — Mode anti-raid",
+          "`/joinlock activer|désactiver` · `&joinlock on|off` (`&join`) — Bloque toutes les arrivées",
         ].join("\n"),
       },
       {

@@ -5,6 +5,9 @@ import {
   Message,
   Client,
   TextChannel,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from "discord.js";
 import { addSupportRequest, hasSupportRequest } from "../pending-support-store.js";
 import { sendLog, LOG_CHANNEL_ID } from "../log.js";
@@ -106,8 +109,19 @@ export async function handleSupportResponse(
       { name: "Utilisateur", value: `${username} (\`${userId}\`) <@${userId}>`, inline: true },
       { name: "Serveur", value: guildName, inline: true }
     )
-    .setFooter({ text: "Répondre en DM à l'utilisateur directement." })
+    .setFooter({ text: "Utilisez les boutons ci-dessous pour répondre à cette demande." })
     .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`support_ticket_${userId}`)
+      .setLabel("🎫  Ouvrir un ticket")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`support_dm_${userId}`)
+      .setLabel("📩  Message vu — Réponse bientôt")
+      .setStyle(ButtonStyle.Secondary)
+  );
 
   try {
     const channel = await client.channels.fetch(logChannelId);
@@ -115,6 +129,7 @@ export async function handleSupportResponse(
       await (channel as TextChannel).send({
         content: `<@&${SUPPORT_STAFF_ROLE_ID}>`,
         embeds: [embed],
+        components: [row],
       });
     }
   } catch {

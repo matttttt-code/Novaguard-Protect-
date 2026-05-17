@@ -2,6 +2,7 @@ export interface GuildConfig {
   logChannelId: string | null;
   banLogChannelId: string | null;
   raidMode: boolean;
+  joinLock: boolean;
   ticketStaffRoleId: string | null;
   ticketCategoryId: string | null;
 }
@@ -14,6 +15,7 @@ function getOrCreate(guildId: string): GuildConfig {
       logChannelId: null,
       banLogChannelId: null,
       raidMode: false,
+      joinLock: false,
       ticketStaffRoleId: null,
       ticketCategoryId: null,
     });
@@ -26,6 +28,7 @@ export function getConfig(guildId: string): GuildConfig {
     logChannelId: null,
     banLogChannelId: null,
     raidMode: false,
+    joinLock: false,
     ticketStaffRoleId: null,
     ticketCategoryId: null,
   };
@@ -48,6 +51,15 @@ export function setRaidMode(guildId: string, enabled: boolean): void {
 
 export function isRaidMode(guildId: string): boolean {
   return configs.get(guildId)?.raidMode ?? false;
+}
+
+export function setJoinLock(guildId: string, enabled: boolean): void {
+  const c = getOrCreate(guildId);
+  configs.set(guildId, { ...c, joinLock: enabled });
+}
+
+export function isJoinLocked(guildId: string): boolean {
+  return configs.get(guildId)?.joinLock ?? false;
 }
 
 export function setTicketStaffRole(guildId: string, roleId: string): void {
