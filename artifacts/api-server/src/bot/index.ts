@@ -1159,12 +1159,62 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
       .addFields(
         { name: "Membre", value: `${member.user.tag} (\`${mId}\`)`, inline: true },
         { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
-        { name: "Délai", value: "En attente de réponse du membre", inline: false },
+        { name: "Délai", value: "10 minutes pour répondre", inline: false },
       )
       .setTimestamp(), { guildId: gId });
 
+    // Expiration après 10 min — captcha annulé, rôle reste retiré, propriétaire notifié
+    const expireTimer = setTimeout(async () => {
+      if (!hasCaptcha(mId)) return;
+      deleteCaptcha(mId);
+      captchaTimeouts.delete(mId);
+
+      const g = client.guilds.cache.get(gId);
+      const m = await g?.members.fetch(mId).catch(() => null);
+
+      // DM membre
+      await m?.user.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("⏱️ Captcha expiré")
+          .setDescription(
+            `Tu n'as pas répondu au captcha dans les **10 minutes** imparties.\n\n` +
+            `Ton rôle **Administrateur** sur **${g?.name ?? gId}** reste retiré.\n` +
+            `Contacte le propriétaire du serveur pour le récupérer.`
+          )
+          .setFooter({ text: `${g?.name ?? gId} • Vérification sécurité` })
+          .setTimestamp(),
+        ],
+      }).catch(() => null);
+
+      // DM propriétaire
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("⏱️ Captcha admin — Expiré (10 min)")
+        .addFields(
+          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
+          { name: "Serveur", value: g?.name ?? gId, inline: true },
+          { name: "Résultat", value: "Aucune réponse dans les 10 min — rôle **toujours retiré**", inline: false },
+        )
+        .setTimestamp()
+      ).catch(() => null);
+
+      // Log serveur
+      await sendLog(client, new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("⏱️ Captcha admin — Expiré")
+        .setThumbnail(m?.user.displayAvatarURL() ?? "")
+        .addFields(
+          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
+          { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
+          { name: "Raison", value: "10 min écoulées sans réponse — rôle non rétabli", inline: false },
+        )
+        .setTimestamp(), { guildId: gId });
+    }, 10 * 60_000);
+    captchaTimeouts.set(mId, expireTimer);
+
     await interaction.update({
-      content: `🔑 Captcha de confirmation envoyé à **${member.user.tag}** — rôle admin retiré temporairement.\nEn attente de sa réponse.`,
+      content: `🔑 Captcha de confirmation envoyé à **${member.user.tag}** — rôle admin retiré temporairement.\nDélai : **10 minutes** pour répondre.`,
       embeds: [], components: [],
     });
     return;
