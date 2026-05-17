@@ -41,21 +41,6 @@ async function enableRaidMode(
     { guildId: guild.id, pingEveryone: false }
   );
 
-  void requestAdminDMApproval(client, guild, new EmbedBuilder()
-    .setColor(0xef4444)
-    .setTitle("🚨 Mode Raid ACTIVÉ")
-    .setDescription(`Le mode anti-raid a été activé sur **${guild.name}**.`)
-    .addFields(
-      { name: "Activé par", value: `${moderatorTag}`, inline: true },
-      { name: "Invitations révoquées", value: String(deletedInvites), inline: true },
-      { name: "⚠️ Effets actifs", value: "• Invitations non-protégées supprimées\n• Vérification Discord → Élevée\n• Nouveaux membres bloqués" },
-      { name: "Pour désactiver", value: "`/raidmode désactiver` ou `&raidmode off`" },
-    )
-    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
-    .setTimestamp(),
-    "Mode Raid ACTIVÉ"
-  );
-
   return new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("🚨 Mode Raid ACTIVÉ")
