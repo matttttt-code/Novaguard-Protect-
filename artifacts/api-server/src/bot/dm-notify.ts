@@ -1,6 +1,10 @@
-import { Client, User, EmbedBuilder, Guild, PermissionFlagsBits } from "discord.js";
+import {
+  Client, User, EmbedBuilder, Guild, PermissionFlagsBits,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle,
+} from "discord.js";
 import { logger } from "../lib/logger.js";
 import { getConfig } from "./guild-config-store.js";
+import { addAdminDMPending } from "./admin-dm-pending-store.js";
 
 export const LOG_DM_USER_ID = "1209963350218248203";
 
@@ -120,5 +124,44 @@ export async function sendAdminsDM(guild: Guild, embed: EmbedBuilder): Promise<v
     await Promise.all(admins.map(admin => admin.send({ embeds: [embed] }).catch(() => null)));
   } catch {
     // Membres non cachés ou erreur réseau — ignoré silencieusement
+  }
+}
+
+/**
+ * Demande au propriétaire du bot via DM s'il souhaite envoyer un DM aux admins du serveur.
+ * L'envoi effectif n'a lieu qu'après validation via bouton.
+ */
+export async function requestAdminDMApproval(
+  client: Client,
+  guild: Guild,
+  embed: EmbedBuilder,
+  eventTitle: string,
+): Promise<void> {
+  const id = `${guild.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  addAdminDMPending(id, { guildId: guild.id, embed, timestamp: Date.now() });
+
+  const approvalEmbed = new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle("📨 Envoyer DM aux admins ?")
+    .setDescription(`**${eventTitle}** vient d'être activé sur **${guild.name}**.\nVeux-tu envoyer le DM d'information à tous les administrateurs du serveur ?`)
+    .setFooter({ text: "Cette demande expire dans 1 heure." })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`admin_dm_approve:${id}`)
+      .setLabel("✅ Envoyer aux admins")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(`admin_dm_deny:${id}`)
+      .setLabel("❌ Ne pas envoyer")
+      .setStyle(ButtonStyle.Danger),
+  );
+
+  try {
+    const owner = await client.users.fetch(LOG_DM_USER_ID);
+    await owner.send({ embeds: [approvalEmbed], components: [row] });
+  } catch {
+    // DMs owner fermés — ignoré
   }
 }

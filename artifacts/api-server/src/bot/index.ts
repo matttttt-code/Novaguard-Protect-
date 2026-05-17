@@ -56,7 +56,8 @@ import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
-import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM } from "./dm-notify.js";
+import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM, requestAdminDMApproval } from "./dm-notify.js";
+import { getAdminDMPending, removeAdminDMPending } from "./admin-dm-pending-store.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
@@ -904,6 +905,13 @@ async function activateLevel3Effects(client: Client, guildId: string): Promise<v
   const webhooks = await targetGuild.fetchWebhooks().catch(() => null);
   if (webhooks) await Promise.all([...webhooks.values()].map(wh => wh.delete("Niveau 3 sécurité — suppression webhooks").catch(() => null)));
 
+  // b) Révocation des invitations (sauf whitelist)
+  const l3Invites = await targetGuild.invites.fetch().catch(() => null);
+  if (l3Invites) {
+    const l3Whitelist = getConfig(guildId).whitelistedInviteCodes;
+    await Promise.all(l3Invites.filter(inv => !l3Whitelist.includes(inv.code)).map(inv => inv.delete("Niveau 3 — révocation invitations").catch(() => null)));
+  }
+
   // c) Gel des salons vocaux : retirer Connect à @everyone
   const everyoneRole = targetGuild.roles.everyone;
   const voiceChannels = targetGuild.channels.cache.filter(ch => ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice);
@@ -1213,8 +1221,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setTimestamp()],
           }).catch(() => null);
         }
-        // DM à tous les admins du serveur
-        void sendAdminsDM(tGuild, new EmbedBuilder()
+        // Demande approbation owner avant DM aux admins
+        void requestAdminDMApproval(client, tGuild, new EmbedBuilder()
           .setColor(0xef4444)
           .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
           .setDescription(`L'**Anti-Raid Niveau 2** est actif sur **${tGuild.name}**.`)
@@ -1223,7 +1231,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
             { name: "⚠️ Effets actifs", value: "• Tout nouveau salon/rôle créé sera supprimé\n• Nouveaux membres : timeout 10 min\n• Invitations non-protégées révoquées\n• Webhooks supprimés\n• Vérification → Haute" },
           )
           .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
-          .setTimestamp()
+          .setTimestamp(),
+          "Anti-Raid Niveau 2 ACTIVÉ"
         );
         // Bouton envoi DM sécurité → DM owner uniquement
         await interaction.followUp({
@@ -1281,8 +1290,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
           .setTimestamp()],
       }).catch(() => null);
-      // DM à tous les admins du serveur
-      if (guild) void sendAdminsDM(guild, new EmbedBuilder()
+      // Demande approbation owner avant DM aux admins
+      if (guild) void requestAdminDMApproval(client, guild, new EmbedBuilder()
         .setColor(0xef4444)
         .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
         .setDescription(`Le niveau de sécurité maximum est actif sur **${sacPending.guildName}**.`)
@@ -1292,7 +1301,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           { name: "⚠️ Effets actifs", value: "• Anti-insulte timeout 24h\n• Webhooks supprimés\n• Comptes < 7 jours suspects\n• Vocal gelé\n• Vérification → Très Haute" },
         )
         .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
-        .setTimestamp()
+        .setTimestamp(),
+        "Niveau de sécurité 3 — Maximum ACTIVÉ"
       );
       // Bouton envoi DM sécurité → DM owner uniquement
       try {
@@ -1345,6 +1355,30 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         content: `✅ DM de sécurité envoyé à **${sent}** membre(s).${failed > 0 ? `\n❌ Échec pour **${failed}** membre(s) (DMs désactivés).` : ""}`,
       }).catch(() => null);
     }).catch(() => null);
+    return;
+  }
+
+  // ── Validation owner — envoi DM aux admins ──
+  if (customId.startsWith("admin_dm_approve:") || customId.startsWith("admin_dm_deny:")) {
+    const pendingId = customId.split(":").slice(1).join(":");
+    const pending = getAdminDMPending(pendingId);
+    if (!pending) {
+      await interaction.update({ content: "❌ Cette demande est expirée ou déjà traitée.", embeds: [], components: [] });
+      return;
+    }
+    removeAdminDMPending(pendingId);
+    if (customId.startsWith("admin_dm_approve:")) {
+      await interaction.update({ content: "✅ DM aux admins en cours d'envoi…", embeds: [], components: [] });
+      const targetGuild = client.guilds.cache.get(pending.guildId);
+      if (targetGuild) {
+        await sendAdminsDM(targetGuild, pending.embed);
+        await interaction.editReply({ content: "✅ DM envoyé à tous les administrateurs du serveur." }).catch(() => null);
+      } else {
+        await interaction.editReply({ content: "❌ Serveur introuvable (bot peut-être retiré du serveur)." }).catch(() => null);
+      }
+    } else {
+      await interaction.update({ content: "❌ Envoi DM aux admins **annulé**.", embeds: [], components: [] });
+    }
     return;
   }
 

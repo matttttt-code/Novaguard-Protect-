@@ -11,7 +11,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { setRaidMode, isRaidMode, setRaidMode2, isRaidMode2, getConfig } from "../guild-config-store.js";
-import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM } from "../dm-notify.js";
+import { sendLogDM, LOG_DM_USER_ID, requestAdminDMApproval } from "../dm-notify.js";
 import { addPendingRaid2, getPendingRaid2, removePendingRaid2 } from "../raid2-pending-store.js";
 
 async function enableRaidMode(
@@ -41,7 +41,7 @@ async function enableRaidMode(
     { guildId: guild.id, pingEveryone: false }
   );
 
-  void sendAdminsDM(guild, new EmbedBuilder()
+  void requestAdminDMApproval(client, guild, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("🚨 Mode Raid ACTIVÉ")
     .setDescription(`Le mode anti-raid a été activé sur **${guild.name}**.`)
@@ -52,7 +52,8 @@ async function enableRaidMode(
       { name: "Pour désactiver", value: "`/raidmode désactiver` ou `&raidmode off`" },
     )
     .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
-    .setTimestamp()
+    .setTimestamp(),
+    "Mode Raid ACTIVÉ"
   );
 
   return new EmbedBuilder()
