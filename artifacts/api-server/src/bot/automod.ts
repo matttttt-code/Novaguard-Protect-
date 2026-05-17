@@ -11,6 +11,7 @@ import { sendLog, logEmbed } from "./log.js";
 import { getConfig, isRaidMode2 } from "./guild-config-store.js";
 import { sendSanctionDM, sendLogDM } from "./dm-notify.js";
 import { addWarning } from "./warnings-store.js";
+import { getAntilinkConfig } from "./antilink-store.js";
 
 const SPAM_LIMIT = 5;
 const SPAM_WINDOW_MS = 5000;
@@ -233,8 +234,22 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
     }
 
     if (containsLink(content)) {
-      await applyTimeout(member, "Lien non autorisé détecté", message);
-      return;
+      const antilinkCfg = getAntilinkConfig(message.guildId!);
+      if (antilinkCfg.enabled) {
+        const urlMatch = content.match(/https?:\/\/([^/\s]+)|www\.([^/\s]+)/i);
+        const domain = (urlMatch?.[1] ?? urlMatch?.[2] ?? "").toLowerCase();
+        const isAllowed = antilinkCfg.allowedDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+        if (!isAllowed) {
+          if (antilinkCfg.action === "timeout") {
+            await applyTimeout(member, "Lien non autorisé détecté (anti-lien)", message, antilinkCfg.timeoutMinutes * 60 * 1000);
+          } else if (antilinkCfg.action === "warn") {
+            await applyWarn(member, "Lien non autorisé détecté (anti-lien)", message);
+          } else {
+            await message.delete().catch(() => null);
+          }
+          return;
+        }
+      }
     }
 
     if (isAllCaps(content)) {

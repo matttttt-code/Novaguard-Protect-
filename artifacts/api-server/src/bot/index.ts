@@ -54,6 +54,10 @@ import {
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { registerGeneralLog } from "./general-log.js";
 import { setClient } from "./client-store.js";
+import { startTempBanScheduler } from "./tempban-store.js";
+import { registerAntiGhostPing } from "./commands/antighostping.js";
+import { getAntilinkConfig } from "./antilink-store.js";
+import { addWarning } from "./warnings-store.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
@@ -128,6 +132,7 @@ export function startBot(): void {
       logger.error({ err }, "Impossible d'envoyer le DM de démarrage");
     });
     await initInviteTracker(readyClient).catch(() => null);
+    startTempBanScheduler(readyClient);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -238,6 +243,7 @@ export function startBot(): void {
   registerAutoMod(client, hasMessageContent);
   registerPrefixHandler(client, prefixCommands);
   registerGeneralLog(client);
+  registerAntiGhostPing(client);
 
   // ──── GUILD MEMBER ADD ────
   client.on(Events.GuildMemberAdd, async (member) => {
