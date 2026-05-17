@@ -6,9 +6,13 @@ import {
   TextChannel,
   EmbedBuilder,
   ButtonInteraction,
+  ModalSubmitInteraction,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   PermissionFlagsBits,
   ChannelType,
   type ApplicationCommandDataResolvable,
@@ -26,7 +30,12 @@ import {
   removeFromBlacklist,
 } from "./blacklist-store.js";
 import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
-import { isRaidMode, isJoinLocked, getConfig } from "./guild-config-store.js";
+import {
+  isRaidMode, isJoinLocked, getConfig,
+  setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
+  setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
+} from "./guild-config-store.js";
+import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -67,6 +76,10 @@ export function startBot(): void {
   client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       await handleButtonInteraction(client, interaction as ButtonInteraction);
+      return;
+    }
+    if (interaction.isModalSubmit()) {
+      await handleModalSubmit(client, interaction as ModalSubmitInteraction);
       return;
     }
     if (!interaction.isChatInputCommand()) return;
@@ -196,6 +209,28 @@ export function startBot(): void {
     }
 
     await sendLog(client, joinEmbed, { guildId, pingEveryone: isSuspect });
+
+    const cfg = getConfig(guildId);
+    if (cfg.welcomeEnabled && cfg.welcomeChannelId) {
+      try {
+        const wCh = await client.channels.fetch(cfg.welcomeChannelId);
+        if (wCh && wCh.isTextBased()) {
+          const text = cfg.welcomeMessage
+            .replace(/\{user\}/g, `<@${member.id}>`)
+            .replace(/\{username\}/g, member.user.username)
+            .replace(/\{server\}/g, member.guild.name)
+            .replace(/\{count\}/g, String(member.guild.memberCount));
+          const wEmbed = new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setDescription(text)
+            .setThumbnail(member.user.displayAvatarURL())
+            .setTimestamp();
+          await (wCh as TextChannel).send({ embeds: [wEmbed] });
+        }
+      } catch (err) {
+        logger.error({ err }, "Erreur envoi message d'arrivée");
+      }
+    }
   });
 
   client.on(Events.GuildMemberRemove, async (member) => {
@@ -218,6 +253,28 @@ export function startBot(): void {
       .setTimestamp();
 
     await sendLog(client, leaveEmbed, { guildId });
+
+    const lcfg = getConfig(guildId);
+    if (lcfg.leaveEnabled && lcfg.leaveChannelId) {
+      try {
+        const lCh = await client.channels.fetch(lcfg.leaveChannelId);
+        if (lCh && lCh.isTextBased()) {
+          const text = lcfg.leaveMessage
+            .replace(/\{user\}/g, `<@${member.id}>`)
+            .replace(/\{username\}/g, member.user.username)
+            .replace(/\{server\}/g, member.guild.name)
+            .replace(/\{count\}/g, String(member.guild.memberCount));
+          const lEmbed = new EmbedBuilder()
+            .setColor(0x6b7280)
+            .setDescription(text)
+            .setThumbnail(member.user.displayAvatarURL())
+            .setTimestamp();
+          await (lCh as TextChannel).send({ embeds: [lEmbed] });
+        }
+      } catch (err) {
+        logger.error({ err }, "Erreur envoi message de départ");
+      }
+    }
   });
 
   client.login(token).catch((err) => {
@@ -228,6 +285,11 @@ export function startBot(): void {
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
+
+  if (customId.startsWith("dash_")) {
+    await handleDashboardButton(client, interaction);
+    return;
+  }
 
   if (customId === "ticket_create") {
     await handleTicketCreate(client, interaction);
@@ -534,4 +596,188 @@ async function handleTicketClose(interaction: ButtonInteraction): Promise<void> 
   setTimeout(async () => {
     await channel.delete("Ticket fermé").catch(() => null);
   }, 5000);
+}
+
+async function handleDashboardButton(client: Client, interaction: ButtonInteraction): Promise<void> {
+  const { customId, guild } = interaction;
+  if (!guild) return;
+
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!member?.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "❌ Seuls les administrateurs peuvent utiliser le dashboard.", ephemeral: true });
+    return;
+  }
+
+  const guildId = guild.id;
+
+  if (customId === "dash_welcome_toggle") {
+    const cfg = getConfig(guildId);
+    setWelcomeEnabled(guildId, !cfg.welcomeEnabled);
+    const newCfg = getConfig(guildId);
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
+    return;
+  }
+
+  if (customId === "dash_leave_toggle") {
+    const cfg = getConfig(guildId);
+    setLeaveEnabled(guildId, !cfg.leaveEnabled);
+    const newCfg = getConfig(guildId);
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
+    return;
+  }
+
+  if (customId === "dash_reset_welcome_msg") {
+    setWelcomeMessage(guildId, DEFAULT_WELCOME_MSG);
+    const newCfg = getConfig(guildId);
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
+    return;
+  }
+
+  if (customId === "dash_reset_leave_msg") {
+    setLeaveMessage(guildId, DEFAULT_LEAVE_MSG);
+    const newCfg = getConfig(guildId);
+    await interaction.update({ embeds: [buildDashboardEmbed(newCfg, guild)], components: buildDashboardRows(newCfg) });
+    return;
+  }
+
+  if (customId === "dash_welcome_channel") {
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_welcome_channel")
+      .setTitle("Salon des messages d'arrivée")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("channel_id")
+            .setLabel("ID ou mention du salon (#salon ou ID)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder("ex : 123456789012345678 ou <#123456789012345678>")
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (customId === "dash_welcome_msg") {
+    const cfg = getConfig(guildId);
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_welcome_msg")
+      .setTitle("Message d'arrivée")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("message")
+            .setLabel("Message ({user} {username} {server} {count})")
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setValue(cfg.welcomeMessage)
+            .setMaxLength(500)
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (customId === "dash_leave_channel") {
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_leave_channel")
+      .setTitle("Salon des messages de départ")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("channel_id")
+            .setLabel("ID ou mention du salon (#salon ou ID)")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setPlaceholder("ex : 123456789012345678 ou <#123456789012345678>")
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+
+  if (customId === "dash_leave_msg") {
+    const cfg = getConfig(guildId);
+    const modal = new ModalBuilder()
+      .setCustomId("dash_modal_leave_msg")
+      .setTitle("Message de départ")
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("message")
+            .setLabel("Message ({user} {username} {server} {count})")
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setValue(cfg.leaveMessage)
+            .setMaxLength(500)
+        )
+      );
+    await interaction.showModal(modal);
+    return;
+  }
+}
+
+async function handleModalSubmit(client: Client, interaction: ModalSubmitInteraction): Promise<void> {
+  const { customId, guild } = interaction;
+  if (!guild) return;
+
+  const guildId = guild.id;
+
+  function parseChannelId(raw: string): string {
+    return raw.replace(/[<#>]/g, "").trim();
+  }
+
+  if (customId === "dash_modal_welcome_channel") {
+    const raw = interaction.fields.getTextInputValue("channel_id");
+    const channelId = parseChannelId(raw);
+    setWelcomeChannel(guildId, channelId);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: `✅ Salon d'arrivée défini sur <#${channelId}>.`,
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (customId === "dash_modal_welcome_msg") {
+    const msg = interaction.fields.getTextInputValue("message");
+    setWelcomeMessage(guildId, msg);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: "✅ Message d'arrivée mis à jour.",
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (customId === "dash_modal_leave_channel") {
+    const raw = interaction.fields.getTextInputValue("channel_id");
+    const channelId = parseChannelId(raw);
+    setLeaveChannel(guildId, channelId);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: `✅ Salon de départ défini sur <#${channelId}>.`,
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
+
+  if (customId === "dash_modal_leave_msg") {
+    const msg = interaction.fields.getTextInputValue("message");
+    setLeaveMessage(guildId, msg);
+    const newCfg = getConfig(guildId);
+    await interaction.reply({
+      content: "✅ Message de départ mis à jour.",
+      embeds: [buildDashboardEmbed(newCfg, guild)],
+      components: buildDashboardRows(newCfg),
+      ephemeral: true,
+    });
+    return;
+  }
 }
