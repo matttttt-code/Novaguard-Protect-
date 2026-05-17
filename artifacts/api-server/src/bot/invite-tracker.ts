@@ -106,6 +106,74 @@ async function cacheGuildInvites(guild: { id: string; invites: { fetch: () => Pr
   }
 }
 
+// ──── Constructeur d'embed public (réutilisable) ────
+
+export interface InviteEmbedOptions {
+  userId: string;
+  userTag: string;
+  avatarUrl: string;
+  createdTimestamp: number;
+  accountAgeDays: number;
+  accountAgeHours: number;
+  memberCount: number;
+  guildName: string;
+  inviterUser: { id: string; tag: string } | null;
+  inviterId: string | null;
+  usedCode: string | null;
+  iStats: { invited: number; left: number } | null;
+  noInviteReason: string | null;
+}
+
+export function buildInviteEmbed(opts: InviteEmbedOptions): EmbedBuilder {
+  const {
+    userId, userTag, avatarUrl, createdTimestamp,
+    accountAgeDays, accountAgeHours, memberCount,
+    guildName, inviterUser, inviterId, usedCode, iStats, noInviteReason,
+  } = opts;
+
+  // Couleur selon l'âge du compte
+  const color = accountAgeHours < 24 ? 0xef4444 : accountAgeDays < 7 ? 0xf97316 : 0x5865f2;
+
+  const createdTs = Math.floor(createdTimestamp / 1000);
+  const ageStr = accountAgeDays < 1
+    ? `⚠️ ${accountAgeHours}h`
+    : accountAgeDays < 7
+      ? `⚠️ ${accountAgeDays}j`
+      : `${accountAgeDays}j`;
+
+  const active = iStats ? Math.max(0, iStats.invited - iStats.left) : 0;
+
+  // Ligne inviteur
+  let inviterLine: string;
+  if (inviterUser) {
+    inviterLine = `<@${inviterUser.id}> — \`${inviterUser.tag}\``;
+    if (usedCode) inviterLine += ` · \`${usedCode}\``;
+  } else if (inviterId) {
+    inviterLine = `\`${inviterId}\``;
+    if (usedCode) inviterLine += ` · \`${usedCode}\``;
+  } else {
+    inviterLine = noInviteReason ?? "Inconnu";
+  }
+
+  const lines = [
+    `👤 <@${userId}> — \`${userTag}\``,
+    ``,
+    `> 📨 **Invité par** › ${inviterLine}`,
+    iStats
+      ? `> 📊 **Stats** › **${iStats.invited}** invités · **${active}** actifs · **${iStats.left}** partis`
+      : null,
+    `> 📅 **Compte** › <t:${createdTs}:R> · ${ageStr}`,
+    `> 🔢 **Membre** › n°\u202F${memberCount} de ${guildName}`,
+  ].filter((l): l is string => l !== null);
+
+  return new EmbedBuilder()
+    .setColor(color)
+    .setDescription(lines.join("\n"))
+    .setThumbnail(avatarUrl)
+    .setFooter({ text: `ID: ${userId}${inviterId ? ` · Inviteur: ${inviterId}` : ""}` })
+    .setTimestamp();
+}
+
 // ──── Initialisation (à appeler sur ClientReady) ────
 export async function initInviteTracker(client: Client): Promise<void> {
   await Promise.allSettled(client.guilds.cache.map((g) => cacheGuildInvites(g)));
@@ -194,45 +262,33 @@ export async function onMemberJoin(client: Client, member: GuildMember): Promise
     saveToDisk();
   }
 
-  // Construire l'embed (toujours, même sans info d'invite)
+  // Construire l'embed
   const inviterUser = inviterId ? await client.users.fetch(inviterId).catch(() => null) : null;
   const iStats = inviterId ? (inviteStats.get(guildId)?.get(inviterId) ?? { invited: 1, left: 0 }) : null;
-  const active = iStats ? iStats.invited - iStats.left : 0;
 
   const accountAgeMs = Date.now() - member.user.createdTimestamp;
   const accountAgeDays = Math.floor(accountAgeMs / 86_400_000);
   const accountAgeHours = Math.floor(accountAgeMs / 3_600_000);
-  const ageStr = accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`;
 
-  const embed = new EmbedBuilder()
-    .setColor(inviterId ? 0x22c55e : 0x6b7280)
-    .setTitle("📨 Nouveau membre — Arrivée")
-    .setThumbnail(member.user.displayAvatarURL({ size: 256 }))
-    .addFields(
-      { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-      { name: "Âge du compte", value: ageStr, inline: true },
-      { name: "Arrivée", value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
-      {
-        name: "Invité par",
-        value: inviterUser
-          ? `${inviterUser.tag} (\`${inviterId}\`)`
-          : inviterId
-            ? `\`${inviterId}\``
-            : currentInvites.size === 0
-              ? "Indéterminable (permission manquante)"
-              : "Inconnu (vanity URL / OAuth / bot)",
-        inline: true,
-      },
-      ...(usedCode ? [{ name: "Code utilisé", value: `\`${usedCode}\``, inline: true }] : []),
-      { name: "Membres", value: `**${member.guild.memberCount}**`, inline: true },
-      ...(iStats ? [{
-        name: "Stats inviteur",
-        value: `✅ **${iStats.invited}** invités · ❌ **${iStats.left}** partis · 🟢 **${Math.max(0, active)}** actifs`,
-        inline: false,
-      }] : []),
-    )
-    .setFooter({ text: `${member.guild.name} · ID membre : ${member.id}${inviterId ? ` · ID inviteur : ${inviterId}` : ""}` })
-    .setTimestamp();
+  const noInviteReason = currentInvites.size === 0
+    ? "Indéterminable"
+    : "Inconnu (vanity / OAuth)";
+
+  const embed = buildInviteEmbed({
+    userId: member.id,
+    userTag: member.user.tag,
+    avatarUrl: member.user.displayAvatarURL({ size: 256 }),
+    createdTimestamp: member.user.createdTimestamp,
+    accountAgeDays,
+    accountAgeHours,
+    memberCount: member.guild.memberCount,
+    guildName: member.guild.name,
+    inviterUser: inviterUser ?? null,
+    inviterId,
+    usedCode,
+    iStats,
+    noInviteReason,
+  });
 
   // Envoyer dans le salon configuré
   const cfg = getConfig(guildId);
@@ -246,8 +302,8 @@ export async function onMemberJoin(client: Client, member: GuildMember): Promise
   }
 
   // Envoyer en DM au propriétaire du bot
-  await sendLogDM(client, EmbedBuilder.from(embed.toJSON())
-    .setTitle(`📨 [${member.guild.name}] Nouveau membre`)
+  await sendLogDM(client, new EmbedBuilder(embed.toJSON())
+    .setFooter({ text: `${member.guild.name} · ID: ${member.id}${inviterId ? ` · Inviteur: ${inviterId}` : ""}` })
   ).catch(() => null);
 }
 

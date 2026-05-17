@@ -8,7 +8,7 @@ import {
 function buildCommandListEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x6366f1)
-    .setTitle("📋 Liste des commandes — 49 commandes")
+    .setTitle("📋 Liste des commandes — 50 commandes")
     .setDescription("Toutes les commandes disponibles en slash `/` et préfixe `&`")
     .addFields(
       {
@@ -157,10 +157,12 @@ function buildCommandListEmbed(): EmbedBuilder {
           "  → `apercu` : aperçu visuel éphémère de l'embed captcha",
           "`/errortest` · `&errortest` (`&testalerte`) — Envoie les 5 types d'alertes DM en simulation (Admin)",
           "  → 🟢 Démarrage · ❌ Erreur commande · ⚠️ Ping · 💥 Rejet non géré · 🔴 Arrêt",
+          "`/testinviteembed` · `&testinviteembed` (`&testinvite`, `&tinv`) — Aperçu de l'embed de logs d'invitations (Admin)",
+          "  → Envoie dans le salon configuré si défini, sinon dans le salon actuel",
         ].join("\n"),
       },
     )
-    .setFooter({ text: "49 commandes slash · 49 préfixes · Config persistante · Blacklist globale + blacklist invitation" })
+    .setFooter({ text: "50 commandes slash · 50 préfixes · Config persistante · Blacklist globale + blacklist invitation" })
     .setTimestamp();
 }
 

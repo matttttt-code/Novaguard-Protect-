@@ -22,9 +22,9 @@
     "inviteLogChannelId": "1504513378591309954"
   },
   "1504534006253883463": {
-    "logChannelId": null,
+    "logChannelId": "1505445296132591618",
     "banLogChannelId": null,
-    "generalLogChannelId": null,
+    "generalLogChannelId": "1505445296132591618",
     "raidMode": false,
     "joinLock": false,
     "ticketStaffRoleId": null,

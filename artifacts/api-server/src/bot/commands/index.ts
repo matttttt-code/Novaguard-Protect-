@@ -47,6 +47,7 @@ import * as checkinvite from "./checkinvite.js";
 import * as checkinvites from "./checkinvites.js";
 import * as blacklistinvite from "./blacklistinvite.js";
 import * as serverstats from "./serverstats.js";
+import * as testinviteembed from "./testinviteembed.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -68,7 +69,7 @@ export const commands: Command[] = [
   setgenlog, testcaptcha,
   voicemute, rolerequest, suggestion, errortest,
   setinvitelog, checkinvite, checkinvites,
-  blacklistinvite, serverstats,
+  blacklistinvite, serverstats, testinviteembed,
 ];
 
 type PrefixModule = {
@@ -90,7 +91,7 @@ const prefixModules: PrefixModule[] = [
   setgenlog, testcaptcha,
   voicemute, rolerequest, suggestion, errortest,
   setinvitelog, checkinvite, checkinvites,
-  blacklistinvite, serverstats,
+  blacklistinvite, serverstats, testinviteembed,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({
