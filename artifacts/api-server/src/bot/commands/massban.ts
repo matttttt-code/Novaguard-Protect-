@@ -3,10 +3,17 @@ import {
   ChatInputCommandInteraction,
   PermissionFlagsBits,
   EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ComponentType,
   Message,
+  GuildMember,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendBlockedActionDM } from "../dm-notify.js";
+
+const CONFIRM_TIMEOUT_MS = 30_000;
 
 export const data = new SlashCommandBuilder()
   .setName("massban")
@@ -29,9 +36,72 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (ids.length > 50) return interaction.reply({ content: "❌ Maximum 50 IDs par massban.", ephemeral: true });
   if (ids.includes(interaction.user.id)) return interaction.reply({ content: "❌ Vous ne pouvez pas vous inclure dans un massban.", ephemeral: true });
 
-  await interaction.deferReply();
+  // ── Embed de confirmation ─────────────────────────────────────────────────
+  const preview = ids.length <= 10
+    ? ids.map((id) => `\`${id}\``).join("\n")
+    : ids.slice(0, 10).map((id) => `\`${id}\``).join("\n") + `\n*…et ${ids.length - 10} autre(s)*`;
 
-  const moderator = interaction.member as import("discord.js").GuildMember | null;
+  const confirmEmbed = new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle("⚠️ Confirmation requise — Massban")
+    .setDescription("Vous êtes sur le point de bannir **plusieurs membres** en une seule action. Cette opération est **irréversible**.\n\nVérifiez la liste ci-dessous avant de confirmer.")
+    .addFields(
+      { name: "Nombre d'IDs", value: `**${ids.length}**`, inline: true },
+      { name: "Suppression messages", value: deleteMessageSeconds > 0 ? `${deleteMessageSeconds / 86400} jour(s)` : "Aucune", inline: true },
+      { name: "Raison", value: reason },
+      { name: "IDs ciblés", value: preview },
+    )
+    .setFooter({ text: `Cette confirmation expire dans ${CONFIRM_TIMEOUT_MS / 1000}s · Seul le modérateur peut répondre` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("massban_confirm")
+      .setLabel("✅ Confirmer le massban")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("massban_cancel")
+      .setLabel("❌ Annuler")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  await interaction.reply({ embeds: [confirmEmbed], components: [row], ephemeral: true });
+
+  // ── Attente de la confirmation ────────────────────────────────────────────
+  let confirmed = false;
+  try {
+    const btn = await interaction.fetchReply();
+    const collector = btn.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      filter: (i) => i.user.id === interaction.user.id,
+      time: CONFIRM_TIMEOUT_MS,
+      max: 1,
+    });
+
+    await new Promise<void>((resolve) => {
+      collector.on("collect", async (i) => {
+        confirmed = i.customId === "massban_confirm";
+        await i.deferUpdate();
+        resolve();
+      });
+      collector.on("end", (_collected, reason) => {
+        if (reason === "time") resolve();
+      });
+    });
+  } catch {
+    return interaction.editReply({ content: "❌ Impossible de collecter la réponse.", components: [], embeds: [] });
+  }
+
+  if (!confirmed) {
+    const cancelEmbed = new EmbedBuilder().setColor(0x6b7280).setTitle("🚫 Massban annulé").setDescription("L'opération a été annulée ou a expiré. Aucun membre n'a été banni.").setTimestamp();
+    return interaction.editReply({ embeds: [cancelEmbed], components: [] });
+  }
+
+  // ── Exécution ─────────────────────────────────────────────────────────────
+  const progressEmbed = new EmbedBuilder().setColor(0xf59e0b).setTitle("⏳ Massban en cours…").setDescription(`Traitement de **${ids.length}** IDs…`);
+  await interaction.editReply({ embeds: [progressEmbed], components: [] });
+
+  const moderator = interaction.member as GuildMember | null;
   const results = { success: 0, skipped: 0, failed: 0, skippedTags: [] as string[] };
 
   for (const id of ids) {
@@ -63,17 +133,17 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   }
 
   const color = results.success > 0 ? 0xef4444 : 0xf59e0b;
-  const embed = new EmbedBuilder().setColor(color).setTitle("🔨 Massban")
+  const resultEmbed = new EmbedBuilder().setColor(color).setTitle("🔨 Massban terminé")
     .addFields(
       { name: "IDs traités", value: String(ids.length), inline: true },
-      { name: "Bannis", value: String(results.success), inline: true },
-      { name: "Ignorés", value: String(results.skipped), inline: true },
-      { name: "Échecs", value: String(results.failed), inline: true },
+      { name: "✅ Bannis", value: String(results.success), inline: true },
+      { name: "⏭️ Ignorés", value: String(results.skipped), inline: true },
+      { name: "❌ Échecs", value: String(results.failed), inline: true },
       { name: "Raison", value: reason },
       ...(results.skippedTags.length ? [{ name: "Ignorés (détail)", value: results.skippedTags.slice(0, 10).join("\n") }] : []),
     ).setTimestamp();
 
-  await interaction.editReply({ embeds: [embed] });
+  await interaction.editReply({ embeds: [resultEmbed], components: [] });
   return sendLog(interaction.client, logEmbed(0xef4444, "🔨 Massban", [
     { name: "IDs", value: String(ids.length), inline: true },
     { name: "Bannis", value: String(results.success), inline: true },
@@ -91,12 +161,62 @@ export async function executeMessage(message: Message, args: string[]) {
   }
 
   const ids = [...new Set(args.map(s => s.replace(/[<@!>]/g, "").trim()).filter(s => /^\d+$/.test(s)))];
-  if (ids.length === 0) { await message.reply("Usage : `&massban <id1> <id2> ... [raison]`"); return; }
+  if (ids.length === 0) { await message.reply("Usage : `&massban <id1> <id2> ...` — max 50 IDs."); return; }
+  if (ids.length > 50) { await message.reply("❌ Maximum 50 IDs par massban."); return; }
 
   const reasonArgs = args.filter(s => !/^\d+$/.test(s.replace(/[<@!>]/g, "")));
   const reason = reasonArgs.join(" ") || "Massban — aucune raison fournie";
 
-  await message.reply(`⏳ Massban en cours pour **${ids.length}** IDs…`);
+  const preview = ids.length <= 10
+    ? ids.map((id) => `\`${id}\``).join("\n")
+    : ids.slice(0, 10).map((id) => `\`${id}\``).join("\n") + `\n*…et ${ids.length - 10} autre(s)*`;
+
+  const confirmEmbed = new EmbedBuilder()
+    .setColor(0xf59e0b)
+    .setTitle("⚠️ Confirmation requise — Massban")
+    .setDescription("Vous êtes sur le point de bannir **plusieurs membres**. Cette opération est **irréversible**.")
+    .addFields(
+      { name: "Nombre d'IDs", value: `**${ids.length}**`, inline: true },
+      { name: "Raison", value: reason },
+      { name: "IDs ciblés", value: preview },
+    )
+    .setFooter({ text: `Expire dans ${CONFIRM_TIMEOUT_MS / 1000}s · Seul ${message.author.tag} peut répondre` })
+    .setTimestamp();
+
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("massban_confirm_prefix")
+      .setLabel("✅ Confirmer le massban")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("massban_cancel_prefix")
+      .setLabel("❌ Annuler")
+      .setStyle(ButtonStyle.Secondary),
+  );
+
+  const confirmMsg = await message.reply({ embeds: [confirmEmbed], components: [row] });
+
+  let confirmed = false;
+  try {
+    const interaction = await confirmMsg.awaitMessageComponent({
+      componentType: ComponentType.Button,
+      filter: (i) => i.user.id === message.author.id,
+      time: CONFIRM_TIMEOUT_MS,
+    });
+    confirmed = interaction.customId === "massban_confirm_prefix";
+    await interaction.deferUpdate();
+  } catch {
+    // timeout
+  }
+
+  if (!confirmed) {
+    const cancelEmbed = new EmbedBuilder().setColor(0x6b7280).setTitle("🚫 Massban annulé").setDescription("Aucun membre n'a été banni.").setTimestamp();
+    await confirmMsg.edit({ embeds: [cancelEmbed], components: [] });
+    return;
+  }
+
+  const progressEmbed = new EmbedBuilder().setColor(0xf59e0b).setTitle("⏳ Massban en cours…").setDescription(`Traitement de **${ids.length}** IDs…`);
+  await confirmMsg.edit({ embeds: [progressEmbed], components: [] });
 
   let success = 0, failed = 0;
   for (const id of ids.slice(0, 50)) {
@@ -106,7 +226,14 @@ export async function executeMessage(message: Message, args: string[]) {
     } catch { failed++; }
   }
 
-  await message.reply(`✅ Massban terminé : **${success}** bannis, **${failed}** échecs.`);
+  const resultEmbed = new EmbedBuilder().setColor(0xef4444).setTitle("🔨 Massban terminé")
+    .addFields(
+      { name: "✅ Bannis", value: String(success), inline: true },
+      { name: "❌ Échecs", value: String(failed), inline: true },
+      { name: "Raison", value: reason },
+    ).setTimestamp();
+
+  await confirmMsg.edit({ embeds: [resultEmbed], components: [] });
   await sendLog(message.client, logEmbed(0xef4444, "🔨 Massban", [
     { name: "IDs", value: String(ids.length), inline: true },
     { name: "Bannis", value: String(success), inline: true },
