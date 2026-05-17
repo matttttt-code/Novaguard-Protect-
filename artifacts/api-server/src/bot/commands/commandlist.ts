@@ -157,12 +157,13 @@ function buildEmbeds(): EmbedBuilder[] {
         value: [
           "`/restart` · `&restart` — **Redémarre le bot** (propriétaire uniquement)",
           "`/testcaptcha [simulation|apercu] [@m]` · `&testcaptcha` (`&testcap`)",
+          "`/creetestbot créer|message|spam|insulte|lien|liste|supprimer` · `&creetestbot` (`&ctb`) — Bots de test (webhooks)",
           "`/errortest` · `&errortest` (`&testalerte`) — Teste les alertes DM",
           "`/testinviteembed` · `&testinviteembed` (`&tinv`) — Aperçu logs invitations",
         ].join("\n"),
       },
     )
-    .setFooter({ text: "58 commandes slash · 58 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "59 commandes slash · 59 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];
