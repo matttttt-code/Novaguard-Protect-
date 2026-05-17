@@ -45,6 +45,7 @@ import {
 } from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { registerGeneralLog } from "./general-log.js";
+import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -78,8 +79,6 @@ export function startBot(): void {
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
   });
-
-  const captchaTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   // Empêche le crash du process sur erreur non gérée du client
   client.on("error", (err) => { logger.error({ err }, "Erreur non gérée du client Discord"); });
@@ -478,18 +477,39 @@ async function handleCaptchaChannelMessage(
   if (answer.toUpperCase() === challenge.code.toUpperCase()) {
     const msgId = challenge.challengeMessageId;
     const chanId = getConfig(challenge.guildId).captchaChannelId;
+    const { guildId: cGuildId, isTest } = challenge;
     deleteCaptcha(message.author.id);
-    await resolveCaptchaSuccess(client, message.author.id, challenge.guildId, captchaTimeouts, msgId, chanId);
+
+    if (isTest) {
+      const tid = captchaTimeouts.get(message.author.id);
+      if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+      if (msgId && chanId) {
+        try {
+          const ch = await client.channels.fetch(chanId) as TextChannel | null;
+          const msg = await ch?.messages.fetch(msgId).catch(() => null);
+          await msg?.edit({ content: null, embeds: [new EmbedBuilder().setColor(0x22c55e).setTitle("🧪 [TEST] Vérification réussie").setDescription(`<@${message.author.id}> a résolu le captcha de test.\nAucune modification de rôle appliquée.`).setTimestamp()] }).catch(() => null);
+          setTimeout(() => msg?.delete().catch(() => null), 10_000);
+          const ok = await ch?.send({ content: `<@${message.author.id}> 🧪 **[TEST] Captcha réussi !** — Aucune action réelle effectuée.` }).catch(() => null);
+          if (ok) setTimeout(() => ok.delete().catch(() => null), 10_000);
+        } catch { /* ignore */ }
+      }
+      await sendLog(client, new EmbedBuilder().setColor(0x22c55e).setTitle("🧪 [TEST] Captcha réussi").setThumbnail(message.author.displayAvatarURL()).addFields({ name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true }, { name: "Mode", value: "Simulation — aucune action réelle", inline: true }).setTimestamp(), { guildId: cGuildId });
+      return;
+    }
+
+    await resolveCaptchaSuccess(client, message.author.id, cGuildId, captchaTimeouts, msgId, chanId);
   } else {
     const remaining = decrementAttempts(message.author.id);
     if (remaining <= 0) {
       const msgId = challenge.challengeMessageId;
+      const isTest = challenge.isTest ?? false;
+      const failGuildId = challenge.guildId;
       deleteCaptcha(message.author.id);
       const tid = captchaTimeouts.get(message.author.id);
       if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
 
       // Edit challenge message to show failure
-      const cfg = getConfig(challenge.guildId);
+      const cfg = getConfig(failGuildId);
       if (msgId && cfg.captchaChannelId) {
         try {
           const ch = await client.channels.fetch(cfg.captchaChannelId) as TextChannel | null;
@@ -498,35 +518,41 @@ async function handleCaptchaChannelMessage(
             content: null,
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
-              .setTitle("❌ Captcha échoué")
-              .setDescription(`<@${message.author.id}> a épuisé ses tentatives et a été expulsé.`)
+              .setTitle(isTest ? "🧪 [TEST] Captcha échoué" : "❌ Captcha échoué")
+              .setDescription(isTest
+                ? `<@${message.author.id}> a épuisé ses tentatives. (Mode test — aucune expulsion)`
+                : `<@${message.author.id}> a épuisé ses tentatives et a été expulsé.`)
               .setTimestamp()],
           }).catch(() => null);
           setTimeout(() => { msg?.delete().catch(() => null); }, 10_000);
         } catch { /* ignore */ }
       }
 
-      const guild = client.guilds.cache.get(challenge.guildId);
-      const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
-      await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+      if (!isTest) {
+        const guild = client.guilds.cache.get(failGuildId);
+        const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
+        await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+      }
 
       await sendLog(client, new EmbedBuilder()
         .setColor(0xef4444)
-        .setTitle("❌ Captcha échoué")
+        .setTitle(isTest ? "🧪 [TEST] Captcha échoué" : "❌ Captcha échoué")
         .setThumbnail(message.author.displayAvatarURL())
         .addFields(
           { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
-          { name: "Raison", value: "Trop de mauvaises tentatives — expulsé", inline: true },
+          { name: "Raison", value: isTest ? "Trop de mauvaises tentatives (test — aucune expulsion)" : "Trop de mauvaises tentatives — expulsé", inline: true },
         )
-        .setTimestamp(), { guildId: challenge.guildId });
+        .setTimestamp(), { guildId: failGuildId });
 
       // Feedback visible pour l'utilisateur
-      const cfg2 = getConfig(challenge.guildId);
+      const cfg2 = getConfig(failGuildId);
       if (cfg2.captchaChannelId) {
         try {
           const ch2 = await client.channels.fetch(cfg2.captchaChannelId) as TextChannel | null;
           const failMsg = await ch2?.send({
-            content: `<@${message.author.id}> ❌ **Captcha échoué !** Trop de mauvaises tentatives — tu as été expulsé du serveur.`,
+            content: isTest
+              ? `<@${message.author.id}> 🧪 **[TEST] Captcha échoué !** Trop de mauvaises tentatives. (Aucune action réelle effectuée)`
+              : `<@${message.author.id}> ❌ **Captcha échoué !** Trop de mauvaises tentatives — tu as été expulsé du serveur.`,
           }).catch(() => null);
           if (failMsg) setTimeout(() => failMsg.delete().catch(() => null), 10_000);
         } catch { /* ignore */ }

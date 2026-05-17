@@ -2,6 +2,7 @@
   "1504463605163364573": {
     "logChannelId": "1505255721988657322",
     "banLogChannelId": "1505158615567302747",
+    "generalLogChannelId": "1504477683025707104",
     "raidMode": false,
     "joinLock": false,
     "ticketStaffRoleId": "1505490829513457745",
@@ -22,6 +23,7 @@
   "1504534006253883463": {
     "logChannelId": null,
     "banLogChannelId": null,
+    "generalLogChannelId": null,
     "raidMode": false,
     "joinLock": false,
     "ticketStaffRoleId": null,

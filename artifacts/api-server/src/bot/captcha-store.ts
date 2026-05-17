@@ -3,6 +3,7 @@ export interface CaptchaChallenge {
   guildId: string;
   attempts: number;
   challengeMessageId?: string;
+  isTest?: boolean;
 }
 
 const CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
