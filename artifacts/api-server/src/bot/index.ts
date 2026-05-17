@@ -110,7 +110,11 @@ export function startBot(): void {
 
     try {
       const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);
+      // Enregistrement global (propagation ~1h) + par serveur (instantané)
       await readyClient.application.commands.set(commandData);
+      await Promise.all(
+        readyClient.guilds.cache.map(g => g.commands.set(commandData).catch(() => null)),
+      );
       logger.info({ count: commandData.length }, "Commandes slash enregistrées avec succès");
     } catch (err) {
       logger.error({ err }, "Erreur lors de l'enregistrement des commandes");
