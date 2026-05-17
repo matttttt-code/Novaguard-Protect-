@@ -56,7 +56,7 @@ import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
-import { sendLogDM } from "./dm-notify.js";
+import { sendLogDM, LOG_DM_USER_ID } from "./dm-notify.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
@@ -1207,16 +1207,24 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setDescription(`Approuvé par le propriétaire du bot.\nDemandé par <@${raid2.requesterId}>.`)
               .addFields({ name: "⚠️ Effets actifs", value: "• Tout nouveau **salon** ou **rôle** créé sera supprimé auto\n• Tout membre qui rejoint reçoit un **timeout 10 min**\n• Toutes les **invitations** ont été révoquées\n• Tous les **webhooks** ont été supprimés\n• Vérification Discord → **Haute** (téléphone requis)\n• Anti-spam renforcé : 3 msg en 3s = expulsion" })
               .setTimestamp()],
-            components: [
-              new ActionRowBuilder<ButtonBuilder>().addComponents(
-                new ButtonBuilder()
-                  .setCustomId(`send_sec_dm:${r2GuildId}`)
-                  .setLabel("📨 Envoyer DM sécurité à tous")
-                  .setStyle(ButtonStyle.Danger),
-              ),
-            ],
           }).catch(() => null);
         }
+        // Bouton envoi DM sécurité → DM owner uniquement
+        await interaction.followUp({
+          embeds: [new EmbedBuilder()
+            .setColor(0xef4444)
+            .setTitle("📨 Envoyer DM sécurité ?")
+            .setDescription(`L'**Anti-Raid Niveau 2** est actif sur **${raid2.guildName}**.\nTu peux envoyer un DM d'information de sécurité à tous les membres.`)
+            .setTimestamp()],
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`send_sec_dm:${r2GuildId}`)
+                .setLabel("📨 Envoyer DM sécurité à tous")
+                .setStyle(ButtonStyle.Danger),
+            ),
+          ],
+        }).catch(() => null);
       }
     } else {
       removePendingRaid2(r2GuildId);
@@ -1255,15 +1263,26 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           .setDescription(`Approuvé par le propriétaire du bot + confirmé par <@${interaction.user.id}>.\nDemandé par <@${sacPending.requesterId}>.`)
           .addFields({ name: "Effets actifs", value: "• Anti-insulte timeout 24h\n• Anti-webhook auto\n• Comptes < 7 jours suspects\n• Alerte DM owner pour tout compte suspect" })
           .setTimestamp()],
-        components: [
-          new ActionRowBuilder<ButtonBuilder>().addComponents(
-            new ButtonBuilder()
-              .setCustomId(`send_sec_dm:${sacGuildId}`)
-              .setLabel("📨 Envoyer DM sécurité à tous")
-              .setStyle(ButtonStyle.Danger),
-          ),
-        ],
       }).catch(() => null);
+      // Bouton envoi DM sécurité → DM owner uniquement
+      try {
+        const ownerUser = await client.users.fetch(LOG_DM_USER_ID);
+        await ownerUser.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0xef4444)
+            .setTitle("📨 Envoyer DM sécurité ?")
+            .setDescription(`Le **Niveau 3** est actif sur **${sacPending.guildName}**.\nTu peux envoyer un DM d'information de sécurité à tous les membres.`)
+            .setTimestamp()],
+          components: [
+            new ActionRowBuilder<ButtonBuilder>().addComponents(
+              new ButtonBuilder()
+                .setCustomId(`send_sec_dm:${sacGuildId}`)
+                .setLabel("📨 Envoyer DM sécurité à tous")
+                .setStyle(ButtonStyle.Danger),
+            ),
+          ],
+        });
+      } catch { /* DMs owner fermés */ }
     } else {
       removePendingLevel3(sacGuildId);
       await interaction.update({ content: `❌ Niveau 3 **refusé** par ${interaction.user.tag}.`, embeds: [], components: [] });
@@ -1276,13 +1295,16 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
   if (customId.startsWith("send_sec_dm:")) {
     const sdGuildId = customId.split(":")[1] ?? "";
     if (!sdGuildId) return;
-    const sdMember = guild
-      ? await guild.members.fetch(interaction.user.id).catch(() => null)
-      : null;
-    const hasAdmin = sdMember?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
-    if (!hasAdmin) {
-      await interaction.reply({ content: "❌ Seuls les administrateurs peuvent déclencher cette action.", ephemeral: true });
-      return;
+    // En DM (pas de guild) → seul le propriétaire du bot peut déclencher
+    // En serveur → admin requis
+    const isOwner = interaction.user.id === LOG_DM_USER_ID;
+    if (!isOwner) {
+      const sdMember = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
+      const hasAdmin = sdMember?.permissions.has(PermissionFlagsBits.Administrator) ?? false;
+      if (!hasAdmin) {
+        await interaction.reply({ content: "❌ Seuls les administrateurs peuvent déclencher cette action.", ephemeral: true });
+        return;
+      }
     }
     await interaction.update({
       content: "⏳ Envoi des DMs de sécurité en cours… cela peut prendre plusieurs minutes selon la taille du serveur.",
