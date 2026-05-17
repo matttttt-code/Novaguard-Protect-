@@ -111,6 +111,8 @@ export function startBot(): void {
 
     const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);
     try {
+      // Efface les commandes globales (évite les doublons si elles existaient avant)
+      await readyClient.application.commands.set([]).catch(() => null);
       // Enregistrement par serveur uniquement (instantané, sans doublon global)
       await Promise.all(
         readyClient.guilds.cache.map(g => g.commands.set(commandData).catch(() => null)),

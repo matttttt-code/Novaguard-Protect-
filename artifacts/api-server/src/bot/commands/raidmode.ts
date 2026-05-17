@@ -13,6 +13,15 @@ import { sendLog, logEmbed } from "../log.js";
 import { setRaidMode, isRaidMode, setRaidMode2, isRaidMode2, getConfig } from "../guild-config-store.js";
 import { sendLogDM, LOG_DM_USER_ID, requestAdminDMApproval } from "../dm-notify.js";
 import { addPendingRaid2, getPendingRaid2, removePendingRaid2 } from "../raid2-pending-store.js";
+import { GuildTextBasedChannel } from "discord.js";
+import {
+  genCode,
+  captchaEmbed,
+  captchaSuccessEmbed,
+  captchaFailEmbed,
+  collectCaptchaResponse,
+  awaitPrefixCaptcha,
+} from "../captcha-confirm.js";
 
 async function enableRaidMode(
   guild: NonNullable<ChatInputCommandInteraction["guild"]>,
@@ -198,17 +207,40 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (!interaction.guild) return interaction.reply({ content: "Commande serveur uniquement.", ephemeral: true });
 
   const action = interaction.options.getString("action", true);
-  await interaction.deferReply();
 
   if (action === "niveau2-activer") {
+    await interaction.deferReply();
     const embed = await requestRaidMode2(interaction.guild, interaction.client, interaction.user.id, interaction.user.tag);
     return interaction.editReply({ embeds: [embed] });
   }
+
   if (action === "niveau2-désactiver") {
+    if (!isRaidMode2(interaction.guild.id)) {
+      return interaction.reply({
+        embeds: [new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("⚠️ Anti-Raid Niveau 2 non actif")
+          .setDescription("Le niveau 2 n'est pas actif sur ce serveur.")
+          .setTimestamp()],
+        ephemeral: true,
+      });
+    }
+    if (!interaction.channel?.isTextBased()) {
+      return interaction.reply({ content: "❌ Impossible de lancer le captcha dans ce salon.", ephemeral: true });
+    }
+    const code = genCode();
+    await interaction.reply({ embeds: [captchaEmbed(code, "Désactivation Anti-Raid N2")] });
+    const ok = await collectCaptchaResponse(interaction.channel as GuildTextBasedChannel, interaction.user.id, code);
+    if (!ok) {
+      return interaction.editReply({ embeds: [captchaFailEmbed()] });
+    }
+    await interaction.editReply({ embeds: [captchaSuccessEmbed()] });
     const embed = await disableRaidMode2(interaction.guild, interaction.client, interaction.user.tag, interaction.user.id);
-    return interaction.editReply({ embeds: [embed] });
+    await interaction.followUp({ embeds: [embed] });
+    return;
   }
 
+  await interaction.deferReply();
   const embed =
     action === "activer"
       ? await enableRaidMode(interaction.guild, interaction.client, interaction.user.tag, interaction.user.id)
@@ -236,9 +268,16 @@ export async function executeMessage(message: Message, args: string[]) {
     const embed = await requestRaidMode2(message.guild, message.client, message.author.id, message.author.tag);
     await message.reply({ embeds: [embed] }); return;
   }
+
   if (isLevel2Disable) {
+    if (!isRaidMode2(message.guild.id)) {
+      await message.reply("⚠️ L'Anti-Raid Niveau 2 n'est pas actif sur ce serveur."); return;
+    }
+    const ok = await awaitPrefixCaptcha(message.channel as GuildTextBasedChannel, message.author.id, "Désactivation Anti-Raid N2");
+    if (!ok) return;
     const embed = await disableRaidMode2(message.guild, message.client, message.author.tag, message.author.id);
-    await message.reply({ embeds: [embed] }); return;
+    await (message.channel as GuildTextBasedChannel).send({ embeds: [embed] });
+    return;
   }
 
   if (!isEnable && !isDisable) {

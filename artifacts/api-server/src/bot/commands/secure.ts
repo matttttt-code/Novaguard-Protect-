@@ -8,6 +8,7 @@ import {
   ButtonStyle,
   ActionRowBuilder,
   Client,
+  GuildTextBasedChannel,
 } from "discord.js";
 import {
   getConfig,
@@ -16,6 +17,14 @@ import {
 } from "../guild-config-store.js";
 import { addPendingLevel3 } from "../security-pending-store.js";
 import { sendLogDM, LOG_DM_USER_ID } from "../dm-notify.js";
+import {
+  genCode,
+  captchaEmbed,
+  captchaSuccessEmbed,
+  captchaFailEmbed,
+  collectCaptchaResponse,
+  awaitPrefixCaptcha,
+} from "../captcha-confirm.js";
 
 const LEVEL_LABELS: Record<1 | 2 | 3, string> = {
   1: "🟢 Niveau 1 — Normal",
@@ -172,6 +181,23 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       return;
     }
 
+    // Captcha requis pour quitter le niveau 3
+    if (current === 3) {
+      if (!interaction.channel?.isTextBased()) {
+        return interaction.reply({ content: "❌ Impossible de lancer le captcha dans ce salon.", ephemeral: true });
+      }
+      const code = genCode();
+      await interaction.reply({ embeds: [captchaEmbed(code, `Désactivation Niveau 3 → Niveau ${val}`)] });
+      const ok = await collectCaptchaResponse(interaction.channel as GuildTextBasedChannel, interaction.user.id, code);
+      if (!ok) {
+        return interaction.editReply({ embeds: [captchaFailEmbed()] });
+      }
+      await interaction.editReply({ embeds: [captchaSuccessEmbed()] });
+      setSecurityLevel(guildId, val);
+      await interaction.followUp({ embeds: [buildSecureEmbed(guildId, interaction.guild.name)] });
+      return;
+    }
+
     setSecurityLevel(guildId, val);
     return interaction.reply({ embeds: [buildSecureEmbed(guildId, interaction.guild.name)] });
   }
@@ -209,6 +235,14 @@ export async function executeMessage(message: Message, args: string[]) {
       await sendLevel3ApprovalDM(message.client, guildId, message.guild.name, message.author.id, message.author.tag, message.channelId);
       return;
     }
+
+    // Captcha requis pour quitter le niveau 3
+    const current = getConfig(guildId).securityLevel;
+    if (current === 3) {
+      const ok = await awaitPrefixCaptcha(message.channel as GuildTextBasedChannel, message.author.id, `Désactivation Niveau 3 → Niveau ${val}`);
+      if (!ok) return;
+    }
+
     setSecurityLevel(guildId, val);
     await message.reply({ embeds: [buildSecureEmbed(guildId, message.guild.name)] }); return;
   }
