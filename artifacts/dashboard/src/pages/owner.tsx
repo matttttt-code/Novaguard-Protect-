@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocation, useParams, Link } from "wouter";
-import { getToken, clearToken } from "@/lib/auth";
+import { getToken, clearToken, decodeToken } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,18 +10,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, Lock, LogOut } from "lucide-react";
-
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-const OWNER_TOKEN_KEY = "owner_token";
-
-function getOwnerToken() { return localStorage.getItem(OWNER_TOKEN_KEY) ?? ""; }
-function setOwnerToken(t: string) { localStorage.setItem(OWNER_TOKEN_KEY, t); }
-function clearOwnerToken() { localStorage.removeItem(OWNER_TOKEN_KEY); }
+import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, ShieldOff } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
-  const token = getOwnerToken();
-  return fetch(`${BASE}${path}`, {
+  const token = getToken();
+  return fetch(path, {
     ...opts,
     headers: {
       "Content-Type": "application/json",
@@ -29,72 +22,6 @@ function apiFetch(path: string, opts: RequestInit = {}) {
       ...(opts.headers ?? {}),
     },
   });
-}
-
-function OwnerLogin({ onSuccess }: { onSuccess: () => void }) {
-  const [pw, setPw] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [, setLocation] = useLocation();
-
-  async function handleLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      const r = await fetch(`${BASE}/api/owner/auth`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: pw }),
-      });
-      if (r.ok) {
-        setOwnerToken(pw);
-        onSuccess();
-      } else {
-        setError("Mot de passe incorrect.");
-      }
-    } catch {
-      setError("Erreur de connexion.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <Card className="w-full max-w-sm">
-        <CardHeader className="text-center space-y-2">
-          <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-            <Lock className="h-6 w-6 text-primary" />
-          </div>
-          <CardTitle className="font-mono uppercase tracking-tight">Panneau Propriétaire</CardTitle>
-          <CardDescription>Accès restreint — mot de passe requis.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <Input
-                type="password"
-                value={pw}
-                onChange={(e) => setPw(e.target.value)}
-                placeholder="Mot de passe owner..."
-                autoFocus
-              />
-              {error && <p className="text-destructive text-sm mt-1.5">{error}</p>}
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" className="flex-1" onClick={() => setLocation("/guilds")}>
-                <ArrowLeft className="h-4 w-4 mr-1" /> Retour
-              </Button>
-              <Button type="submit" className="flex-1" disabled={loading || !pw}>
-                {loading ? "Vérification..." : "Accéder"}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
-  );
 }
 
 type Channel = { id: string; name: string; type: number; parentId: string | null; position: number };
@@ -123,7 +50,11 @@ export default function OwnerPanel() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
 
-  const [ownerAuthed, setOwnerAuthed] = useState(() => !!getOwnerToken());
+  const user = decodeToken();
+
+  useEffect(() => {
+    if (!getToken()) { setLocation("/"); return; }
+  }, [setLocation]);
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -131,43 +62,30 @@ export default function OwnerPanel() {
   const [loading, setLoading] = useState(true);
   const [guildName, setGuildName] = useState("");
 
-  // Messages state
   const [selectedChannelId, setSelectedChannelId] = useState("");
   const [messageContent, setMessageContent] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
 
-  // Create channel state
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelType, setNewChannelType] = useState<string>("text");
   const [newChannelParent, setNewChannelParent] = useState("");
   const [newChannelTopic, setNewChannelTopic] = useState("");
   const [creatingChannel, setCreatingChannel] = useState(false);
 
-  // Member action state
   const [actionMemberId, setActionMemberId] = useState("");
   const [actionReason, setActionReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
-  // Guild settings state
   const [guildEditName, setGuildEditName] = useState("");
   const [guildVerifLevel, setGuildVerifLevel] = useState<string>("0");
   const [guildSystemChannel, setGuildSystemChannel] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
 
-  useEffect(() => {
-    if (!getToken()) { setLocation("/"); return; }
-  }, [setLocation]);
-
-  const handleOwnerUnauth = useCallback(() => {
-    clearOwnerToken();
-    setOwnerAuthed(false);
-  }, []);
-
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
-    if (r.status === 401) { handleOwnerUnauth(); return; }
+    if (r.status === 401 || r.status === 403) { clearToken(); setLocation("/"); return; }
     if (r.ok) setChannels(await r.json());
-  }, [guildId, handleOwnerUnauth]);
+  }, [guildId, setLocation]);
 
   const fetchMembers = useCallback(async () => {
     const q = memberSearch ? `?search=${encodeURIComponent(memberSearch)}&limit=50` : "?limit=50";
@@ -182,6 +100,30 @@ export default function OwnerPanel() {
 
   const textChannels = channels.filter((c) => c.type === 0 || c.type === 5);
   const categories = channels.filter((c) => c.type === 4);
+
+  // Not owner → show access denied
+  if (user && !user.isOwner) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="w-full max-w-sm text-center">
+          <CardHeader>
+            <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-2">
+              <ShieldOff className="h-6 w-6 text-destructive" />
+            </div>
+            <CardTitle>Accès refusé</CardTitle>
+            <CardDescription>Le panneau propriétaire est réservé au propriétaire du bot.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/guilds">
+              <Button variant="outline" className="gap-2">
+                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   async function sendMessage() {
     if (!selectedChannelId || !messageContent.trim()) return;
@@ -287,10 +229,6 @@ export default function OwnerPanel() {
     }
   }
 
-  if (!ownerAuthed) {
-    return <OwnerLogin onSuccess={() => setOwnerAuthed(true)} />;
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen p-8 space-y-4">
@@ -317,9 +255,12 @@ export default function OwnerPanel() {
           </h1>
           <p className="text-muted-foreground font-mono text-sm">{guildName || guildId}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleOwnerUnauth} className="gap-2 shrink-0">
-          <LogOut className="h-4 w-4" /> Déconnexion Owner
-        </Button>
+        {user && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <img src={user.avatarURL} alt={user.userTag} className="h-7 w-7 rounded-full border border-border" />
+            <span className="hidden md:block font-mono">{user.userTag}</span>
+          </div>
+        )}
       </header>
 
       <Tabs defaultValue="messages" className="space-y-4">
@@ -330,7 +271,6 @@ export default function OwnerPanel() {
           <TabsTrigger value="settings" className="gap-2"><Settings className="h-4 w-4" /> Serveur</TabsTrigger>
         </TabsList>
 
-        {/* ── MESSAGES ─────────────────────────────────────────────────────── */}
         <TabsContent value="messages" className="space-y-4">
           <Card>
             <CardHeader>
@@ -348,13 +288,11 @@ export default function OwnerPanel() {
                     {categories.map((cat) => (
                       <div key={cat.id}>
                         <div className="px-2 py-1 text-xs text-muted-foreground uppercase tracking-wider font-semibold">{cat.name}</div>
-                        {textChannels
-                          .filter((c) => c.parentId === cat.id)
-                          .map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              <span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span>
-                            </SelectItem>
-                          ))}
+                        {textChannels.filter((c) => c.parentId === cat.id).map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            <span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span>
+                          </SelectItem>
+                        ))}
                       </div>
                     ))}
                     {textChannels.filter((c) => !c.parentId).map((c) => (
@@ -370,25 +308,20 @@ export default function OwnerPanel() {
                 <Textarea
                   value={messageContent}
                   onChange={(e) => setMessageContent(e.target.value)}
-                  placeholder="Tapez votre message ici... (Markdown Discord supporté)"
+                  placeholder="Tapez votre message... (Markdown Discord supporté)"
                   rows={5}
                   onKeyDown={(e) => { if (e.key === "Enter" && e.ctrlKey) sendMessage(); }}
                 />
                 <p className="text-xs text-muted-foreground mt-1">Ctrl+Entrée pour envoyer</p>
               </div>
-              <Button
-                onClick={sendMessage}
-                disabled={sendingMsg || !selectedChannelId || !messageContent.trim()}
-                className="gap-2"
-              >
+              <Button onClick={sendMessage} disabled={sendingMsg || !selectedChannelId || !messageContent.trim()} className="gap-2">
                 <Send className="h-4 w-4" />
-                {sendingMsg ? "Envoi..." : "Envoyer le message"}
+                {sendingMsg ? "Envoi..." : "Envoyer"}
               </Button>
             </CardContent>
           </Card>
         </TabsContent>
 
-        {/* ── SALONS ───────────────────────────────────────────────────────── */}
         <TabsContent value="channels" className="space-y-4">
           <Card>
             <CardHeader>
@@ -397,19 +330,13 @@ export default function OwnerPanel() {
             <CardContent className="space-y-3">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Nom du salon</label>
-                  <Input
-                    value={newChannelName}
-                    onChange={(e) => setNewChannelName(e.target.value)}
-                    placeholder="mon-salon"
-                  />
+                  <label className="text-sm font-medium mb-1.5 block">Nom</label>
+                  <Input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="mon-salon" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Type</label>
                   <Select value={newChannelType} onValueChange={setNewChannelType}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="text">💬 Texte</SelectItem>
                       <SelectItem value="voice">🔊 Vocal</SelectItem>
@@ -420,35 +347,22 @@ export default function OwnerPanel() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Catégorie parente (optionnel)</label>
+                  <label className="text-sm font-medium mb-1.5 block">Catégorie parente</label>
                   <Select value={newChannelParent} onValueChange={setNewChannelParent}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Aucune catégorie" />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Aucune" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Aucune catégorie</SelectItem>
-                      {categories.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                      ))}
+                      <SelectItem value="">Aucune</SelectItem>
+                      {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Description / Topic (optionnel)</label>
-                  <Input
-                    value={newChannelTopic}
-                    onChange={(e) => setNewChannelTopic(e.target.value)}
-                    placeholder="Description du salon..."
-                  />
+                  <label className="text-sm font-medium mb-1.5 block">Topic (optionnel)</label>
+                  <Input value={newChannelTopic} onChange={(e) => setNewChannelTopic(e.target.value)} placeholder="Description..." />
                 </div>
               </div>
-              <Button
-                onClick={createChannel}
-                disabled={creatingChannel || !newChannelName.trim()}
-                className="gap-2"
-              >
-                <Plus className="h-4 w-4" />
-                {creatingChannel ? "Création..." : "Créer le salon"}
+              <Button onClick={createChannel} disabled={creatingChannel || !newChannelName.trim()} className="gap-2">
+                <Plus className="h-4 w-4" />{creatingChannel ? "Création..." : "Créer"}
               </Button>
             </CardContent>
           </Card>
@@ -460,7 +374,7 @@ export default function OwnerPanel() {
                 <CardDescription>{channels.length} salons</CardDescription>
               </div>
               <Button variant="ghost" size="sm" onClick={fetchChannels} className="gap-1">
-                <RefreshCw className="h-4 w-4" /> Actualiser
+                <RefreshCw className="h-4 w-4" />
               </Button>
             </CardHeader>
             <CardContent>
@@ -473,17 +387,14 @@ export default function OwnerPanel() {
                         {c.type !== 4 ? "#" : ""}{c.name}
                       </span>
                       {c.parentId && c.type !== 4 && (
-                        <span className="text-xs text-muted-foreground">
-                          — {channelById[c.parentId]?.name ?? "?"}
-                        </span>
+                        <span className="text-xs text-muted-foreground">— {channelById[c.parentId]?.name ?? "?"}</span>
                       )}
                       <Badge variant="secondary" className="text-xs hidden group-hover:inline-flex">
                         {CHANNEL_TYPE_LABEL[c.type] ?? c.type}
                       </Badge>
                     </div>
                     <Button
-                      variant="ghost"
-                      size="sm"
+                      variant="ghost" size="sm"
                       onClick={() => deleteChannel(c.id, c.name)}
                       className="text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity h-7 px-2"
                     >
@@ -496,33 +407,29 @@ export default function OwnerPanel() {
           </Card>
         </TabsContent>
 
-        {/* ── MEMBRES ──────────────────────────────────────────────────────── */}
         <TabsContent value="members" className="space-y-4">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-4">
               <div>
-                <CardTitle className="text-base font-mono uppercase">👥 Gestion des Membres</CardTitle>
-                <CardDescription>{members.length} membres affichés</CardDescription>
+                <CardTitle className="text-base font-mono uppercase">👥 Membres</CardTitle>
+                <CardDescription>{members.filter((m) => !m.bot).length} membres affichés</CardDescription>
               </div>
               <div className="flex items-center gap-2 flex-1 max-w-xs">
                 <Input
                   value={memberSearch}
                   onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder="Rechercher un membre..."
+                  placeholder="Rechercher..."
                   onKeyDown={(e) => { if (e.key === "Enter") fetchMembers(); }}
                 />
-                <Button variant="outline" size="sm" onClick={fetchMembers}>
-                  <RefreshCw className="h-4 w-4" />
-                </Button>
+                <Button variant="outline" size="sm" onClick={fetchMembers}><RefreshCw className="h-4 w-4" /></Button>
               </div>
             </CardHeader>
             <CardContent>
               <div className="mb-3">
-                <label className="text-sm font-medium mb-1.5 block text-muted-foreground">Raison des actions (optionnel)</label>
                 <Input
                   value={actionReason}
                   onChange={(e) => setActionReason(e.target.value)}
-                  placeholder="Raison pour kick/ban..."
+                  placeholder="Raison pour les actions..."
                   className="max-w-sm"
                 />
               </div>
@@ -545,8 +452,7 @@ export default function OwnerPanel() {
                     </div>
                     <div className="flex items-center gap-2">
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="outline" size="sm"
                         onClick={() => memberAction("kick", m.id, m.displayName)}
                         disabled={actionLoading && actionMemberId === m.id}
                         className="gap-1.5 text-orange-500 border-orange-500/30 hover:bg-orange-500/10"
@@ -554,8 +460,7 @@ export default function OwnerPanel() {
                         <UserX className="h-3.5 w-3.5" /> Kick
                       </Button>
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="outline" size="sm"
                         onClick={() => memberAction("ban", m.id, m.displayName)}
                         disabled={actionLoading && actionMemberId === m.id}
                         className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
@@ -573,29 +478,22 @@ export default function OwnerPanel() {
           </Card>
         </TabsContent>
 
-        {/* ── PARAMÈTRES SERVEUR ───────────────────────────────────────────── */}
         <TabsContent value="settings" className="space-y-4">
           <Card>
             <CardHeader>
               <CardTitle className="text-base font-mono uppercase">⚙️ Paramètres du Serveur</CardTitle>
-              <CardDescription>Modification directe des paramètres Discord du serveur. Le bot doit avoir la permission Gérer le serveur.</CardDescription>
+              <CardDescription>Modification directe des paramètres Discord. Le bot doit avoir la permission Gérer le serveur.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Nom du serveur</label>
-                  <Input
-                    value={guildEditName}
-                    onChange={(e) => setGuildEditName(e.target.value)}
-                    placeholder="Laisser vide pour ne pas changer"
-                  />
+                  <Input value={guildEditName} onChange={(e) => setGuildEditName(e.target.value)} placeholder="Laisser vide pour ne pas changer" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Niveau de vérification</label>
                   <Select value={guildVerifLevel} onValueChange={setGuildVerifLevel}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {VERIFICATION_LABELS.map((label, i) => (
                         <SelectItem key={i} value={String(i)}>{label}</SelectItem>
@@ -604,23 +502,19 @@ export default function OwnerPanel() {
                   </Select>
                 </div>
                 <div className="md:col-span-2">
-                  <label className="text-sm font-medium mb-1.5 block">Salon système (messages Discord)</label>
+                  <label className="text-sm font-medium mb-1.5 block">Salon système</label>
                   <Select value={guildSystemChannel} onValueChange={setGuildSystemChannel}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Aucun salon système" />
-                    </SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Aucun salon système</SelectItem>
-                      {textChannels.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>
-                      ))}
+                      <SelectItem value="">Aucun</SelectItem>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
               </div>
               <Button onClick={saveGuildSettings} disabled={savingSettings} className="gap-2">
                 <Settings className="h-4 w-4" />
-                {savingSettings ? "Sauvegarde..." : "Appliquer les changements"}
+                {savingSettings ? "Sauvegarde..." : "Appliquer"}
               </Button>
             </CardContent>
           </Card>

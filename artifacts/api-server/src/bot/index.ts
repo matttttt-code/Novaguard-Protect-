@@ -55,6 +55,7 @@ import {
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
 import { registerGeneralLog } from "./general-log.js";
 import { setClient } from "./client-store.js";
+import { setOwnerIds } from "./owner-store.js";
 import { startTempBanScheduler } from "./tempban-store.js";
 import { registerAntiGhostPing } from "./commands/antighostping.js";
 import { getAntilinkConfig } from "./antilink-store.js";
@@ -117,6 +118,21 @@ export function startBot(): void {
   client.once(Events.ClientReady, async (readyClient) => {
     setClient(readyClient);
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
+
+    // Récupère le propriétaire de l'application pour le panneau owner
+    try {
+      const app = await readyClient.application.fetch();
+      if (app.owner) {
+        if ("members" in app.owner) {
+          setOwnerIds([...app.owner.members.keys()]);
+        } else {
+          setOwnerIds([app.owner.id]);
+        }
+        logger.info("Propriétaire(s) du bot chargés");
+      }
+    } catch (err) {
+      logger.error({ err }, "Impossible de récupérer le propriétaire de l'application");
+    }
     readyClient.user.setActivity("le serveur 🛡️", { type: ActivityType.Watching });
 
     const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);

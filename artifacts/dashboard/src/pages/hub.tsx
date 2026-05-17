@@ -3,8 +3,8 @@ import { Link, useLocation } from "wouter";
 import { useGetDashboardStats, useGetDashboardGuilds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Activity, Users, Server, Clock, HardDrive, Wifi, LogOut, Shield } from "lucide-react";
-import { clearToken, getToken } from "@/lib/auth";
+import { Users, Server, Clock, HardDrive, Wifi, LogOut, Shield } from "lucide-react";
+import { clearToken, getToken, decodeToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
 function StatCard({ title, value, icon: Icon, description, className }: { title: string; value: string | React.ReactNode; icon: React.ElementType; description?: string; className?: string }) {
@@ -82,10 +82,19 @@ export default function Hub() {
           </h1>
           <p className="text-muted-foreground font-mono text-sm mt-1">{stats.tag}</p>
         </div>
-        <Button variant="outline" size="sm" onClick={handleLogout} className="w-full md:w-auto gap-2">
-          <LogOut className="h-4 w-4" />
-          Déconnexion
-        </Button>
+        <div className="flex items-center gap-3">
+          {(() => { const u = decodeToken(); return u ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground border border-border rounded-full pl-1 pr-3 py-1">
+              <img src={u.avatarURL} alt={u.userTag} className="h-6 w-6 rounded-full" />
+              <span className="font-mono hidden md:block">{u.userTag}</span>
+              {u.isOwner && <span className="text-xs text-primary font-bold uppercase">Owner</span>}
+            </div>
+          ) : null; })()}
+          <Button variant="outline" size="sm" onClick={handleLogout} className="w-full md:w-auto gap-2">
+            <LogOut className="h-4 w-4" />
+            Déconnexion
+          </Button>
+        </div>
       </header>
 
       <section>
