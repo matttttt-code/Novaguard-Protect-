@@ -10,61 +10,55 @@ function buildEmbeds(): EmbedBuilder[] {
 
   const embed1 = new EmbedBuilder()
     .setColor(base.color)
-    .setTitle("📋 Liste des commandes — 55 commandes (1/3)")
+    .setTitle("📋 Liste des commandes (1/3)")
     .setDescription("Toutes les commandes disponibles en slash `/` et préfixe `&`")
     .addFields(
       {
         name: "🛡️ Modération",
         value: [
-          "`/kick` · `&kick @membre [raison]` — Expulse un membre",
-          "`/ban` · `&ban @membre|<id> [raison]` — Bannit (fonctionne par ID hors serveur)",
-          "`/softban` · `&softban` (`&sb`) — Ban + déban immédiat (efface les messages)",
-          "`/unban` · `&unban <userId> [raison]` — Débannit",
-          "`/timeout` · `&timeout @membre durée [raison]` (`&mute`) — 1m · 5m · 10m · 30m · 1h · 6h · 12h · 1j · 7j · 28j",
-          "`/untimeout` · `&untimeout @membre` (`&unmute`) — Retire le timeout",
-          "`/voicemute` · `&voicemute @membre durée` (`&vmute`) — Coupe micro + casque (1m→1j, auto-rétablissement)",
-          "`/warn` · `&warn @membre raison` — Avertissement avec Case ID",
-          "`/warnings voir|effacer|retirer` · `&warnings @membre [caseId]` — Gère les avertissements",
-          "`/clear` · `&clear [nombre]` (`&purge`) — Supprime 1-100 messages",
+          "`/kick` · `&kick @m [raison]` — Expulse",
+          "`/ban` · `&ban @m|<id> [raison]` — Bannit",
+          "`/softban` · `&softban` (`&sb`) — Ban+déban (efface msgs)",
+          "`/unban` · `&unban <id> [raison]` — Débannit",
+          "`/timeout` · `&timeout @m durée [raison]` (`&mute`) — 1m·5m·10m·30m·1h·6h·12h·1j·7j·28j",
+          "`/untimeout` · `&untimeout @m` (`&unmute`) — Retire timeout",
+          "`/voicemute` · `&voicemute @m durée` (`&vmute`) — Coupe micro+casque (auto-rétablissement)",
+          "`/warn` · `&warn @m raison` — Avertissement (Case ID)",
+          "`/warnings voir|effacer|retirer` · `&warnings @m` — Gère les avertissements",
+          "`/clear` · `&clear [n]` (`&purge`) — Supprime 1-100 messages",
         ].join("\n"),
       },
       {
         name: "⚙️ Gestion du serveur",
         value: [
-          "`/slowmode secondes [#salon]` · `&slowmode` (`&sm`) — Slowmode (0 = désactiver)",
-          "`/lock [#salon] [raison]` · `&lock` — Verrouille un salon",
-          "`/unlock [#salon]` · `&unlock` — Déverrouille",
-          "`/lockserver lock|unlock` · `&lockserver` — Verrouille/déverrouille **tous** les salons",
-          "`/nuke [#salon]` · `&nuke` — Recrée un salon identique (supprime l'historique)",
-          "`/role ajouter|retirer @membre @rôle` · `&role` — Attribue ou retire un rôle",
-          "`/nickname @membre [surnom]` · `&nickname` (`&nick`) — Change ou réinitialise le surnom",
+          "`/slowmode s [#salon]` · `&slowmode` (`&sm`) — Slowmode (0=off)",
+          "`/lock [#salon]` · `&lock` — Verrouille · `/unlock` · `&unlock` — Déverrouille",
+          "`/lockserver lock|unlock` · `&lockserver` — Tous les salons",
+          "`/nuke [#salon]` · `&nuke` — Recrée salon (efface historique)",
+          "`/role ajouter|retirer @m @rôle` · `&role` — Attribue/retire un rôle",
+          "`/nickname @m [surnom]` · `&nickname` (`&nick`) — Change/réinitialise surnom",
           "`/revokeinvites` · `&revokeinvites` — Révoque toutes les invitations",
-          "`/raidmode activer|désactiver` · `&raidmode on|off` — Mode anti-raid",
-          "`/joinlock activer|désactiver` · `&joinlock on|off` — Bloque toutes les arrivées",
+          "`/raidmode activer|désactiver|niveau2-activer|niveau2-désactiver` · `&raidmode` — Anti-raid N1/N2",
+          "`/joinlock activer|désactiver` · `&joinlock` — Bloque les arrivées",
         ].join("\n"),
       },
       {
         name: "⛔ Blacklist & sanctions",
         value: [
-          "`/blacklist @membre|<id> raison` · `&blacklist` (`&bl`) — **Blacklist globale** : banni sur tous les serveurs",
+          "`/blacklist @m|<id> raison` · `&blacklist` (`&bl`) — **Blacklist globale** (tous serveurs)",
           "`/blacklistinfo` · `&blacklistinfo` (`&bli`) — Liste noire du serveur",
-          "`/sanctioninfo @membre` · `&sanctioninfo` (`&si`) — Toutes les sanctions d'un membre",
-          "`/blacklistinvite ajouter|retirer|liste` · `&bliv` (`&ibl`) — Empêche d'inviter sans expulser",
-          "🌐 **AntiDC global** — Ban auto si un blacklisté rejoint n'importe quel serveur",
+          "`/sanctioninfo @m` · `&sanctioninfo` (`&si`) — Sanctions d'un membre",
+          "`/blacklistinvite ajouter|retirer|liste` · `&bliv` — Empêche d'inviter",
+          "🌐 **AntiDC global** — Ban auto si un blacklisté rejoint un serveur",
         ].join("\n"),
       },
       {
         name: "📋 Configuration",
         value: [
-          "`/dashboard` · `&dashboard` (`&config`) — Panneau interactif complet",
-          "`/setlog #salon` · `&setlog` — Salon de logs principal",
-          "`/setbanlog <id>` · `&setbanlog` — Salon de logs bans",
-          "`/setgenlog #salon` · `&setgenlog` — Logs généraux (vide = désactiver)",
-          "`/setinvitelog #salon` · `&setinvitelog` (`&setinvlog`) — Logs invitations",
-          "`/settranscript #salon` · `&settranscript` — Salon transcripts tickets",
-          "`/ticketconfig role @role` · `&ticketconfig role @role` — Rôle staff tickets",
-          "`/ticketconfig categorie <id>` · `&ticketconfig categorie` — Catégorie tickets",
-          "`/ticketconfig voir` · `&ticketconfig voir` — Config tickets actuelle",
+          "`/dashboard` · `&dashboard` (`&config`) — Panneau interactif",
+          "`/setlog #s` · `/setbanlog <id>` · `/setgenlog #s` · `/setinvitelog #s`",
+          "`/settranscript #s` · `&settranscript` — Salon transcripts",
+          "`/ticketconfig role @r|categorie <id>|voir` · `&ticketconfig`",
         ].join("\n"),
       },
     )
@@ -78,44 +72,43 @@ function buildEmbeds(): EmbedBuilder[] {
       {
         name: "🎫 Tickets",
         value: [
-          "`/ticketpanel` · `&ticketpanel` — Panel de création (Admin)",
-          "`/ticket claim` · `&ticket claim` — Prend en charge (staff)",
-          "`/ticket fermer [raison]` · `&ticket fermer` — Ferme et archive",
-          "`/ticket ajouter @membre` · `&ticket ajouter` — Ajoute un membre",
-          "`/ticket retirer @membre` · `&ticket retirer` — Retire un membre",
-          "`/ticket reset` · `&ticket reset` — Réinitialise le registre (Admin)",
-          "`/transcript` · `&transcript` (`&trs`) — Génère un transcript .txt",
+          "`/ticketpanel` · `&ticketpanel` — Panel (Admin)",
+          "`/ticket claim` — Prend en charge (staff)",
+          "`/ticket fermer [raison]` — Ferme et archive",
+          "`/ticket ajouter|retirer @m` — Ajoute/retire du ticket",
+          "`/ticket reset` — Réinitialise registre (Admin)",
+          "`/transcript` · `&transcript` (`&trs`) — Génère transcript .txt",
           "🔘 **Bouton 🎫** — Ouvre un salon ticket privé",
         ].join("\n"),
       },
       {
-        name: "🤖 Captcha anti-bot",
+        name: "🤖 Captcha & Invitations",
         value: [
-          "**Configuration via `/dashboard` → 🤖 Captcha**",
-          "📍 **Salon vérification** — challenge dans le salon configuré",
-          "📨 **Fallback DM** — si aucun salon, challenge en DM",
-          "✅ Bonne réponse → rôle vérifié + bienvenue + log",
-          "❌ 3 erreurs ou 5 min → expulsion automatique",
-        ].join("\n"),
-      },
-      {
-        name: "📨 Suivi des invitations",
-        value: [
-          "`/setinvitelog #salon` · `&setinvitelog` — Active les logs d'invitations",
-          "`/checkinvite [@membre]` · `&checkinvite` (`&ci`) — Stats d'invitations personnelles",
-          "`/checkinvites` · `&checkinvites` (`&topinvites`) — Classement top 15 (Admin)",
-          "→ Embed automatique à chaque arrivée : inviteur, code, âge du compte",
+          "**Captcha** — Config via `/dashboard` → 🤖 Captcha",
+          "📍 Challenge dans le salon ou DM · ✅ réponse → rôle vérifié · ❌ 3 erreurs/5min → expulsion",
+          "`/checkinvite [@m]` · `&checkinvite` (`&ci`) — Stats invitations",
+          "`/checkinvites` · `&checkinvites` (`&topinvites`) — Top 15 (Admin)",
         ].join("\n"),
       },
       {
         name: "ℹ️ Informations",
         value: [
-          "`/userinfo [@membre]` · `&userinfo` (`&ui`) — Infos complètes d'un membre",
-          "`/serverinfo` · `&serverinfo` (`&sv`) — Infos du serveur",
-          "`/serverstats` · `&serverstats` (`&stats`, `&ss`) — Statistiques détaillées",
+          "`/userinfo [@m]` · `&userinfo` (`&ui`) — Infos membre",
+          "`/serverinfo` · `&serverinfo` (`&sv`) — Infos serveur",
+          "`/serverstats` · `&serverstats` (`&stats`) — Statistiques détaillées",
           "`/infome` · `&infome` (`&im`) — Mes propres infos",
-          "`/getid [@mention|#salon|@rôle]` · `&getid` (`&id`) — ID d'un élément",
-          "`/info` · `&info` (`&botinfo`) — Infos du bot (version, uptime, ping)",
+          "`/getid [@m|#s|@r]` · `&getid` (`&id`) — ID d'un élément",
+          "`/info` · `&info` (`&botinfo`) — Infos bot (uptime, ping)",
+        ].join("\n"),
+      },
+      {
+        name: "📩 Utilitaires",
+        value: [
+          "`/rolerequest` · `&rolerequest <rôle> <raison>` (`&rr`) — Demande de rôle",
+          "`/suggestion <texte>` · `&suggestion` (`&suggest`) — Suggestion au dev",
+          "`/support` · `&support` — Questionnaire DM → staff",
+          "`/reglement #s <texte>` · `&reglement` — Publie le règlement",
+          "`/commandlist` · `&help` (`&cmds`) — Cette liste",
         ].join("\n"),
       },
     )
@@ -129,61 +122,43 @@ function buildEmbeds(): EmbedBuilder[] {
       {
         name: "🔐 Sécurité avancée",
         value: [
-          "`/secure voir` · `&secure voir` — Affiche toute la config sécurité",
-          "`/secure niveau <1|2|3>` · `&secure niveau <1|2|3>` — Définit le niveau de sécurité",
-          "`/secure suspicieux activer|désactiver` — Détection de comptes suspects à l'arrivée",
-          "`/antiinsult activer|désactiver|ajouter|retirer|liste` · `&antiinsult` — Filtre anti-insulte",
-          "`/antiwebhook activer|désactiver|statut` · `&antiwebhook` — Suppression auto des webhooks",
-          "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`) — Invitations irrévocables",
-          "📊 **Niveau 1** : Automod standard · **Niveau 2** : +comptes <3j suspects, anti-insulte 1h",
-          "📊 **Niveau 3** : Maximum (approbation owner) · anti-insulte 24h · anti-webhook auto",
+          "`/secure voir|niveau <1|2|3>|suspicieux activer|désactiver` · `&secure`",
+          "`/antiinsult activer|désactiver|ajouter|retirer|liste|charger-defaults` · `&antiinsult`",
+          "`/antiwebhook activer|désactiver|statut` · `&antiwebhook`",
+          "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`)",
+          "**N1** Automod standard · **N2** +comptes <3j suspects, anti-insulte 1h",
+          "**N3** Maximum (double validation owner+admin) · anti-insulte 24h · anti-webhook auto",
         ].join("\n"),
       },
       {
         name: "🤖 Auto-modération",
         value: [
-          "👢 **Spam** (5 msg en 5s) → Expulsion + slowmode 5s auto",
-          "🔇 **Emojis** (+5 dans un message) → Timeout 24h",
-          "🔇 **Lien** détecté → Timeout 24h",
-          "🔇 **MAJUSCULES** (+8 lettres, 100%) → Timeout 24h",
-          "🤬 **Insulte** détectée → Warn/Timeout 1h/24h (selon niveau sécurité)",
-          "🔗 **Webhook** non autorisé → Suppression + alerte DM owner (si actif)",
-          "⚠️ **Compte suspect** à l'arrivée → Alerte DM owner (selon niveau)",
-          "*Les modérateurs (ManageMessages) sont exemptés*",
+          "👢 **Spam** (5 msg/5s) → Expulsion + slowmode 5s",
+          "🔇 **Emojis** (+5) / **Lien** / **MAJUSCULES** (+8, 100%) → Timeout 24h",
+          "🤬 **Insulte** → Warn/Timeout 1h-24h (selon niveau sécurité)",
+          "🔗 **Webhook** non autorisé → Suppression + alerte DM owner",
+          "*Modérateurs (ManageMessages) exemptés*",
         ].join("\n"),
       },
       {
         name: "🗂️ Logs généraux",
         value: [
-          "`/setgenlog #salon` — Active/désactive les logs généraux",
-          "📡 Vocal : rejoindre · quitter · changer de salon",
-          "✏️ Messages : modifiés · supprimés · suppression massive",
-          "📁 Salons : créés · supprimés · modifiés",
-          "🎭 Rôles : créés · supprimés · modifiés · attribués/retirés",
-          "🔨 Bans/débans · 🔗 Invitations créées/supprimées",
-        ].join("\n"),
-      },
-      {
-        name: "📩 Utilitaires",
-        value: [
-          "`/rolerequest` · `&rolerequest <rôle> <raison>` (`&rr`) — Demande de rôle via modal",
-          "`/suggestion <texte>` · `&suggestion` (`&suggest`, `&idee`) — Suggestion au développeur",
-          "`/support` · `&support` — Questionnaire d'aide DM → transmis au staff",
-          "`/reglement #salon <texte>` · `&reglement` — Publie le règlement",
-          "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
+          "`/setgenlog #salon` — Active/désactive les logs",
+          "📡 Vocal · ✏️ Messages · 📁 Salons · 🎭 Rôles · 🔨 Bans · 🔗 Invitations",
+          "🚨 Alerte DM owner : rôle admin attribué / rôle admin créé / anti-raid N2",
         ].join("\n"),
       },
       {
         name: "🔧 Admin & diagnostic",
         value: [
           "`/restart` · `&restart` — **Redémarre le bot** (propriétaire uniquement)",
-          "`/testcaptcha [simulation|apercu] [@membre]` · `&testcaptcha` (`&testcap`)",
-          "`/errortest` · `&errortest` (`&testalerte`) — Teste les 5 alertes DM (Admin)",
-          "`/testinviteembed` · `&testinviteembed` (`&tinv`) — Aperçu des logs invitations (Admin)",
+          "`/testcaptcha [simulation|apercu] [@m]` · `&testcaptcha` (`&testcap`)",
+          "`/errortest` · `&errortest` (`&testalerte`) — Teste les alertes DM",
+          "`/testinviteembed` · `&testinviteembed` (`&tinv`) — Aperçu logs invitations",
         ].join("\n"),
       },
     )
-    .setFooter({ text: "55 commandes slash · 55 préfixes · Sécurité niveaux 1-3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "55 commandes slash · 55 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];
@@ -194,12 +169,19 @@ export const data = new SlashCommandBuilder()
   .setDescription("Affiche la liste de toutes les commandes disponibles");
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  return interaction.reply({ embeds: buildEmbeds() });
+  const [e1, e2, e3] = buildEmbeds();
+  await interaction.reply({ embeds: [e1] });
+  await interaction.followUp({ embeds: [e2] });
+  await interaction.followUp({ embeds: [e3] });
 }
 
 export const prefixName = "commandlist";
 export const prefixAliases = ["cmds", "help", "commandes"];
 
 export async function executeMessage(message: Message) {
-  await message.reply({ embeds: buildEmbeds() });
+  const [e1, e2, e3] = buildEmbeds();
+  const ch = message.channel as import("discord.js").TextChannel;
+  await message.reply({ embeds: [e1] });
+  await ch.send({ embeds: [e2] });
+  await ch.send({ embeds: [e3] });
 }
