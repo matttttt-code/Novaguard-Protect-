@@ -1130,7 +1130,7 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
         `Le propriétaire de **${targetGuild?.name ?? gId}** doit confirmer l'attribution de ton rôle **Administrateur**.\n\n` +
         `**Ton rôle a été retiré temporairement** le temps de cette vérification.\n\n` +
         `Réponds à ce message avec le code ci-dessous pour le récupérer immédiatement :\n\`\`\`\n${code}\n\`\`\`\n` +
-        `> ⏱️ **5 minutes** pour répondre (rétablissement automatique si délai dépassé)\n` +
+        `> ⏱️ Réponds dès que possible\n` +
         `> 🔢 **3 tentatives** maximum · code insensible à la casse`
       )
       .setFooter({ text: `${targetGuild?.name ?? gId} • Confirmation de rôle admin` })
@@ -1159,59 +1159,12 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
       .addFields(
         { name: "Membre", value: `${member.user.tag} (\`${mId}\`)`, inline: true },
         { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
-        { name: "Délai", value: "5 min · auto-rétablissement si pas de réponse", inline: false },
+        { name: "Délai", value: "En attente de réponse du membre", inline: false },
       )
       .setTimestamp(), { guildId: gId });
 
-    // Auto-approbation après 5 minutes si aucune réponse du membre
-    const autoApproveTimer = setTimeout(async () => {
-      if (!hasCaptcha(mId)) return;
-      deleteCaptcha(mId);
-      const g = client.guilds.cache.get(gId);
-      const m = await g?.members.fetch(mId).catch(() => null);
-      if (rId !== "0") {
-        await m?.roles.add(rId, "Captcha admin — rôle rétabli automatiquement après délai de 5 min").catch(() => null);
-      }
-      // DM membre
-      await m?.user.send({
-        embeds: [new EmbedBuilder()
-          .setColor(0xf59e0b)
-          .setTitle("⏱️ Délai de vérification écoulé")
-          .setDescription(
-            `Aucune réponse reçue dans les **5 minutes** imparties.\n\n` +
-            `Ton rôle **Administrateur** a été **rétabli automatiquement** sur **${g?.name ?? gId}**.`
-          )
-          .setFooter({ text: `${g?.name ?? gId} • Vérification sécurité` })
-          .setTimestamp(),
-        ],
-      }).catch(() => null);
-      // DM propriétaire
-      await sendLogDM(client, new EmbedBuilder()
-        .setColor(0xf59e0b)
-        .setTitle("⏱️ Captcha admin — Auto-rétabli (délai expiré)")
-        .addFields(
-          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
-          { name: "Serveur", value: g?.name ?? gId, inline: true },
-          { name: "Résultat", value: "Aucune réponse dans les 5 min — rôle rétabli automatiquement", inline: false },
-        )
-        .setTimestamp()
-      ).catch(() => null);
-      // Log serveur
-      await sendLog(client, new EmbedBuilder()
-        .setColor(0xf59e0b)
-        .setTitle("⏱️ Captcha admin — Auto-rétablissement (timeout)")
-        .setThumbnail(m?.user.displayAvatarURL() ?? "")
-        .addFields(
-          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
-          { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
-          { name: "Raison", value: "5 min écoulées sans réponse", inline: false },
-        )
-        .setTimestamp(), { guildId: gId });
-    }, 5 * 60_000);
-    captchaTimeouts.set(mId, autoApproveTimer);
-
     await interaction.update({
-      content: `🔑 Captcha de confirmation envoyé à **${member.user.tag}** — rôle admin retiré temporairement.\nDélai : **5 minutes** · Auto-rétablissement si aucune réponse.`,
+      content: `🔑 Captcha de confirmation envoyé à **${member.user.tag}** — rôle admin retiré temporairement.\nEn attente de sa réponse.`,
       embeds: [], components: [],
     });
     return;
