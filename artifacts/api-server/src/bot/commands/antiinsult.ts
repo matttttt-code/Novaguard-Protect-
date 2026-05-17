@@ -10,7 +10,9 @@ import {
   setAntiInsultEnabled,
   addAntiInsultWord,
   removeAntiInsultWord,
+  setAntiInsultWords,
 } from "../guild-config-store.js";
+import { DEFAULT_INSULT_WORDS } from "../insult-list.js";
 
 export const data = new SlashCommandBuilder()
   .setName("antiinsult")
@@ -28,6 +30,9 @@ export const data = new SlashCommandBuilder()
       .addStringOption((o) => o.setName("mot").setDescription("Mot à retirer").setRequired(true))
   )
   .addSubcommand((s) => s.setName("liste").setDescription("Affiche tous les mots filtrés"))
+  .addSubcommand((s) =>
+    s.setName("charger-defaults").setDescription(`Charge la liste française prédéfinie (${DEFAULT_INSULT_WORDS.length} mots + dérivés)`)
+  )
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
@@ -38,9 +43,12 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (sub === "activer") {
     setAntiInsultEnabled(guildId, true);
-    const lvl = getConfig(guildId).securityLevel;
+    const cfg = getConfig(guildId);
+    const lvl = cfg.securityLevel;
     const punishment = lvl >= 3 ? "timeout 24h" : lvl >= 2 ? "timeout 1h" : "avertissement + suppression";
-    return interaction.reply({ content: `✅ Anti-insulte **activé**. Sanction selon niveau de sécurité actuel (niveau ${lvl}) : **${punishment}**.`, ephemeral: true });
+    const wordCount = cfg.antiInsultWords.length;
+    const hint = wordCount === 0 ? " ⚠️ Aucun mot dans le filtre — utilisez `/antiinsult charger-defaults` pour charger la liste française." : ` (${wordCount} mots filtrés)`;
+    return interaction.reply({ content: `✅ Anti-insulte **activé**. Sanction niveau ${lvl} : **${punishment}**.${hint}`, ephemeral: true });
   }
 
   if (sub === "désactiver") {
@@ -64,15 +72,39 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (sub === "liste") {
     const words = getConfig(guildId).antiInsultWords;
     if (words.length === 0) {
-      return interaction.reply({ content: "ℹ️ Le filtre anti-insulte ne contient aucun mot. Ajoutez-en avec `/antiinsult ajouter`.", ephemeral: true });
+      return interaction.reply({ content: "ℹ️ Aucun mot dans le filtre. Utilisez `/antiinsult charger-defaults` pour charger la liste française prédéfinie.", ephemeral: true });
     }
-    const embed = new EmbedBuilder()
-      .setColor(0xef4444)
-      .setTitle(`🤬 Mots filtrés — ${words.length} entrée(s)`)
-      .setDescription(words.map((w) => `\`${w}\``).join(", "))
-      .setFooter({ text: `Anti-insulte : ${getConfig(guildId).antiInsultEnabled ? "Actif" : "Inactif"}` })
-      .setTimestamp();
-    return interaction.reply({ embeds: [embed], ephemeral: true });
+    const chunks = words.join(", ");
+    const display = chunks.length > 3900 ? chunks.slice(0, 3900) + "..." : chunks;
+    return interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle(`🤬 Mots filtrés — ${words.length} entrée(s)`)
+        .setDescription(display.split(", ").map((w) => `\`${w}\``).join(", "))
+        .setFooter({ text: `Anti-insulte : ${getConfig(guildId).antiInsultEnabled ? "✅ Actif" : "❌ Inactif"}` })
+        .setTimestamp()],
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "charger-defaults") {
+    const existing = getConfig(guildId).antiInsultWords;
+    const merged = [...new Set([...existing, ...DEFAULT_INSULT_WORDS])];
+    setAntiInsultWords(guildId, merged);
+    const added = merged.length - existing.length;
+    return interaction.reply({
+      embeds: [new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle("✅ Liste française chargée")
+        .setDescription(
+          `**${added}** nouveaux mots ajoutés depuis la liste prédéfinie.\n` +
+          `**Total actuel : ${merged.length} mots** dans le filtre.\n\n` +
+          `Couvre : connard·e·s, putain, enculé·e, salope, fdp, ntm, tg, branleur, pédé, imbécile, abruti, et ~${DEFAULT_INSULT_WORDS.length} termes au total avec dérivés.\n\n` +
+          `Utilisez \`/antiinsult activer\` si ce n'est pas encore fait.`
+        )
+        .setTimestamp()],
+      ephemeral: true,
+    });
   }
 
   return interaction.reply({ content: "Sous-commande inconnue.", ephemeral: true });
@@ -92,7 +124,8 @@ export async function executeMessage(message: Message, args: string[]) {
 
   if (sub === "activer") {
     setAntiInsultEnabled(guildId, true);
-    await message.reply("✅ Anti-insulte **activé**."); return;
+    const wc = getConfig(guildId).antiInsultWords.length;
+    await message.reply(`✅ Anti-insulte **activé**. ${wc === 0 ? "⚠️ Aucun mot — utilisez `&antiinsult charger-defaults`." : `(${wc} mots filtrés)`}`); return;
   }
   if (sub === "désactiver" || sub === "desactiver") {
     setAntiInsultEnabled(guildId, false);
@@ -111,9 +144,17 @@ export async function executeMessage(message: Message, args: string[]) {
   }
   if (sub === "liste") {
     const words = getConfig(guildId).antiInsultWords;
-    if (words.length === 0) { await message.reply("ℹ️ Aucun mot filtré."); return; }
-    await message.reply({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle(`🤬 Mots filtrés — ${words.length}`).setDescription(words.map((w) => `\`${w}\``).join(", ")).setTimestamp()] });
+    if (words.length === 0) { await message.reply("ℹ️ Aucun mot filtré. Utilisez `&antiinsult charger-defaults`."); return; }
+    const disp = words.map((w) => `\`${w}\``).join(", ");
+    await message.reply({ embeds: [new EmbedBuilder().setColor(0xef4444).setTitle(`🤬 Mots filtrés — ${words.length}`).setDescription(disp.slice(0, 4000)).setTimestamp()] });
     return;
   }
-  await message.reply("Sous-commandes : `activer`, `désactiver`, `ajouter <mot>`, `retirer <mot>`, `liste`");
+  if (sub === "charger-defaults" || sub === "defaults") {
+    const existing = getConfig(guildId).antiInsultWords;
+    const merged = [...new Set([...existing, ...DEFAULT_INSULT_WORDS])];
+    setAntiInsultWords(guildId, merged);
+    await message.reply(`✅ Liste française chargée — **${merged.length}** mots au total dans le filtre.`);
+    return;
+  }
+  await message.reply("Sous-commandes : `activer`, `désactiver`, `ajouter <mot>`, `retirer <mot>`, `liste`, `charger-defaults`");
 }

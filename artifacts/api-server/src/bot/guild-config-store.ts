@@ -6,6 +6,7 @@ export interface GuildConfig {
   banLogChannelId: string | null;
   generalLogChannelId: string | null;
   raidMode: boolean;
+  raidMode2: boolean;
   joinLock: boolean;
   ticketStaffRoleId: string | null;
   ticketCategoryId: string | null;
@@ -39,6 +40,7 @@ function defaults(): GuildConfig {
     banLogChannelId: null,
     generalLogChannelId: null,
     raidMode: false,
+    raidMode2: false,
     joinLock: false,
     ticketStaffRoleId: null,
     ticketCategoryId: null,
@@ -114,6 +116,8 @@ export function setBanLogChannel(guildId: string, channelId: string): void { set
 export function setGeneralLogChannel(guildId: string, channelId: string | null): void { set(guildId, { generalLogChannelId: channelId }); }
 export function setRaidMode(guildId: string, enabled: boolean): void { set(guildId, { raidMode: enabled }); }
 export function isRaidMode(guildId: string): boolean { return configs.get(guildId)?.raidMode ?? false; }
+export function setRaidMode2(guildId: string, enabled: boolean): void { set(guildId, { raidMode2: enabled }); }
+export function isRaidMode2(guildId: string): boolean { return configs.get(guildId)?.raidMode2 ?? false; }
 export function setJoinLock(guildId: string, enabled: boolean): void { set(guildId, { joinLock: enabled }); }
 export function isJoinLocked(guildId: string): boolean { return configs.get(guildId)?.joinLock ?? false; }
 export function setTicketStaffRole(guildId: string, roleId: string): void { set(guildId, { ticketStaffRoleId: roleId }); }
@@ -136,6 +140,7 @@ export function setSecurityLevel(guildId: string, level: 1 | 2 | 3): void { set(
 export function getSecurityLevel(guildId: string): 1 | 2 | 3 { return configs.get(guildId)?.securityLevel ?? 1; }
 
 export function setAntiInsultEnabled(guildId: string, enabled: boolean): void { set(guildId, { antiInsultEnabled: enabled }); }
+export function setAntiInsultWords(guildId: string, words: string[]): void { set(guildId, { antiInsultWords: words }); }
 
 export function addAntiInsultWord(guildId: string, word: string): void {
   const cfg = getOrCreate(guildId);

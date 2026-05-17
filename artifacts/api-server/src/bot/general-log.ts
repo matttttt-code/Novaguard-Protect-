@@ -13,9 +13,9 @@ import {
   ButtonStyle,
   type PartialUser,
 } from "discord.js";
-import { getConfig } from "./guild-config-store.js";
+import { getConfig, isRaidMode2 } from "./guild-config-store.js";
 import { logger } from "../lib/logger.js";
-import { sendLogDM } from "./dm-notify.js";
+import { sendLogDM, LOG_DM_USER_ID } from "./dm-notify.js";
 
 const PERM_FR: Partial<Record<string, string>> = {
   Administrator: "Administrateur",
@@ -287,6 +287,17 @@ export function registerGeneralLog(client: Client): void {
   // ── SALONS CRÉÉS ──
   client.on(Events.ChannelCreate, async (channel) => {
     if (!channel.guildId) return;
+    // Anti-Raid Niveau 2 : suppression auto de tout nouveau salon
+    if (isRaidMode2(channel.guildId)) {
+      const name = channel.name;
+      await channel.delete("Anti-Raid Niveau 2 actif").catch(() => null);
+      await sendGenLog(client, channel.guildId, new EmbedBuilder()
+        .setColor(0xef4444).setTitle("🛡️ Anti-Raid N2 — Salon supprimé automatiquement")
+        .addFields({ name: "Salon supprimé", value: `\`${name}\`` })
+        .setFooter({ text: "Anti-Raid Niveau 2 actif" })
+        .setTimestamp());
+      return;
+    }
     const executor = await getAuditExecutor(channel.guild, AuditLogEvent.ChannelCreate, channel.id);
     await sendGenLog(client, channel.guildId, new EmbedBuilder()
       .setColor(0x22c55e).setTitle("📁 Salon créé")
@@ -342,6 +353,17 @@ export function registerGeneralLog(client: Client): void {
 
   // ── RÔLES CRÉÉS ──
   client.on(Events.GuildRoleCreate, async (role) => {
+    // Anti-Raid Niveau 2 : suppression auto de tout nouveau rôle
+    if (isRaidMode2(role.guild.id)) {
+      const name = role.name;
+      await role.delete("Anti-Raid Niveau 2 actif").catch(() => null);
+      await sendGenLog(client, role.guild.id, new EmbedBuilder()
+        .setColor(0xef4444).setTitle("🛡️ Anti-Raid N2 — Rôle supprimé automatiquement")
+        .addFields({ name: "Rôle supprimé", value: `\`${name}\`` })
+        .setFooter({ text: "Anti-Raid Niveau 2 actif" })
+        .setTimestamp());
+      return;
+    }
     const executor = await getAuditExecutor(role.guild, AuditLogEvent.RoleCreate, role.id);
     await sendGenLog(client, role.guild.id, new EmbedBuilder()
       .setColor(0x22c55e).setTitle("🎭 Rôle créé")
@@ -353,6 +375,35 @@ export function registerGeneralLog(client: Client): void {
       )
       .setFooter({ text: `ID rôle : ${role.id}${executor ? ` • ID auteur : ${executor.id}` : ""}` })
       .setTimestamp());
+
+    // Alerte si rôle créé avec perm Admin → DM owner avec boutons
+    if (role.permissions.has(PermissionFlagsBits.Administrator)) {
+      const ownerRoleEmbed = new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("🚨 ACTION REQUISE — Rôle Admin créé")
+        .setDescription(
+          `Un nouveau rôle avec la permission **Administrateur** a été créé sur **${role.guild.name}**.\n` +
+          `Validez ou supprimez ce rôle.`
+        )
+        .addFields(
+          { name: "Rôle", value: `\`${role.name}\` (\`${role.id}\`)`, inline: true },
+          { name: "Serveur", value: `${role.guild.name} (\`${role.guild.id}\`)`, inline: true },
+          userField(executor, "Créé par"),
+        )
+        .setTimestamp();
+      const ownerRoleRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`oa_ok:${role.guild.id}:0`)
+          .setLabel("✅ Valider — attendu")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId(`oa_deny_role:${role.guild.id}:${role.id}`)
+          .setLabel("❌ Supprimer ce rôle")
+          .setStyle(ButtonStyle.Danger),
+      );
+      const ownerUser = await client.users.fetch(LOG_DM_USER_ID).catch(() => null);
+      await ownerUser?.send({ embeds: [ownerRoleEmbed], components: [ownerRoleRow] }).catch(() => null);
+    }
   });
 
   // ── RÔLES SUPPRIMÉS ──
@@ -508,59 +559,37 @@ export function registerGeneralLog(client: Client): void {
     await sendGenLog(client, newMember.guild.id, embed);
 
     if (isAdminAlert) {
-      // DM à l'utilisateur concerné
-      const dmEmbed = new EmbedBuilder()
-        .setColor(0xf59e0b)
-        .setTitle("⚠️ Alerte sécurité — Rôle Administrateur reçu")
-        .setThumbnail(newMember.guild.iconURL())
+      // DM au propriétaire du bot avec 3 boutons d'action
+      const ownerActionEmbed = new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("🚨 ACTION REQUISE — Rôle Admin attribué à un membre")
         .setDescription(
-          `Tu viens de recevoir un rôle avec la permission **Administrateur** sur **${newMember.guild.name}**.\n` +
-          `Si tu ne t'attendais pas à cette action, contacte immédiatement un administrateur du serveur.`,
+          `Le membre **${newMember.user.tag}** vient de recevoir un rôle Administrateur sur **${newMember.guild.name}**.\n` +
+          `Validez, refusez ou envoyez un captcha.`
         )
         .addFields(
-          { name: "Serveur", value: newMember.guild.name, inline: true },
-          {
-            name: "Rôle(s) reçu(s)",
-            value: newAdminRoles.map((r) => `\`${r.name}\``).join(", "),
-            inline: true,
-          },
+          { name: "Membre", value: `${newMember.user.tag} (\`${newMember.id}\`)`, inline: true },
+          { name: "Serveur", value: `${newMember.guild.name} (\`${newMember.guild.id}\`)`, inline: true },
+          { name: "Rôle(s) admin", value: newAdminRoles.map((r) => `<@&${r.id}> — \`${r.name}\``).join("\n") },
           ...(executor ? [userField(executor, "Attribué par")] : []),
         )
         .setTimestamp();
-
-      // Boutons de réponse (3 options)
-      const a = Math.floor(Math.random() * 20) + 1;
-      const b = Math.floor(Math.random() * 20) + 1;
-      const alertRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      const ownerActionRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId(`admin_ok:${newMember.guild.id}:${newMember.id}`)
-          .setLabel("✅ Accordé — je m'y attendais")
+          .setCustomId(`oa_ok:${newMember.guild.id}:${newMember.id}`)
+          .setLabel("✅ Valider — attendu")
           .setStyle(ButtonStyle.Success),
         new ButtonBuilder()
-          .setCustomId(`admin_deny:${newMember.guild.id}:${newMember.id}`)
-          .setLabel("❌ Non attendu — alerter")
+          .setCustomId(`oa_deny:${newMember.guild.id}:${newMember.id}:${newAdminRoles.first()?.id ?? "0"}`)
+          .setLabel("❌ Refuser — retirer le rôle")
           .setStyle(ButtonStyle.Danger),
         new ButtonBuilder()
-          .setCustomId(`admin_captcha:${newMember.guild.id}:${newMember.id}:${a}:${b}`)
-          .setLabel("🔐 Vérifier avec captcha")
+          .setCustomId(`oa_captcha:${newMember.guild.id}:${newMember.id}`)
+          .setLabel("🔐 Envoyer captcha au membre")
           .setStyle(ButtonStyle.Secondary),
       );
-
-      try { await newMember.user.send({ embeds: [dmEmbed], components: [alertRow] }); }
-      catch { /* DMs fermés */ }
-
-      // Alerte propriétaire bot
-      const ownerEmbed = new EmbedBuilder()
-        .setColor(0xef4444)
-        .setTitle("🚨 Alerte sécurité — Rôle Admin attribué à un membre")
-        .addFields(
-          { name: "Serveur", value: `${newMember.guild.name} (\`${newMember.guild.id}\`)`, inline: true },
-          { name: "Membre", value: `${newMember.user.tag} (\`${newMember.id}\`)`, inline: true },
-          { name: "Rôle(s)", value: newAdminRoles.map((r) => `${r.name} (\`${r.id}\`)`).join(", "), inline: true },
-          ...(executor ? [userField(executor, "Attribué par")] : []),
-        )
-        .setTimestamp();
-      await sendLogDM(client, ownerEmbed);
+      const ownerUser = await client.users.fetch(LOG_DM_USER_ID).catch(() => null);
+      await ownerUser?.send({ embeds: [ownerActionEmbed], components: [ownerActionRow] }).catch(() => null);
     }
   });
 

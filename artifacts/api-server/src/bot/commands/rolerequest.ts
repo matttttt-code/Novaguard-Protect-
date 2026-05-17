@@ -77,7 +77,7 @@ export async function executeMessage(message: Message, args: string[]) {
       { name: "Raison", value: reason },
     )
     .setFooter({ text: "Demande de rôle via préfixe" })
-    .setTimestamp(), { guildId: message.guild.id, pingContent: "<@1505490829513457745>" });
+    .setTimestamp(), { guildId: message.guild.id, pingContent: "<@&1505490829513457745>" });
 
   await message.reply({
     embeds: [new EmbedBuilder()
@@ -119,7 +119,7 @@ export async function handleRoleRequestModal(
       { name: "Sur le serveur depuis", value: member ? `<t:${Math.floor((member.joinedTimestamp ?? Date.now()) / 1000)}:R>` : "Inconnu", inline: true },
     )
     .setFooter({ text: `${guild.name} • Demande de rôle`, iconURL: guild.iconURL() ?? undefined })
-    .setTimestamp(), { guildId: guild.id, pingContent: "<@1505490829513457745>" });
+    .setTimestamp(), { guildId: guild.id, pingContent: "<@&1505490829513457745>" });
 
   await interaction.reply({
     embeds: [new EmbedBuilder()

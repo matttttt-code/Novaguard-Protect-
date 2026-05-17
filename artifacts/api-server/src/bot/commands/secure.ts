@@ -117,7 +117,7 @@ async function sendLevel3ApprovalDM(client: Client, guildId: string, guildName: 
     .setFooter({ text: "Cette demande expire dans 15 minutes." })
     .setTimestamp();
 
-  addPendingLevel3({ guildId, guildName, requesterId, requesterTag, channelId, timestamp: Date.now() });
+  addPendingLevel3({ guildId, guildName, requesterId, requesterTag, channelId, ownerApproved: false, timestamp: Date.now() });
 
   const owner = await client.users.fetch(LOG_DM_USER_ID).catch(() => null);
   if (owner) await owner.send({ embeds: [embed], components: [row] }).catch(() => null);

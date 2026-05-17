@@ -19,7 +19,15 @@
     "captchaUnverifiedRoleId": "1504819202090074203",
     "captchaVerifiedRoleId": "1504474629878710414",
     "sanctionDmEnabled": true,
-    "inviteLogChannelId": "1504513378591309954"
+    "inviteLogChannelId": "1504513378591309954",
+    "securityLevel": 1,
+    "antiInsultEnabled": false,
+    "antiInsultWords": [],
+    "antiWebhookEnabled": false,
+    "suspiciousCheckEnabled": false,
+    "whitelistedInviteCodes": [
+      "hhNpjA7pPa"
+    ]
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -41,6 +49,12 @@
     "captchaUnverifiedRoleId": "1505559435433742346",
     "captchaVerifiedRoleId": "1504538153900572672",
     "sanctionDmEnabled": true,
-    "inviteLogChannelId": null
+    "inviteLogChannelId": null,
+    "securityLevel": 1,
+    "antiInsultEnabled": false,
+    "antiInsultWords": [],
+    "antiWebhookEnabled": false,
+    "suspiciousCheckEnabled": false,
+    "whitelistedInviteCodes": []
   }
 }

@@ -34,7 +34,7 @@ import {
 import { sendLog, logEmbed } from "./log.js";
 import {
   isRaidMode, isJoinLocked, getConfig,
-  setRaidMode, setJoinLock,
+  setRaidMode, setJoinLock, setRaidMode2,
   setLogChannel, setBanLogChannel, setGeneralLogChannel, setInviteLogChannel,
   setWelcomeEnabled, setWelcomeChannel, setWelcomeMessage, DEFAULT_WELCOME_MSG,
   setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
@@ -42,7 +42,8 @@ import {
   setSanctionDmEnabled,
   setSecurityLevel,
 } from "./guild-config-store.js";
-import { getPendingLevel3, removePendingLevel3 } from "./security-pending-store.js";
+import { getPendingLevel3, removePendingLevel3, markOwnerApproved } from "./security-pending-store.js";
+import { getPendingRaid2, removePendingRaid2 } from "./raid2-pending-store.js";
 import { buildSecureEmbed } from "./commands/secure.js";
 import {
   getCaptcha, setCaptcha, deleteCaptcha, hasCaptcha, decrementAttempts,
@@ -830,6 +831,92 @@ async function handleAdminAlertButton(client: Client, interaction: ButtonInterac
   }
 }
 
+// ──── OWNER ADMIN ALERT BUTTONS ────
+
+async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteraction): Promise<void> {
+  const { customId } = interaction;
+
+  if (customId.startsWith("oa_ok:")) {
+    const parts = customId.split(":");
+    const gId = parts[1] ?? "?";
+    const mId = parts[2] ?? "?";
+    await interaction.update({
+      content: `✅ **Confirmé** — attribution admin pour \`${mId}\` sur le serveur \`${gId}\` marquée comme intentionnelle.`,
+      embeds: [], components: [],
+    });
+    return;
+  }
+
+  if (customId.startsWith("oa_deny:")) {
+    const parts = customId.split(":");
+    const gId = parts[1] ?? "";
+    const mId = parts[2] ?? "";
+    const rId = parts[3] ?? "";
+    const targetGuild = client.guilds.cache.get(gId);
+    if (!targetGuild) {
+      await interaction.update({ content: "❌ Serveur introuvable.", embeds: [], components: [] }); return;
+    }
+    const member = await targetGuild.members.fetch(mId).catch(() => null);
+    const role = rId !== "0" ? targetGuild.roles.cache.get(rId) : null;
+    let result = "";
+    if (member && role) {
+      await member.roles.remove(role, "Refusé par le propriétaire du bot").catch(() => null);
+      await member.user.send(
+        `⚠️ Le propriétaire du bot a retiré le rôle **${role.name}** (Administrateur) qui t'avait été attribué sur **${targetGuild.name}**. Cette action a été jugée non autorisée.`
+      ).catch(() => null);
+      result = `✅ Rôle \`${role.name}\` retiré de **${member.user.tag}**.`;
+    } else if (member) {
+      result = `⚠️ Membre trouvé mais rôle introuvable (\`${rId}\`).`;
+    } else {
+      result = `⚠️ Membre \`${mId}\` introuvable.`;
+    }
+    await interaction.update({ content: `❌ **Refusé.** ${result}`, embeds: [], components: [] });
+    return;
+  }
+
+  if (customId.startsWith("oa_deny_role:")) {
+    const parts = customId.split(":");
+    const gId = parts[1] ?? "";
+    const rId = parts[2] ?? "";
+    const targetGuild = client.guilds.cache.get(gId);
+    if (!targetGuild) {
+      await interaction.update({ content: "❌ Serveur introuvable.", embeds: [], components: [] }); return;
+    }
+    const role = targetGuild.roles.cache.get(rId);
+    if (role) {
+      await role.delete("Supprimé par le propriétaire du bot — rôle admin non autorisé").catch(() => null);
+      await interaction.update({ content: `✅ Rôle \`${role.name}\` **supprimé** du serveur **${targetGuild.name}**.`, embeds: [], components: [] });
+    } else {
+      await interaction.update({ content: `⚠️ Rôle \`${rId}\` introuvable (déjà supprimé ?).`, embeds: [], components: [] });
+    }
+    return;
+  }
+
+  if (customId.startsWith("oa_captcha:")) {
+    const parts = customId.split(":");
+    const gId = parts[1] ?? "";
+    const mId = parts[2] ?? "";
+    const targetGuild = client.guilds.cache.get(gId);
+    const member = targetGuild ? await targetGuild.members.fetch(mId).catch(() => null) : null;
+    if (!member) {
+      await interaction.update({ content: "❌ Membre introuvable.", embeds: [], components: [] }); return;
+    }
+    const a = Math.floor(Math.random() * 20) + 1;
+    const b = Math.floor(Math.random() * 20) + 1;
+    await member.user.send(
+      `🔐 **Vérification de sécurité** — **${targetGuild?.name ?? gId}**\n\n` +
+      `Le propriétaire du serveur souhaite vérifier ton identité suite à l'attribution d'un rôle Administrateur.\n` +
+      `Réponds à cette question dans ce DM : **Combien fait ${a} + ${b} ?**\n\n` +
+      `Tu as 10 minutes pour répondre.`
+    ).catch(() => null);
+    await interaction.update({
+      content: `🔐 Captcha envoyé à **${member.user.tag}** — réponse attendue : **${a + b}** (valable 10 min).`,
+      embeds: [], components: [],
+    });
+    return;
+  }
+}
+
 // ──── BUTTON INTERACTION ────
 
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
@@ -852,34 +939,44 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     }
 
     if (customId.startsWith("sec_approve:")) {
-      setSecurityLevel(guildId, 3);
-      removePendingLevel3(guildId);
+      // Étape 1 owner → marquer approuvé, envoyer validation admin dans le serveur
+      markOwnerApproved(guildId);
+      await interaction.update({
+        content: `✅ **Approuvé.** En attente de la validation d'un admin dans le salon logs de **${pending.guildName}**.`,
+        embeds: [],
+        components: [],
+      });
 
-      await interaction.update({ content: `✅ Niveau 3 **approuvé** pour **${pending.guildName}**.`, embeds: [], components: [] });
-
-      // Log dans le serveur avec @everyone
-      const guild = client.guilds.cache.get(guildId);
-      if (guild) {
+      const pendingGuild = client.guilds.cache.get(guildId);
+      if (pendingGuild) {
         const cfg = getConfig(guildId);
         if (cfg.logChannelId) {
-          const logCh = guild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
+          const logCh = pendingGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
+          const adminRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setCustomId(`sec_admin_confirm:${guildId}`)
+              .setLabel("✅ Confirmer — activer niveau 3")
+              .setStyle(ButtonStyle.Danger),
+            new ButtonBuilder()
+              .setCustomId(`sec_admin_deny:${guildId}`)
+              .setLabel("❌ Refuser")
+              .setStyle(ButtonStyle.Secondary),
+          );
           await logCh?.send({
             content: "@everyone",
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
-              .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
-              .setDescription(`Le mode de sécurité **maximum** a été activé par le propriétaire du bot.\n\nDemandé par <@${pending.requesterId}>.`)
-              .addFields(
-                { name: "Effets actifs", value: "• Anti-insulte renforcé (timeout 24h)\n• Anti-webhook automatique\n• Comptes < 7 jours = suspects\n• Alerte DM propriétaire pour tout compte suspect" },
+              .setTitle("🔴 Niveau 3 — Validation admin requise")
+              .setDescription(
+                `Le propriétaire du bot a approuvé l'activation du **niveau de sécurité maximum**.\n\n` +
+                `Un administrateur du serveur doit confirmer pour finaliser.\nDemandé par <@${pending.requesterId}>.`
               )
+              .addFields({ name: "Effets si activé", value: "• Anti-insulte timeout 24h\n• Anti-webhook auto\n• Comptes < 7 jours suspects\n• Alerte DM owner pour tout compte suspect" })
               .setTimestamp()],
+            components: [adminRow],
           }).catch(() => null);
         }
       }
-
-      // Notifier le demandeur
-      const requester = await client.users.fetch(pending.requesterId).catch(() => null);
-      await requester?.send(`✅ Ta demande d'activation du niveau de sécurité 3 sur **${pending.guildName}** a été **approuvée** par le propriétaire du bot.`).catch(() => null);
 
     } else {
       removePendingLevel3(guildId);
@@ -891,7 +988,90 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     return;
   }
 
+  // ── Boutons alerte rôle admin (DM owner) — avant le !guild check ──
+  if (customId.startsWith("oa_ok:") || customId.startsWith("oa_deny:") || customId.startsWith("oa_deny_role:") || customId.startsWith("oa_captcha:")) {
+    await handleOwnerAdminAlert(client, interaction);
+    return;
+  }
+
+  // ── Boutons approbation anti-raid niveau 2 (DM owner) ──
+  if (customId.startsWith("raid2_approve:") || customId.startsWith("raid2_deny:")) {
+    const r2GuildId = customId.split(":")[1] ?? "";
+    const raid2 = getPendingRaid2(r2GuildId);
+    if (!raid2) {
+      await interaction.update({ content: "❌ Cette demande est expirée ou déjà traitée.", embeds: [], components: [] });
+      return;
+    }
+    if (customId.startsWith("raid2_approve:")) {
+      setRaidMode2(r2GuildId, true);
+      removePendingRaid2(r2GuildId);
+      await interaction.update({ content: `✅ Anti-Raid Niveau 2 **approuvé** pour **${raid2.guildName}**.`, embeds: [], components: [] });
+      const tGuild = client.guilds.cache.get(r2GuildId);
+      if (tGuild) {
+        const cfg = getConfig(r2GuildId);
+        if (cfg.logChannelId) {
+          const lCh = tGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
+          await lCh?.send({
+            content: "@everyone",
+            embeds: [new EmbedBuilder()
+              .setColor(0xef4444)
+              .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
+              .setDescription(`Approuvé par le propriétaire du bot.\nDemandé par <@${raid2.requesterId}>.`)
+              .addFields({ name: "⚠️ Effet", value: "Tout nouveau **salon** ou **rôle** créé sera automatiquement supprimé." })
+              .setTimestamp()],
+          }).catch(() => null);
+        }
+      }
+      const reqUser = await client.users.fetch(raid2.requesterId).catch(() => null);
+      await reqUser?.send(`✅ L'**Anti-Raid Niveau 2** sur **${raid2.guildName}** a été approuvé et est maintenant actif.`).catch(() => null);
+    } else {
+      removePendingRaid2(r2GuildId);
+      await interaction.update({ content: `❌ Anti-Raid Niveau 2 **refusé** pour **${raid2.guildName}**.`, embeds: [], components: [] });
+      const reqUser = await client.users.fetch(raid2.requesterId).catch(() => null);
+      await reqUser?.send(`❌ Ta demande d'**Anti-Raid Niveau 2** sur **${raid2.guildName}** a été refusée.`).catch(() => null);
+    }
+    return;
+  }
+
   if (!guild) return;
+
+  // ── Validation admin en serveur pour sec niveau 3 ──
+  if (customId.startsWith("sec_admin_confirm:") || customId.startsWith("sec_admin_deny:")) {
+    const sacGuildId = customId.split(":")[1] ?? "";
+    const sacPending = getPendingLevel3(sacGuildId);
+    if (!sacPending || !sacPending.ownerApproved) {
+      await interaction.reply({ content: "❌ Cette demande est expirée ou n'a pas encore été approuvée par le propriétaire.", ephemeral: true });
+      return;
+    }
+    const sacMember = await guild.members.fetch(interaction.user.id).catch(() => null);
+    if (!sacMember?.permissions.has(PermissionFlagsBits.Administrator)) {
+      await interaction.reply({ content: "❌ Seuls les administrateurs du serveur peuvent confirmer cette action.", ephemeral: true });
+      return;
+    }
+    if (customId.startsWith("sec_admin_confirm:")) {
+      setSecurityLevel(sacGuildId, 3);
+      removePendingLevel3(sacGuildId);
+      await interaction.update({ content: `✅ Niveau 3 **activé** et confirmé par ${interaction.user.tag}.`, embeds: [], components: [] });
+      const sacLogCh = interaction.channel as TextChannel | null;
+      await sacLogCh?.send({
+        content: "@everyone",
+        embeds: [new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
+          .setDescription(`Approuvé par le propriétaire du bot + confirmé par <@${interaction.user.id}>.\nDemandé par <@${sacPending.requesterId}>.`)
+          .addFields({ name: "Effets actifs", value: "• Anti-insulte timeout 24h\n• Anti-webhook auto\n• Comptes < 7 jours suspects\n• Alerte DM owner pour tout compte suspect" })
+          .setTimestamp()],
+      }).catch(() => null);
+      const sacReq = await client.users.fetch(sacPending.requesterId).catch(() => null);
+      await sacReq?.send(`✅ Ta demande de niveau 3 sur **${sacPending.guildName}** a été approuvée et confirmée. Le niveau 3 est maintenant actif.`).catch(() => null);
+    } else {
+      removePendingLevel3(sacGuildId);
+      await interaction.update({ content: `❌ Niveau 3 **refusé** par ${interaction.user.tag}.`, embeds: [], components: [] });
+      const sacReq = await client.users.fetch(sacPending.requesterId).catch(() => null);
+      await sacReq?.send(`❌ Ta demande de niveau 3 sur **${sacPending.guildName}** a été refusée par un administrateur du serveur.`).catch(() => null);
+    }
+    return;
+  }
 
   if (customId.startsWith("dash_")) {
     await handleDashboardButton(client, interaction);
