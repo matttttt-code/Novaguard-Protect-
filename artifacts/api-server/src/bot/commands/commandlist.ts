@@ -9,60 +9,82 @@ function buildCommandListEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(0x6366f1)
     .setTitle("📋 Liste des commandes")
-    .setDescription("Toutes les commandes disponibles — slash `/` et préfixe `&`")
+    .setDescription("Toutes les commandes — slash `/` et préfixe `&`")
     .addFields(
       {
         name: "🛡️ Modération",
         value: [
-          "`/kick` — Expulse un membre",
-          "`/ban` — Bannit un membre",
-          "`/unban` — Débannit par ID",
-          "`/timeout` — Timeout (1min → 28j)",
-          "`/untimeout` — Retire le timeout",
-          "`/warn` — Avertit un membre",
-          "`/warnings voir|effacer` — Gère les avertissements",
-          "`/clear` — Supprime des messages (1-100)",
+          "`/kick` · `&kick @membre` — Expulse un membre",
+          "`/ban` · `&ban @membre` — Bannit un membre",
+          "`/softban` · `&softban @membre` (`&sb`) — Ban + déban immédiat (supprime les messages)",
+          "`/unban` · `&unban <userId>` — Débannit (approbation admin si blacklisté)",
+          "`/timeout` · `&timeout @membre durée` (`&mute`) — Timeout (1m→28j)",
+          "`/untimeout` · `&untimeout @membre` (`&unmute`) — Retire le timeout",
+          "`/warn` · `&warn @membre raison` — Avertissement avec Case ID",
+          "`/warnings voir|effacer|retirer` · `&warnings voir|effacer|retirer @membre` — Gère les avertissements",
+          "`/clear` · `&clear [nombre]` (`&purge`) — Supprime des messages (1-100)",
         ].join("\n"),
       },
       {
         name: "⚙️ Gestion du serveur",
         value: [
-          "`/slowmode` — Définit le slowmode d'un salon",
-          "`/lock` — Verrouille un salon",
-          "`/unlock` — Déverrouille un salon",
-          "`/role ajouter|retirer` — Gère les rôles d'un membre",
-          "`/nickname` — Change ou réinitialise un surnom",
+          "`/slowmode` · `&slowmode secondes [#salon]` (`&sm`) — Slowmode d'un salon",
+          "`/lock` · `&lock [#salon] [raison]` — Verrouille un salon",
+          "`/unlock` · `&unlock [#salon] [raison]` — Déverrouille un salon",
+          "`/role ajouter|retirer` · `&role ajouter|retirer @membre @rôle` — Gère les rôles",
+          "`/nickname` · `&nickname @membre [surnom]` (`&nick`) — Change le surnom",
+          "`/revokeinvites` · `&revokeinvites` — Révoque toutes les invitations",
+          "`/raidmode activer|désactiver` · `&raidmode on|off` — Mode anti-raid",
+        ].join("\n"),
+      },
+      {
+        name: "⛔ Liste noire (Blacklist)",
+        value: [
+          "`/blacklist` · `&blacklist @membre raison` (`&bl`) — Blacklist définitif (déban nécessite approbation admin)",
+          "`/blacklistinfo` · `&blacklistinfo` (`&bli`) — Voir la liste noire",
+          "`/setbanlog` · `&setbanlog #salon` — Définit le salon des logs bans/blacklist",
+          "🤖 **AntiDC** — Ban automatique si un membre blacklisté tente de rejoindre",
+        ].join("\n"),
+      },
+      {
+        name: "📋 Configuration",
+        value: [
+          "`/setlog` · `&setlog #salon` — Définit le salon de logs principal",
+          "`/setbanlog` · `&setbanlog #salon` — Définit le salon de logs bans",
         ].join("\n"),
       },
       {
         name: "ℹ️ Informations",
         value: [
-          "`/userinfo` — Infos d'un membre",
-          "`/serverinfo` — Infos du serveur",
+          "`/userinfo` · `&userinfo [@membre]` (`&ui`) — Infos d'un membre",
+          "`/serverinfo` · `&serverinfo` (`&sv`) — Infos du serveur",
           "`/sanctioninfo` · `&sanctioninfo` (`&si`) — Sanctions d'un membre",
-          "`/infome` · `&infome` (`&im`, `&whoami`) — Infos complètes d'un membre",
-          "`/getid membre|role|salon` · `&getid` (`&id`) — ID d'un membre, rôle ou salon",
-          "`/info` · `&info` (`&botinfo`, `&bot`) — Infos du bot",
+          "`/infome` · `&infome` (`&im`) — Mes infos complètes",
+          "`/getid` · `&getid` (`&id`) — ID d'un membre, rôle ou salon",
+          "`/info` · `&info` (`&botinfo`) — Infos du bot",
         ].join("\n"),
       },
       {
         name: "🤖 Auto-modération",
         value: [
-          "👢 **5 messages en 5s** → Expulsion automatique",
+          "👢 **5 messages en 5s** → Expulsion + slowmode 5s sur le salon (1 min)",
           "🔇 **+5 emojis** dans un message → Timeout 10min",
           "🔇 **Lien détecté** → Timeout 10min",
           "🔇 **100% majuscules** (+8 lettres) → Timeout 10min",
-          "*Les modérateurs et gestionnaires sont exemptés*",
+          "⚠️ **Compte < 24h** à l'arrivée → Ping @everyone dans les logs",
+          "🤖 **Blacklisté qui rejoint** → Ban automatique + ping @everyone",
+          "*Les modérateurs sont exemptés*",
         ].join("\n"),
       },
       {
-        name: "📋 Utilitaires",
+        name: "📩 Utilitaires",
         value: [
-          "`/commandlist` · `&commandlist` (`&cmds`, `&help`) — Cette liste",
+          "`/support` · `&support` — Reçois un questionnaire d'aide en DM (transmis au staff)",
+          "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
         ].join("\n"),
       }
     )
-    .setFooter({ text: "Les DMs de sanction et logs sont activés pour toutes les actions" })
+    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns" })
     .setTimestamp();
 }
 

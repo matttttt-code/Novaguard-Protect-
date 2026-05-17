@@ -19,6 +19,9 @@ import {
   removeFromBlacklist,
 } from "./blacklist-store.js";
 import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
+import { isRaidMode, getConfig } from "./guild-config-store.js";
+import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
+import { handleSupportResponse } from "./commands/support.js";
 
 export function startBot(): void {
   const token = process.env["DISCORD_TOKEN"];
@@ -34,6 +37,7 @@ export function startBot(): void {
     intents: [
       GatewayIntentBits.Guilds,
       GatewayIntentBits.GuildMessages,
+      GatewayIntentBits.DirectMessages,
       ...(hasGuildMembers ? [GatewayIntentBits.GuildMembers] : []),
       ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
     ],
@@ -41,13 +45,10 @@ export function startBot(): void {
 
   client.once(Events.ClientReady, async (readyClient) => {
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
-
     readyClient.user.setActivity("le serveur 🛡️", { type: ActivityType.Watching });
 
     try {
-      const commandData = commands.map(
-        (c) => c.data.toJSON() as ApplicationCommandDataResolvable
-      );
+      const commandData = commands.map((c) => c.data.toJSON() as ApplicationCommandDataResolvable);
       await readyClient.application.commands.set(commandData);
       logger.info({ count: commandData.length }, "Commandes slash enregistrées avec succès");
     } catch (err) {
@@ -60,7 +61,6 @@ export function startBot(): void {
       await handleButtonInteraction(client, interaction as ButtonInteraction);
       return;
     }
-
     if (!interaction.isChatInputCommand()) return;
 
     const command = commands.find((c) => c.data.name === interaction.commandName);
@@ -79,13 +79,41 @@ export function startBot(): void {
     }
   });
 
+  client.on(Events.MessageCreate, async (message) => {
+    if (!message.author.bot && message.channel.isDMBased()) {
+      const pending = getSupportRequest(message.author.id);
+      if (pending) {
+        removeSupportRequest(message.author.id);
+        const config = getConfig(pending.guildId);
+        const channelId = config.logChannelId ?? LOG_CHANNEL_ID;
+        await handleSupportResponse(
+          client,
+          message.author.id,
+          pending.guildId,
+          pending.guildName,
+          channelId,
+          message.content,
+          message.author.tag
+        );
+        await message.reply("✅ Ta réponse a bien été transmise au staff ! Un modérateur te contactera si nécessaire.");
+      }
+    }
+  });
+
   registerAutoMod(client, hasMessageContent);
   registerPrefixHandler(client, prefixCommands);
 
   client.on(Events.GuildMemberAdd, async (member) => {
     logger.info({ guild: member.guild.name, user: member.user.tag }, "Nouveau membre rejoint");
 
-    if (isBlacklisted(member.guild.id, member.id)) {
+    const guildId = member.guild.id;
+    const accountAgeMs = Date.now() - member.user.createdTimestamp;
+    const accountAgeDays = Math.floor(accountAgeMs / 86_400_000);
+    const accountAgeHours = Math.floor(accountAgeMs / 3_600_000);
+    const createdTs = Math.floor(member.user.createdTimestamp / 1000);
+    const isSuspect = accountAgeHours < 24;
+
+    if (isBlacklisted(guildId, member.id)) {
       try {
         await member.ban({ reason: "[ANTIDC] Membre blacklisté — ban automatique à la reconnexion" });
         logger.info({ user: member.user.tag }, "AntiDC : membre blacklisté banni automatiquement");
@@ -94,14 +122,78 @@ export function startBot(): void {
           client,
           logEmbed(0x0f0f0f, "🤖 AntiDC — Ban automatique", [
             { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Âge du compte", value: accountAgeDays < 1 ? `${accountAgeHours}h` : `${accountAgeDays}j`, inline: true },
             { name: "Raison", value: "Membre blacklisté — tentative de reconnexion détectée" },
           ], { tag: client.user!.tag, id: client.user!.id }),
-          { pingEveryone: true }
+          { guildId, pingEveryone: true, logType: "ban" }
         );
       } catch (err) {
         logger.error({ err, user: member.user.tag }, "AntiDC : impossible de bannir le membre blacklisté");
       }
+      return;
     }
+
+    if (isRaidMode(guildId)) {
+      try {
+        await member.kick("Mode Raid actif — rejoin bloqué");
+        logger.info({ user: member.user.tag }, "Raid mode : membre expulsé automatiquement");
+
+        await sendLog(
+          client,
+          logEmbed(0xef4444, "🚨 Raid Mode — Expulsion automatique", [
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Raison", value: "Mode Raid actif — aucun nouveau membre autorisé" },
+          ], { tag: client.user!.tag, id: client.user!.id }),
+          { guildId }
+        );
+      } catch (err) {
+        logger.error({ err }, "Raid mode kick error");
+      }
+      return;
+    }
+
+    const joinEmbed = new EmbedBuilder()
+      .setColor(isSuspect ? 0xef4444 : 0x22c55e)
+      .setTitle(isSuspect ? "⚠️ Nouveau membre — Compte suspect" : "✅ Nouveau membre")
+      .setThumbnail(member.user.displayAvatarURL())
+      .addFields(
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Compte créé le", value: `<t:${createdTs}:F>`, inline: true },
+        { name: "Âge du compte", value: accountAgeDays < 1 ? `⚠️ ${accountAgeHours} heure(s)` : `${accountAgeDays} jour(s)`, inline: true },
+        { name: "Membres", value: String(member.guild.memberCount), inline: true }
+      )
+      .setTimestamp();
+
+    if (isSuspect) {
+      joinEmbed.setDescription("⚠️ Ce compte a moins de **24 heures**. Possible compte alternatif ou suspect.");
+    }
+
+    await sendLog(client, joinEmbed, {
+      guildId,
+      pingEveryone: isSuspect,
+    });
+  });
+
+  client.on(Events.GuildMemberRemove, async (member) => {
+    logger.info({ guild: member.guild.name, user: member.user.tag }, "Membre quitté");
+
+    const guildId = member.guild.id;
+    const createdTs = Math.floor(member.user.createdTimestamp / 1000);
+    const joinedTs = member.joinedTimestamp ? Math.floor(member.joinedTimestamp / 1000) : null;
+
+    const leaveEmbed = new EmbedBuilder()
+      .setColor(0x6b7280)
+      .setTitle("👋 Membre quitté")
+      .setThumbnail(member.user.displayAvatarURL())
+      .addFields(
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Membres restants", value: String(member.guild.memberCount), inline: true },
+        { name: "Compte créé le", value: `<t:${createdTs}:F>`, inline: false },
+        ...(joinedTs ? [{ name: "Avait rejoint le", value: `<t:${joinedTs}:F>`, inline: false }] : [])
+      )
+      .setTimestamp();
+
+    await sendLog(client, leaveEmbed, { guildId });
   });
 
   client.login(token).catch((err) => {
@@ -110,13 +202,11 @@ export function startBot(): void {
 }
 
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
-  const { customId, guild, member } = interaction;
-
-  if (!guild || !member) return;
+  const { customId, guild } = interaction;
+  if (!guild) return;
 
   const isApprove = customId.startsWith("bl_approve_");
   const isDeny = customId.startsWith("bl_deny_");
-
   if (!isApprove && !isDeny) return;
 
   const guildMember = await guild.members.fetch(interaction.user.id).catch(() => null);
@@ -140,16 +230,13 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       removeFromBlacklist(guild.id, userId);
       removePendingUnban(userId);
 
-      const embed = new EmbedBuilder()
-        .setColor(0x22c55e)
-        .setTitle("✅ Déban validé")
+      const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("✅ Déban validé")
         .addFields(
           { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
-          { name: "Validé par", value: `${interaction.user.tag}`, inline: true },
+          { name: "Validé par", value: interaction.user.tag, inline: true },
           { name: "Demandé par", value: pending.requesterTag, inline: true },
-          { name: "Raison du déban", value: pending.reason },
-        )
-        .setTimestamp();
+          { name: "Raison du déban", value: pending.reason }
+        ).setTimestamp();
 
       await interaction.reply({ embeds: [embed] });
       await interaction.message.edit({ components: [] }).catch(() => null);
@@ -158,8 +245,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
         { name: "Demandé par", value: pending.requesterTag, inline: true },
         { name: "Raison", value: pending.reason },
-      ], { tag: interaction.user.tag, id: interaction.user.id }));
-
+      ], { tag: interaction.user.tag, id: interaction.user.id }),
+      { guildId: guild.id, logType: "ban" });
     } catch (err) {
       logger.error({ err }, "Impossible de débannir le membre blacklisté");
       await interaction.reply({ content: "❌ Impossible de débannir cet utilisateur.", ephemeral: true });
@@ -169,15 +256,12 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
   if (isDeny) {
     removePendingUnban(userId);
 
-    const embed = new EmbedBuilder()
-      .setColor(0xef4444)
-      .setTitle("❌ Déban refusé")
+    const embed = new EmbedBuilder().setColor(0xef4444).setTitle("❌ Déban refusé")
       .addFields(
         { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
         { name: "Refusé par", value: interaction.user.tag, inline: true },
-        { name: "Demandé par", value: pending.requesterTag, inline: true },
-      )
-      .setTimestamp();
+        { name: "Demandé par", value: pending.requesterTag, inline: true }
+      ).setTimestamp();
 
     await interaction.reply({ embeds: [embed] });
     await interaction.message.edit({ components: [] }).catch(() => null);
@@ -185,6 +269,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     await sendLog(client, logEmbed(0xef4444, "❌ Déban blacklist refusé", [
       { name: "Utilisateur", value: `${pending.userTag} (\`${userId}\`)`, inline: true },
       { name: "Demandé par", value: pending.requesterTag, inline: true },
-    ], { tag: interaction.user.tag, id: interaction.user.id }));
+    ], { tag: interaction.user.tag, id: interaction.user.id }),
+    { guildId: guild.id, logType: "ban" });
   }
 }

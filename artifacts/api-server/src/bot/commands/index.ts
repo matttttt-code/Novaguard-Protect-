@@ -20,6 +20,12 @@ import * as botinfo from "./botinfo.js";
 import * as commandlist from "./commandlist.js";
 import * as blacklist from "./blacklist.js";
 import * as blacklistinfo from "./blacklistinfo.js";
+import * as setlog from "./setlog.js";
+import * as setbanlog from "./setbanlog.js";
+import * as softban from "./softban.js";
+import * as revokeinvites from "./revokeinvites.js";
+import * as raidmode from "./raidmode.js";
+import * as support from "./support.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -32,7 +38,8 @@ export const commands: Command[] = [
   kick, ban, unban, timeout, untimeout, warn, warnings, clear,
   userinfo, serverinfo, slowmode, lock, unlock, role, nickname,
   sanctioninfo, infome, getid, botinfo, commandlist,
-  blacklist, blacklistinfo,
+  blacklist, blacklistinfo, setlog, setbanlog,
+  softban, revokeinvites, raidmode, support,
 ];
 
 type PrefixModule = {
@@ -45,7 +52,8 @@ const prefixModules: PrefixModule[] = [
   kick, ban, unban, timeout, untimeout, warn, warnings, clear,
   userinfo, serverinfo, slowmode, lock, unlock, role, nickname,
   sanctioninfo, infome, getid, botinfo, commandlist,
-  blacklist, blacklistinfo,
+  blacklist, blacklistinfo, setlog, setbanlog,
+  softban, revokeinvites, raidmode, support,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

@@ -6,18 +6,40 @@ import {
   EmbedBuilder,
   Message,
 } from "discord.js";
-import { getWarnings, clearWarnings } from "../warnings-store.js";
+import { getWarnings, clearWarnings, removeWarningByCase } from "../warnings-store.js";
+
+function warningsEmbed(member: GuildMember): EmbedBuilder {
+  const warns = getWarnings(member.guild.id, member.id);
+  const description =
+    warns.length === 0
+      ? "Aucun avertissement."
+      : warns
+          .map((w) => `**Case #${w.caseId}** — ${w.reason}\n> Par ${w.moderator} — <t:${Math.floor(w.timestamp.getTime() / 1000)}:R>`)
+          .join("\n\n");
+
+  return new EmbedBuilder()
+    .setColor(0xf97316)
+    .setTitle(`⚠️ Avertissements — ${member.user.tag}`)
+    .setDescription(description)
+    .setFooter({ text: `Total : ${warns.length} avertissement(s) | Pour retirer : &warnings retirer @membre <caseId>` })
+    .setTimestamp();
+}
 
 export const data = new SlashCommandBuilder()
   .setName("warnings")
   .setDescription("Gère les avertissements d'un membre")
   .addSubcommand((sub) =>
-    sub.setName("voir").setDescription("Voir les avertissements d'un membre")
+    sub.setName("voir").setDescription("Voir les avertissements")
       .addUserOption((o) => o.setName("membre").setDescription("Le membre").setRequired(true))
   )
   .addSubcommand((sub) =>
-    sub.setName("effacer").setDescription("Effacer tous les avertissements d'un membre")
+    sub.setName("effacer").setDescription("Effacer TOUS les avertissements d'un membre")
       .addUserOption((o) => o.setName("membre").setDescription("Le membre").setRequired(true))
+  )
+  .addSubcommand((sub) =>
+    sub.setName("retirer").setDescription("Retirer un avertissement par Case ID")
+      .addUserOption((o) => o.setName("membre").setDescription("Le membre").setRequired(true))
+      .addIntegerOption((o) => o.setName("case").setDescription("Le numéro de case à retirer").setRequired(true).setMinValue(1))
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers);
 
@@ -29,12 +51,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
 
   if (sub === "voir") {
-    const warns = getWarnings(interaction.guildId, member.id);
-    const embed = new EmbedBuilder().setColor(0xf97316).setTitle(`⚠️ Avertissements — ${member.user.tag}`)
-      .setDescription(warns.length === 0 ? "Aucun avertissement." :
-        warns.map((w, i) => `**${i + 1}.** ${w.reason}\n> Par ${w.moderator} — <t:${Math.floor(w.timestamp.getTime() / 1000)}:R>`).join("\n\n"))
-      .setFooter({ text: `Total : ${warns.length} avertissement(s)` }).setTimestamp();
-    return interaction.reply({ embeds: [embed] });
+    return interaction.reply({ embeds: [warningsEmbed(member)] });
   }
 
   if (sub === "effacer") {
@@ -43,6 +60,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       .addFields(
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
         { name: "Supprimés", value: String(count), inline: true }
+      ).setTimestamp();
+    return interaction.reply({ embeds: [embed] });
+  }
+
+  if (sub === "retirer") {
+    const caseId = interaction.options.getInteger("case", true);
+    const removed = removeWarningByCase(interaction.guildId, member.id, caseId);
+    if (!removed) {
+      return interaction.reply({ content: `❌ Aucun avertissement avec le Case #${caseId} trouvé pour ce membre.`, ephemeral: true });
+    }
+    const remaining = getWarnings(interaction.guildId, member.id).length;
+    const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("✅ Avertissement retiré")
+      .addFields(
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Case retiré", value: `#${caseId}`, inline: true },
+        { name: "Restants", value: String(remaining), inline: true }
       ).setTimestamp();
     return interaction.reply({ embeds: [embed] });
   }
@@ -60,8 +93,9 @@ export async function executeMessage(message: Message, args: string[]) {
   }
 
   const sub = args[0]?.toLowerCase();
-  if (sub !== "voir" && sub !== "effacer") {
-    await message.reply("Usage : `&warnings voir @membre` ou `&warnings effacer @membre`"); return;
+  const validSubs = ["voir", "effacer", "retirer"];
+  if (!validSubs.includes(sub ?? "")) {
+    await message.reply("Usage :\n`&warnings voir @membre`\n`&warnings effacer @membre`\n`&warnings retirer @membre <caseId>`"); return;
   }
 
   const userId = args[1]?.replace(/[<@!>]/g, "");
@@ -72,13 +106,11 @@ export async function executeMessage(message: Message, args: string[]) {
   catch { await message.reply("❌ Membre introuvable."); return; }
 
   if (sub === "voir") {
-    const warns = getWarnings(message.guild.id, member.id);
-    const embed = new EmbedBuilder().setColor(0xf97316).setTitle(`⚠️ Avertissements — ${member.user.tag}`)
-      .setDescription(warns.length === 0 ? "Aucun avertissement." :
-        warns.map((w, i) => `**${i + 1}.** ${w.reason}\n> Par ${w.moderator} — <t:${Math.floor(w.timestamp.getTime() / 1000)}:R>`).join("\n\n"))
-      .setFooter({ text: `Total : ${warns.length} avertissement(s)` }).setTimestamp();
-    await message.reply({ embeds: [embed] });
-  } else {
+    await message.reply({ embeds: [warningsEmbed(member)] });
+    return;
+  }
+
+  if (sub === "effacer") {
     const count = clearWarnings(message.guild.id, member.id);
     const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("🗑️ Avertissements effacés")
       .addFields(
@@ -86,5 +118,24 @@ export async function executeMessage(message: Message, args: string[]) {
         { name: "Supprimés", value: String(count), inline: true }
       ).setTimestamp();
     await message.reply({ embeds: [embed] });
+    return;
+  }
+
+  if (sub === "retirer") {
+    const caseId = parseInt(args[2] ?? "", 10);
+    if (isNaN(caseId)) { await message.reply("❌ Case ID invalide. Usage : `&warnings retirer @membre <caseId>`"); return; }
+    const removed = removeWarningByCase(message.guild.id, member.id, caseId);
+    if (!removed) {
+      await message.reply(`❌ Aucun avertissement avec le Case #${caseId} pour ce membre.`); return;
+    }
+    const remaining = getWarnings(message.guild.id, member.id).length;
+    const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("✅ Avertissement retiré")
+      .addFields(
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Case retiré", value: `#${caseId}`, inline: true },
+        { name: "Restants", value: String(remaining), inline: true }
+      ).setTimestamp();
+    await message.reply({ embeds: [embed] });
+    return;
   }
 }

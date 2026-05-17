@@ -29,25 +29,39 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous avertir.", ephemeral: true });
   if (!interaction.guildId) return interaction.reply({ content: "Commande serveur uniquement.", ephemeral: true });
 
-  addWarning(interaction.guildId, member.id, { reason, moderator: interaction.user.tag, moderatorId: interaction.user.id, timestamp: new Date() });
+  const caseId = addWarning(interaction.guildId, member.id, {
+    reason,
+    moderator: interaction.user.tag,
+    moderatorId: interaction.user.id,
+    timestamp: new Date(),
+  });
   const total = getWarnings(interaction.guildId, member.id).length;
 
-  const embed = new EmbedBuilder().setColor(0xf97316).setTitle("⚠️ Avertissement")
+  const embed = new EmbedBuilder()
+    .setColor(0xf97316)
+    .setTitle("⚠️ Avertissement")
     .addFields(
       { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
       { name: "Modérateur", value: interaction.user.tag, inline: true },
-      { name: "Total d'avertissements", value: String(total), inline: true },
+      { name: "Case ID", value: `#${caseId}`, inline: true },
+      { name: "Total", value: String(total), inline: true },
       { name: "Raison", value: reason }
-    ).setTimestamp();
+    )
+    .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
-  await sendSanctionDM(member.user, "warn", reason, interaction.guild!, `Total d'avertissements : ${total}`);
+  await sendSanctionDM(member.user, "warn", reason, interaction.guild!, `Case #${caseId} — Total : ${total}`);
 
-  return sendLog(interaction.client, logEmbed(0xf97316, "⚠️ Avertissement", [
-    { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-    { name: "Total", value: String(total), inline: true },
-    { name: "Raison", value: reason },
-  ], { tag: interaction.user.tag, id: interaction.user.id }));
+  return sendLog(
+    interaction.client,
+    logEmbed(0xf97316, "⚠️ Avertissement", [
+      { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Case ID", value: `#${caseId}`, inline: true },
+      { name: "Total", value: String(total), inline: true },
+      { name: "Raison", value: reason },
+    ], { tag: interaction.user.tag, id: interaction.user.id }),
+    { guildId: interaction.guildId ?? undefined }
+  );
 }
 
 export const prefixName = "warn";
@@ -55,7 +69,7 @@ export const prefixName = "warn";
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-    await message.reply("❌ Permission insuffisante (ModerateMembers requise)."); return;
+    await message.reply("❌ Permission insuffisante."); return;
   }
 
   const userId = args[0]?.replace(/[<@!>]/g, "");
@@ -68,24 +82,38 @@ export async function executeMessage(message: Message, args: string[]) {
   const reason = args.slice(1).join(" ");
   if (!reason) { await message.reply("❌ Une raison est obligatoire."); return; }
 
-  addWarning(message.guild.id, member.id, { reason, moderator: message.author.tag, moderatorId: message.author.id, timestamp: new Date() });
+  const caseId = addWarning(message.guild.id, member.id, {
+    reason,
+    moderator: message.author.tag,
+    moderatorId: message.author.id,
+    timestamp: new Date(),
+  });
   const total = getWarnings(message.guild.id, member.id).length;
 
-  const embed = new EmbedBuilder().setColor(0xf97316).setTitle("⚠️ Avertissement")
+  const embed = new EmbedBuilder()
+    .setColor(0xf97316)
+    .setTitle("⚠️ Avertissement")
     .addFields(
       { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
       { name: "Modérateur", value: message.author.tag, inline: true },
-      { name: "Total d'avertissements", value: String(total), inline: true },
+      { name: "Case ID", value: `#${caseId}`, inline: true },
+      { name: "Total", value: String(total), inline: true },
       { name: "Raison", value: reason }
-    ).setTimestamp();
+    )
+    .setTimestamp();
 
   await message.reply({ embeds: [embed] });
-  await sendSanctionDM(member.user, "warn", reason, message.guild, `Total d'avertissements : ${total}`);
+  await sendSanctionDM(member.user, "warn", reason, message.guild, `Case #${caseId} — Total : ${total}`);
 
-  await sendLog(message.client, logEmbed(0xf97316, "⚠️ Avertissement", [
-    { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-    { name: "Total", value: String(total), inline: true },
-    { name: "Raison", value: reason },
-    { name: "Via", value: "Commande préfixe", inline: true },
-  ], { tag: message.author.tag, id: message.author.id }));
+  await sendLog(
+    message.client,
+    logEmbed(0xf97316, "⚠️ Avertissement", [
+      { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+      { name: "Case ID", value: `#${caseId}`, inline: true },
+      { name: "Total", value: String(total), inline: true },
+      { name: "Raison", value: reason },
+      { name: "Via", value: "Commande préfixe", inline: true },
+    ], { tag: message.author.tag, id: message.author.id }),
+    { guildId: message.guildId ?? undefined }
+  );
 }
