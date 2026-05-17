@@ -27,7 +27,7 @@ import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
 import { isRaidMode, getConfig } from "./guild-config-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
-import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel } from "./ticket-store.js";
+import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 
 export function startBot(): void {
   const token = process.env["DISCORD_TOKEN"];
@@ -303,8 +303,9 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
 
   await interaction.deferReply({ ephemeral: true });
 
+  const ticketNumber = nextTicketNumber(guild.id);
   const safeName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20);
-  const channelName = `🎫-${safeName}`;
+  const channelName = `🎫-${safeName}-${ticketNumber}`;
 
   const permOverwrites = [
     {
@@ -332,7 +333,7 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
       type: ChannelType.GuildText,
       parent: config.ticketCategoryId ?? undefined,
       permissionOverwrites: permOverwrites,
-      topic: `Ticket de ${user.tag} — ${user.id}`,
+      topic: `Ticket #${ticketNumber} — ${user.tag} (${user.id})`,
     }) as TextChannel;
   } catch (err) {
     logger.error({ err }, "Erreur lors de la création du salon ticket");
@@ -342,10 +343,13 @@ async function handleTicketCreate(client: Client, interaction: ButtonInteraction
 
   openTicket({
     channelId: ticketChannel.id,
+    ticketNumber,
     userId: user.id,
     username: user.tag,
     guildId: guild.id,
     createdAt: new Date(),
+    claimedBy: null,
+    claimedById: null,
   });
 
   const welcomeEmbed = new EmbedBuilder()

@@ -6,9 +6,8 @@ import {
   Message,
   GuildMember,
   TextChannel,
-  OverwriteType,
 } from "discord.js";
-import { isTicketChannel, getTicketByChannel } from "../ticket-store.js";
+import { isTicketChannel, getTicketByChannel, claimTicket } from "../ticket-store.js";
 import { getConfig } from "../guild-config-store.js";
 
 async function doClose(channel: TextChannel, closedBy: string, reason: string): Promise<void> {
@@ -20,7 +19,8 @@ async function doClose(channel: TextChannel, closedBy: string, reason: string): 
     .addFields(
       { name: "Fermé par", value: closedBy, inline: true },
       { name: "Raison", value: reason, inline: true },
-      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : [])
+      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+      ...(ticket?.claimedBy ? [{ name: "Pris en charge par", value: ticket.claimedBy, inline: true }] : [])
     )
     .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." })
     .setTimestamp();
@@ -41,6 +41,10 @@ export const data = new SlashCommandBuilder()
     sub.setName("fermer")
       .setDescription("Ferme ce ticket")
       .addStringOption((o) => o.setName("raison").setDescription("Raison de la fermeture"))
+  )
+  .addSubcommand((sub) =>
+    sub.setName("claim")
+      .setDescription("Prend en charge ce ticket (staff uniquement)")
   )
   .addSubcommand((sub) =>
     sub.setName("ajouter")
@@ -79,6 +83,35 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     await interaction.reply({ content: "🔒 Fermeture du ticket en cours...", ephemeral: true });
     await doClose(channel, interaction.user.tag, reason);
     return;
+  }
+
+  if (sub === "claim") {
+    if (!isTicketChannel(interaction.channelId)) {
+      return interaction.reply({ content: "❌ Cette commande ne fonctionne que dans un salon ticket.", ephemeral: true });
+    }
+    if (!isStaff) {
+      return interaction.reply({ content: "❌ Seul le staff peut prendre en charge un ticket.", ephemeral: true });
+    }
+    if (ticket?.claimedBy) {
+      return interaction.reply({ content: `❌ Ce ticket est déjà pris en charge par **${ticket.claimedBy}**.`, ephemeral: true });
+    }
+
+    claimTicket(interaction.channelId, interaction.user.tag, interaction.user.id);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("✅ Ticket pris en charge")
+      .setDescription(`<@${interaction.user.id}> prend en charge ce ticket.`)
+      .addFields(
+        { name: "Staff", value: interaction.user.tag, inline: true },
+        ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : [])
+      )
+      .setTimestamp();
+
+    await channel.setTopic(`Ticket #${ticket?.ticketNumber ?? "?"} — ${ticket?.username ?? "?"} — Pris en charge par ${interaction.user.tag}`).catch(() => null);
+
+    return interaction.reply({ embeds: [embed] });
   }
 
   if (!isStaff) {
@@ -129,11 +162,34 @@ export async function executeMessage(message: Message, args: string[]) {
     return;
   }
 
+  if (sub === "claim") {
+    if (!isTicketChannel(message.channelId)) { await message.reply("❌ Cette commande ne fonctionne que dans un salon ticket."); return; }
+    if (!isStaff) { await message.reply("❌ Seul le staff peut prendre en charge un ticket."); return; }
+    if (ticket?.claimedBy) { await message.reply(`❌ Ce ticket est déjà pris en charge par **${ticket.claimedBy}**.`); return; }
+
+    claimTicket(message.channelId, message.author.tag, message.author.id);
+
+    const embed = new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("✅ Ticket pris en charge")
+      .setDescription(`<@${message.author.id}> prend en charge ce ticket.`)
+      .addFields(
+        { name: "Staff", value: message.author.tag, inline: true },
+        ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []),
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : [])
+      )
+      .setTimestamp();
+
+    await (message.channel as TextChannel).setTopic(`Ticket #${ticket?.ticketNumber ?? "?"} — ${ticket?.username ?? "?"} — Pris en charge par ${message.author.tag}`).catch(() => null);
+    await message.reply({ embeds: [embed] });
+    return;
+  }
+
   if (!isStaff) { await message.reply("❌ Seul le staff peut utiliser cette commande."); return; }
   if (!isTicketChannel(message.channelId)) { await message.reply("❌ Cette commande ne fonctionne que dans un salon ticket."); return; }
 
   const userId = args[1]?.replace(/[<@!>]/g, "");
-  if (!userId) { await message.reply("Usage : `&ticket ajouter @membre` | `&ticket retirer @membre` | `&ticket fermer [raison]`"); return; }
+  if (!userId) { await message.reply("Usage : `&ticket claim` | `&ticket ajouter @membre` | `&ticket retirer @membre` | `&ticket fermer [raison]`"); return; }
 
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
@@ -153,5 +209,5 @@ export async function executeMessage(message: Message, args: string[]) {
     return;
   }
 
-  await message.reply("Usage : `&ticket ajouter @membre` | `&ticket retirer @membre` | `&ticket fermer [raison]`");
+  await message.reply("Usage : `&ticket claim` | `&ticket ajouter @membre` | `&ticket retirer @membre` | `&ticket fermer [raison]`");
 }

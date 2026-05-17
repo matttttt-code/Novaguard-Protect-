@@ -59,10 +59,12 @@ function buildCommandListEmbed(): EmbedBuilder {
         name: "🎫 Tickets",
         value: [
           "`/ticketpanel` · `&ticketpanel` — Envoie le panel de tickets dans ce salon (Admin)",
+          "`/ticket claim` · `&ticket claim` — Prend en charge le ticket (staff)",
           "`/ticket fermer [raison]` · `&ticket fermer [raison]` — Ferme le ticket actuel",
           "`/ticket ajouter @membre` · `&ticket ajouter @membre` — Ajoute un membre au ticket",
           "`/ticket retirer @membre` · `&ticket retirer @membre` — Retire un membre du ticket",
           "🔘 **Bouton** — Les membres cliquent sur 🎫 dans le panel pour créer leur ticket privé",
+          "🔢 Les tickets sont numérotés automatiquement : `🎫-username-42`",
         ].join("\n"),
       },
       {
