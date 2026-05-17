@@ -10,12 +10,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings } from "lucide-react";
+import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, Lock, LogOut } from "lucide-react";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const OWNER_TOKEN_KEY = "owner_token";
+
+function getOwnerToken() { return localStorage.getItem(OWNER_TOKEN_KEY) ?? ""; }
+function setOwnerToken(t: string) { localStorage.setItem(OWNER_TOKEN_KEY, t); }
+function clearOwnerToken() { localStorage.removeItem(OWNER_TOKEN_KEY); }
 
 function apiFetch(path: string, opts: RequestInit = {}) {
-  const token = getToken();
+  const token = getOwnerToken();
   return fetch(`${BASE}${path}`, {
     ...opts,
     headers: {
@@ -24,6 +29,72 @@ function apiFetch(path: string, opts: RequestInit = {}) {
       ...(opts.headers ?? {}),
     },
   });
+}
+
+function OwnerLogin({ onSuccess }: { onSuccess: () => void }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [, setLocation] = useLocation();
+
+  async function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const r = await fetch(`${BASE}/api/owner/auth`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: pw }),
+      });
+      if (r.ok) {
+        setOwnerToken(pw);
+        onSuccess();
+      } else {
+        setError("Mot de passe incorrect.");
+      }
+    } catch {
+      setError("Erreur de connexion.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background flex items-center justify-center p-6">
+      <Card className="w-full max-w-sm">
+        <CardHeader className="text-center space-y-2">
+          <div className="mx-auto w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
+            <Lock className="h-6 w-6 text-primary" />
+          </div>
+          <CardTitle className="font-mono uppercase tracking-tight">Panneau Propriétaire</CardTitle>
+          <CardDescription>Accès restreint — mot de passe requis.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <Input
+                type="password"
+                value={pw}
+                onChange={(e) => setPw(e.target.value)}
+                placeholder="Mot de passe owner..."
+                autoFocus
+              />
+              {error && <p className="text-destructive text-sm mt-1.5">{error}</p>}
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" className="flex-1" onClick={() => setLocation("/guilds")}>
+                <ArrowLeft className="h-4 w-4 mr-1" /> Retour
+              </Button>
+              <Button type="submit" className="flex-1" disabled={loading || !pw}>
+                {loading ? "Vérification..." : "Accéder"}
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 type Channel = { id: string; name: string; type: number; parentId: string | null; position: number };
@@ -51,6 +122,8 @@ export default function OwnerPanel() {
   const { guildId } = useParams<{ guildId: string }>();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+
+  const [ownerAuthed, setOwnerAuthed] = useState(() => !!getOwnerToken());
 
   const [channels, setChannels] = useState<Channel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
@@ -85,11 +158,16 @@ export default function OwnerPanel() {
     if (!getToken()) { setLocation("/"); return; }
   }, [setLocation]);
 
+  const handleOwnerUnauth = useCallback(() => {
+    clearOwnerToken();
+    setOwnerAuthed(false);
+  }, []);
+
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
-    if (r.status === 401) { clearToken(); setLocation("/"); return; }
+    if (r.status === 401) { handleOwnerUnauth(); return; }
     if (r.ok) setChannels(await r.json());
-  }, [guildId, setLocation]);
+  }, [guildId, handleOwnerUnauth]);
 
   const fetchMembers = useCallback(async () => {
     const q = memberSearch ? `?search=${encodeURIComponent(memberSearch)}&limit=50` : "?limit=50";
@@ -209,6 +287,10 @@ export default function OwnerPanel() {
     }
   }
 
+  if (!ownerAuthed) {
+    return <OwnerLogin onSuccess={() => setOwnerAuthed(true)} />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen p-8 space-y-4">
@@ -228,13 +310,16 @@ export default function OwnerPanel() {
             <ArrowLeft className="h-4 w-4" /> Retour
           </Button>
         </Link>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-bold font-mono uppercase tracking-tight flex items-center gap-2">
             <Shield className="h-6 w-6 text-primary" />
             Panneau Propriétaire
           </h1>
           <p className="text-muted-foreground font-mono text-sm">{guildName || guildId}</p>
         </div>
+        <Button variant="outline" size="sm" onClick={handleOwnerUnauth} className="gap-2 shrink-0">
+          <LogOut className="h-4 w-4" /> Déconnexion Owner
+        </Button>
       </header>
 
       <Tabs defaultValue="messages" className="space-y-4">

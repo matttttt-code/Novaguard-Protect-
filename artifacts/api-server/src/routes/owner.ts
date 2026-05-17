@@ -9,7 +9,7 @@ import {
 
 const router = Router();
 
-const DASHBOARD_SECRET = process.env["DASHBOARD_PASSWORD"] ?? "";
+const OWNER_SECRET = process.env["OWNER_PASSWORD"] ?? "";
 
 function authMiddleware(
   req: import("express").Request,
@@ -18,12 +18,22 @@ function authMiddleware(
 ): void {
   const auth = req.headers["authorization"] ?? "";
   const token = auth.startsWith("Bearer ") ? auth.slice(7) : (req.query["token"] as string ?? "");
-  if (!DASHBOARD_SECRET || token !== DASHBOARD_SECRET) {
-    res.status(401).json({ error: "Non autorisé" });
+  if (!OWNER_SECRET || token !== OWNER_SECRET) {
+    res.status(401).json({ error: "Accès propriétaire refusé" });
     return;
   }
   next();
 }
+
+// ── POST /api/owner/auth ──────────────────────────────────────────────────────
+router.post("/owner/auth", (req, res) => {
+  const { token } = req.body as { token?: string };
+  if (!OWNER_SECRET || token !== OWNER_SECRET) {
+    res.status(401).json({ ok: false });
+    return;
+  }
+  res.json({ ok: true });
+});
 
 router.use(authMiddleware);
 
