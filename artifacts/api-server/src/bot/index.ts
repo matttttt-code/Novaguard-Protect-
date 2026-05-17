@@ -968,16 +968,27 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
     if (!member) {
       await interaction.update({ content: "❌ Membre introuvable.", embeds: [], components: [] }); return;
     }
-    const a = Math.floor(Math.random() * 20) + 1;
-    const b = Math.floor(Math.random() * 20) + 1;
-    await member.user.send(
-      `🔐 **Vérification de sécurité** — **${targetGuild?.name ?? gId}**\n\n` +
-      `Le propriétaire du serveur souhaite vérifier ton identité suite à l'attribution d'un rôle Administrateur.\n` +
-      `Réponds à cette question dans ce DM : **Combien fait ${a} + ${b} ?**\n\n` +
-      `Tu as 10 minutes pour répondre.`
-    ).catch(() => null);
+
+    const { code } = generateChallenge();
+    setCaptcha(mId, { code, guildId: gId, attempts: 3 });
+    setTimeout(() => { if (hasCaptcha(mId)) deleteCaptcha(mId); }, 10 * 60_000);
+
+    const captchaEmbed = new EmbedBuilder()
+      .setColor(0xef4444)
+      .setTitle("🔐 Vérification de sécurité requise")
+      .setThumbnail(targetGuild?.iconURL() ?? null)
+      .setDescription(
+        `Le propriétaire du serveur souhaite vérifier ton identité suite à l'attribution d'un rôle **Administrateur** sur **${targetGuild?.name ?? gId}**.\n\n` +
+        `Tape le code suivant en réponse à ce DM :\n\`\`\`\n${code}\n\`\`\`\n` +
+        `> ⏱️ **10 minutes** pour répondre · **3 tentatives** maximum\n` +
+        `> Le code est insensible à la casse.`
+      )
+      .setFooter({ text: `${targetGuild?.name ?? gId} • Vérification sécurité` })
+      .setTimestamp();
+
+    await member.user.send({ embeds: [captchaEmbed] }).catch(() => null);
     await interaction.update({
-      content: `🔐 Captcha envoyé à **${member.user.tag}** — réponse attendue : **${a + b}** (valable 10 min).`,
+      content: `🔐 Captcha envoyé à **${member.user.tag}** — code valable 10 min, 3 tentatives (même système que la vérification d'arrivée).`,
       embeds: [], components: [],
     });
     return;
