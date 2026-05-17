@@ -7,7 +7,7 @@
     "joinLock": false,
     "ticketStaffRoleId": "1505490829513457745",
     "ticketCategoryId": "1505522715044347935",
-    "transcriptChannelId": null,
+    "transcriptChannelId": "1505612998876594307",
     "welcomeEnabled": true,
     "welcomeChannelId": "1504531231071535224",
     "welcomeMessage": "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉",

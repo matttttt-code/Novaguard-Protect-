@@ -22,6 +22,12 @@ export interface GuildConfig {
   captchaVerifiedRoleId: string | null;
   sanctionDmEnabled: boolean;
   inviteLogChannelId: string | null;
+  securityLevel: 1 | 2 | 3;
+  antiInsultEnabled: boolean;
+  antiInsultWords: string[];
+  antiWebhookEnabled: boolean;
+  suspiciousCheckEnabled: boolean;
+  whitelistedInviteCodes: string[];
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -49,6 +55,12 @@ function defaults(): GuildConfig {
     captchaVerifiedRoleId: null,
     sanctionDmEnabled: true,
     inviteLogChannelId: null,
+    securityLevel: 1,
+    antiInsultEnabled: false,
+    antiInsultWords: [],
+    antiWebhookEnabled: false,
+    suspiciousCheckEnabled: false,
+    whitelistedInviteCodes: [],
   };
 }
 
@@ -119,3 +131,39 @@ export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null)
 export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaVerifiedRoleId: roleId }); }
 export function setSanctionDmEnabled(guildId: string, enabled: boolean): void { set(guildId, { sanctionDmEnabled: enabled }); }
 export function setInviteLogChannel(guildId: string, channelId: string | null): void { set(guildId, { inviteLogChannelId: channelId }); }
+
+export function setSecurityLevel(guildId: string, level: 1 | 2 | 3): void { set(guildId, { securityLevel: level }); }
+export function getSecurityLevel(guildId: string): 1 | 2 | 3 { return configs.get(guildId)?.securityLevel ?? 1; }
+
+export function setAntiInsultEnabled(guildId: string, enabled: boolean): void { set(guildId, { antiInsultEnabled: enabled }); }
+
+export function addAntiInsultWord(guildId: string, word: string): void {
+  const cfg = getOrCreate(guildId);
+  const words = [...cfg.antiInsultWords, word.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i);
+  set(guildId, { antiInsultWords: words });
+}
+
+export function removeAntiInsultWord(guildId: string, word: string): boolean {
+  const cfg = getOrCreate(guildId);
+  const words = cfg.antiInsultWords.filter((w) => w !== word.toLowerCase());
+  const removed = words.length < cfg.antiInsultWords.length;
+  set(guildId, { antiInsultWords: words });
+  return removed;
+}
+
+export function setAntiWebhookEnabled(guildId: string, enabled: boolean): void { set(guildId, { antiWebhookEnabled: enabled }); }
+export function setSuspiciousCheckEnabled(guildId: string, enabled: boolean): void { set(guildId, { suspiciousCheckEnabled: enabled }); }
+
+export function addWhitelistedInvite(guildId: string, code: string): void {
+  const cfg = getOrCreate(guildId);
+  const codes = [...cfg.whitelistedInviteCodes, code].filter((v, i, a) => a.indexOf(v) === i);
+  set(guildId, { whitelistedInviteCodes: codes });
+}
+
+export function removeWhitelistedInvite(guildId: string, code: string): boolean {
+  const cfg = getOrCreate(guildId);
+  const codes = cfg.whitelistedInviteCodes.filter((c) => c !== code);
+  const removed = codes.length < cfg.whitelistedInviteCodes.length;
+  set(guildId, { whitelistedInviteCodes: codes });
+  return removed;
+}

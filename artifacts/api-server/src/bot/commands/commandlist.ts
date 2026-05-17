@@ -10,7 +10,7 @@ function buildEmbeds(): EmbedBuilder[] {
 
   const embed1 = new EmbedBuilder()
     .setColor(base.color)
-    .setTitle("📋 Liste des commandes — 51 commandes (1/3)")
+    .setTitle("📋 Liste des commandes — 55 commandes (1/3)")
     .setDescription("Toutes les commandes disponibles en slash `/` et préfixe `&`")
     .addFields(
       {
@@ -127,14 +127,28 @@ function buildEmbeds(): EmbedBuilder[] {
     .setTitle("📋 Liste des commandes (3/3)")
     .addFields(
       {
+        name: "🔐 Sécurité avancée",
+        value: [
+          "`/secure voir` · `&secure voir` — Affiche toute la config sécurité",
+          "`/secure niveau <1|2|3>` · `&secure niveau <1|2|3>` — Définit le niveau de sécurité",
+          "`/secure suspicieux activer|désactiver` — Détection de comptes suspects à l'arrivée",
+          "`/antiinsult activer|désactiver|ajouter|retirer|liste` · `&antiinsult` — Filtre anti-insulte",
+          "`/antiwebhook activer|désactiver|statut` · `&antiwebhook` — Suppression auto des webhooks",
+          "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`) — Invitations irrévocables",
+          "📊 **Niveau 1** : Automod standard · **Niveau 2** : +comptes <3j suspects, anti-insulte 1h",
+          "📊 **Niveau 3** : Maximum (approbation owner) · anti-insulte 24h · anti-webhook auto",
+        ].join("\n"),
+      },
+      {
         name: "🤖 Auto-modération",
         value: [
           "👢 **Spam** (5 msg en 5s) → Expulsion + slowmode 5s auto",
           "🔇 **Emojis** (+5 dans un message) → Timeout 24h",
           "🔇 **Lien** détecté → Timeout 24h",
           "🔇 **MAJUSCULES** (+8 lettres, 100%) → Timeout 24h",
-          "⚠️ **Compte < 24h** à l'arrivée → Log avec ping @everyone",
-          "🌐 **Blacklisté global** → Ban auto + ping @everyone",
+          "🤬 **Insulte** détectée → Warn/Timeout 1h/24h (selon niveau sécurité)",
+          "🔗 **Webhook** non autorisé → Suppression + alerte DM owner (si actif)",
+          "⚠️ **Compte suspect** à l'arrivée → Alerte DM owner (selon niveau)",
           "*Les modérateurs (ManageMessages) sont exemptés*",
         ].join("\n"),
       },
@@ -169,7 +183,7 @@ function buildEmbeds(): EmbedBuilder[] {
         ].join("\n"),
       },
     )
-    .setFooter({ text: "51 commandes slash · 51 préfixes · Blacklist globale · Config persistante" })
+    .setFooter({ text: "55 commandes slash · 55 préfixes · Sécurité niveaux 1-3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];

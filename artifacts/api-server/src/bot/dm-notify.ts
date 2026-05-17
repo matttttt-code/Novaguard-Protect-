@@ -4,7 +4,7 @@ import { getConfig } from "./guild-config-store.js";
 
 export const LOG_DM_USER_ID = "1209963350218248203";
 
-export type SanctionType = "warn" | "ban" | "timeout" | "kick" | "automod-kick" | "automod-timeout";
+export type SanctionType = "warn" | "ban" | "timeout" | "kick" | "automod-kick" | "automod-timeout" | "automod-warn";
 
 const TITLES: Record<SanctionType, string> = {
   warn: "⚠️ Tu as reçu un avertissement",
@@ -13,6 +13,7 @@ const TITLES: Record<SanctionType, string> = {
   kick: "👢 Tu as été expulsé",
   "automod-kick": "👢 Tu as été expulsé automatiquement",
   "automod-timeout": "🔇 Tu as été mis en timeout automatiquement",
+  "automod-warn": "⚠️ Tu as reçu un avertissement automatique",
 };
 
 const COLORS: Record<SanctionType, number> = {
@@ -22,6 +23,7 @@ const COLORS: Record<SanctionType, number> = {
   kick: 0xf59e0b,
   "automod-kick": 0xf59e0b,
   "automod-timeout": 0xa855f7,
+  "automod-warn": 0xf97316,
 };
 
 /**

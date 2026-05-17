@@ -40,7 +40,10 @@ import {
   setLeaveEnabled, setLeaveChannel, setLeaveMessage, DEFAULT_LEAVE_MSG,
   setCaptchaEnabled, setCaptchaChannel, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
   setSanctionDmEnabled,
+  setSecurityLevel,
 } from "./guild-config-store.js";
+import { getPendingLevel3, removePendingLevel3 } from "./security-pending-store.js";
+import { buildSecureEmbed } from "./commands/secure.js";
 import {
   getCaptcha, setCaptcha, deleteCaptcha, hasCaptcha, decrementAttempts,
   generateChallenge, setChallengeMessageId,
@@ -201,7 +204,11 @@ export function startBot(): void {
     const accountAgeDays = Math.floor(accountAgeMs / 86_400_000);
     const accountAgeHours = Math.floor(accountAgeMs / 3_600_000);
     const createdTs = Math.floor(member.user.createdTimestamp / 1000);
-    const isSuspect = accountAgeHours < 24;
+    const secLvl = getConfig(guildId).securityLevel;
+    const hasNoAvatar = !member.user.avatar;
+    const suspectThresholdDays = secLvl >= 3 ? 7 : secLvl >= 2 ? 3 : 0;
+    const isSuspect = accountAgeHours < 24 || (suspectThresholdDays > 0 && accountAgeDays < suspectThresholdDays);
+    const isSuspiciousCheckEnabled = getConfig(guildId).suspiciousCheckEnabled;
 
     // Blacklist locale
     if (isBlacklisted(guildId, member.id)) {
@@ -363,6 +370,29 @@ export function startBot(): void {
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
     await sendWelcomeMessage(client, member, guildId, cfg);
+
+    // ── Alerte compte suspect (si suspiciousCheckEnabled ou secLvl >= 2) ──
+    if (isSuspect && (isSuspiciousCheckEnabled || secLvl >= 2)) {
+      const suspectReasons: string[] = [];
+      if (accountAgeHours < 24) suspectReasons.push(`Compte créé il y a **${accountAgeHours}h** (< 24h)`);
+      else if (accountAgeDays < suspectThresholdDays) suspectReasons.push(`Compte créé il y a **${accountAgeDays}j** (< ${suspectThresholdDays}j)`);
+      if (hasNoAvatar) suspectReasons.push("Aucune photo de profil");
+
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0xf59e0b)
+        .setTitle("🕵️ Compte suspect détecté")
+        .setThumbnail(member.user.displayAvatarURL({ size: 128 }))
+        .addFields(
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Serveur", value: `${member.guild.name} (\`${guildId}\`)`, inline: true },
+          { name: "Compte créé", value: `<t:${createdTs}:R>`, inline: true },
+          { name: "Indicateurs suspects", value: suspectReasons.join("\n") || "Âge faible" },
+          { name: "Niveau sécurité", value: `Niveau **${secLvl}** — seuil : ${suspectThresholdDays}j`, inline: true },
+        )
+        .setFooter({ text: "Aucune action automatique prise — surveille ce compte." })
+        .setTimestamp()
+      ).catch(() => null);
+    }
   });
 
   // ──── GUILD MEMBER REMOVE ────
@@ -720,11 +750,24 @@ async function handleAdminAlertButton(client: Client, interaction: ButtonInterac
 
   // admin_ok:guildId:memberId
   if (customId.startsWith("admin_ok:")) {
+    const parts = customId.split(":");
+    const gId = parts[1] ?? "?";
+    const mId = parts[2] ?? "?";
     await interaction.update({
       content: "✅ **Compris** — tu as confirmé avoir reçu ce rôle intentionnellement. Aucune alerte envoyée.",
       embeds: [],
       components: [],
     });
+    await sendLogDM(client, new EmbedBuilder()
+      .setColor(0x22c55e)
+      .setTitle("✅ Alerte admin — Rôle confirmé intentionnel")
+      .addFields(
+        { name: "Membre", value: `<@${mId}> (\`${mId}\`)`, inline: true },
+        { name: "Serveur", value: `\`${gId}\``, inline: true },
+        { name: "Action", value: "A confirmé que le rôle admin était intentionnel", inline: false },
+      )
+      .setTimestamp()
+    ).catch(() => null);
     return;
   }
 
@@ -795,6 +838,56 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
   // Boutons DM admin (hors serveur)
   if (customId.startsWith("admin_ok:") || customId.startsWith("admin_deny:") || customId.startsWith("admin_captcha:")) {
     await handleAdminAlertButton(client, interaction);
+    return;
+  }
+
+  // Boutons approbation niveau 3 (DM owner)
+  if (customId.startsWith("sec_approve:") || customId.startsWith("sec_deny:")) {
+    const guildId = customId.split(":")[1] ?? "";
+    const pending = getPendingLevel3(guildId);
+
+    if (!pending) {
+      await interaction.update({ content: "❌ Cette demande est expirée ou déjà traitée.", embeds: [], components: [] });
+      return;
+    }
+
+    if (customId.startsWith("sec_approve:")) {
+      setSecurityLevel(guildId, 3);
+      removePendingLevel3(guildId);
+
+      await interaction.update({ content: `✅ Niveau 3 **approuvé** pour **${pending.guildName}**.`, embeds: [], components: [] });
+
+      // Log dans le serveur avec @everyone
+      const guild = client.guilds.cache.get(guildId);
+      if (guild) {
+        const cfg = getConfig(guildId);
+        if (cfg.logChannelId) {
+          const logCh = guild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
+          await logCh?.send({
+            content: "@everyone",
+            embeds: [new EmbedBuilder()
+              .setColor(0xef4444)
+              .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
+              .setDescription(`Le mode de sécurité **maximum** a été activé par le propriétaire du bot.\n\nDemandé par <@${pending.requesterId}>.`)
+              .addFields(
+                { name: "Effets actifs", value: "• Anti-insulte renforcé (timeout 24h)\n• Anti-webhook automatique\n• Comptes < 7 jours = suspects\n• Alerte DM propriétaire pour tout compte suspect" },
+              )
+              .setTimestamp()],
+          }).catch(() => null);
+        }
+      }
+
+      // Notifier le demandeur
+      const requester = await client.users.fetch(pending.requesterId).catch(() => null);
+      await requester?.send(`✅ Ta demande d'activation du niveau de sécurité 3 sur **${pending.guildName}** a été **approuvée** par le propriétaire du bot.`).catch(() => null);
+
+    } else {
+      removePendingLevel3(guildId);
+      await interaction.update({ content: `❌ Niveau 3 **refusé** pour **${pending.guildName}**.`, embeds: [], components: [] });
+
+      const requester = await client.users.fetch(pending.requesterId).catch(() => null);
+      await requester?.send(`❌ Ta demande d'activation du niveau de sécurité 3 sur **${pending.guildName}** a été **refusée** par le propriétaire du bot.`).catch(() => null);
+    }
     return;
   }
 

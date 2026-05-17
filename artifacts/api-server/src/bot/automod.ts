@@ -9,13 +9,14 @@ import {
 import { logger } from "../lib/logger.js";
 import { sendLog, logEmbed } from "./log.js";
 import { getConfig } from "./guild-config-store.js";
-import { sendSanctionDM } from "./dm-notify.js";
+import { sendSanctionDM, sendLogDM } from "./dm-notify.js";
 import { addWarning } from "./warnings-store.js";
 
 const SPAM_LIMIT = 5;
 const SPAM_WINDOW_MS = 5000;
 const EMOJI_LIMIT = 5;
-const TIMEOUT_DURATION_MS = 24 * 60 * 60 * 1000;
+const TIMEOUT_24H_MS = 24 * 60 * 60 * 1000;
+const TIMEOUT_1H_MS = 60 * 60 * 1000;
 const MIN_CAPS_LENGTH = 8;
 const AUTOMOD_SLOWMODE_SECONDS = 5;
 
@@ -47,6 +48,14 @@ function isAllCaps(text: string): boolean {
   return letters === letters.toUpperCase();
 }
 
+function detectInsult(text: string, words: string[]): string | null {
+  const lower = text.toLowerCase();
+  for (const w of words) {
+    if (lower.includes(w)) return w;
+  }
+  return null;
+}
+
 async function applySlowmode(channel: TextChannel, seconds: number): Promise<void> {
   try {
     if ("rateLimitPerUser" in channel) {
@@ -55,41 +64,34 @@ async function applySlowmode(channel: TextChannel, seconds: number): Promise<voi
         await channel.setRateLimitPerUser(0, "Auto-Mod — slowmode retiré").catch(() => null);
       }, 3_600_000);
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
-async function applyTimeout(member: GuildMember, reason: string, message: Message): Promise<void> {
+async function applyTimeout(member: GuildMember, reason: string, message: Message, durationMs = TIMEOUT_24H_MS): Promise<void> {
   if (!member.moderatable) return;
-
+  const label = durationMs >= TIMEOUT_24H_MS ? "24 heures" : "1 heure";
   try {
     await message.delete().catch(() => null);
-    await member.timeout(TIMEOUT_DURATION_MS, reason);
-    await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, "Durée : 24 heures");
-
-    const embed = logEmbed(
+    await member.timeout(durationMs, reason);
+    await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, `Durée : ${label}`);
+    await sendLog(message.client, logEmbed(
       0xa855f7, "🤖 Auto-mod — Timeout",
       [
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Durée", value: "24 heures", inline: true },
+        { name: "Durée", value: label, inline: true },
         { name: "Raison", value: reason },
         { name: "Salon", value: `<#${message.channelId}>`, inline: true },
       ],
       { tag: "Auto-Mod", id: message.client.user!.id }
-    );
-    await sendLog(message.client, embed, { guildId: message.guildId ?? undefined });
+    ), { guildId: message.guildId ?? undefined });
   } catch (err) {
     logger.error({ err }, "Erreur auto-mod timeout");
   }
 }
 
-async function applyKick(member: GuildMember, reason: string, message: Message): Promise<void> {
-  if (!member.kickable) return;
-
+async function applyWarn(member: GuildMember, reason: string, message: Message): Promise<void> {
   try {
     await message.delete().catch(() => null);
-
     if (message.guildId) {
       addWarning(message.guildId, member.id, {
         reason,
@@ -98,14 +100,38 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
         timestamp: new Date(),
       });
     }
+    await sendSanctionDM(member.user, "automod-warn", reason, message.guild!);
+    await sendLog(message.client, logEmbed(
+      0xf59e0b, "🤖 Auto-mod — Avertissement",
+      [
+        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+        { name: "Raison", value: reason },
+        { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+      ],
+      { tag: "Auto-Mod", id: message.client.user!.id }
+    ), { guildId: message.guildId ?? undefined });
+  } catch (err) {
+    logger.error({ err }, "Erreur auto-mod warn");
+  }
+}
 
+async function applyKick(member: GuildMember, reason: string, message: Message): Promise<void> {
+  if (!member.kickable) return;
+  try {
+    await message.delete().catch(() => null);
+    if (message.guildId) {
+      addWarning(message.guildId, member.id, {
+        reason,
+        moderator: "Auto-Mod",
+        moderatorId: message.client.user!.id,
+        timestamp: new Date(),
+      });
+    }
     await sendSanctionDM(member.user, "automod-kick", reason, message.guild!);
     await member.kick(reason);
-
     const channel = message.channel as TextChannel;
     await applySlowmode(channel, AUTOMOD_SLOWMODE_SECONDS);
-
-    const embed = logEmbed(
+    await sendLog(message.client, logEmbed(
       0xf59e0b, "🤖 Auto-mod — Expulsion (spam)",
       [
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
@@ -114,14 +140,52 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
         { name: "Slowmode", value: `${AUTOMOD_SLOWMODE_SECONDS}s activé (1 heure)`, inline: true },
       ],
       { tag: "Auto-Mod", id: message.client.user!.id }
-    );
-    await sendLog(message.client, embed, { guildId: message.guildId ?? undefined });
+    ), { guildId: message.guildId ?? undefined });
   } catch (err) {
     logger.error({ err }, "Erreur auto-mod kick");
   }
 }
 
 export function registerAutoMod(client: Client, contentIntentEnabled: boolean): void {
+
+  // ── Anti-webhook : suppression automatique des messages de webhooks ──
+  client.on(Events.MessageCreate, async (message: Message) => {
+    if (!message.guild || !message.webhookId || !message.guildId) return;
+    const cfg = getConfig(message.guildId);
+    if (!cfg.antiWebhookEnabled) return;
+
+    try {
+      const preview = message.content ? message.content.slice(0, 300) : "*Embed / aucun texte*";
+      await message.delete().catch(() => null);
+
+      await sendLog(client, logEmbed(
+        0xf97316, "🔗 Anti-Webhook — Message supprimé",
+        [
+          { name: "Webhook ID", value: `\`${message.webhookId}\``, inline: true },
+          { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+          { name: "Contenu", value: preview },
+        ],
+        { tag: "Auto-Mod", id: client.user!.id }
+      ), { guildId: message.guildId });
+
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0xf97316)
+        .setTitle("🔗 Alerte — Message webhook supprimé")
+        .addFields(
+          { name: "Serveur", value: `${message.guild.name} (\`${message.guildId}\`)`, inline: true },
+          { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+          { name: "Webhook ID", value: `\`${message.webhookId}\``, inline: true },
+          { name: "Contenu", value: preview },
+        )
+        .setTimestamp()
+      ).catch(() => null);
+
+    } catch (err) {
+      logger.error({ err }, "Erreur anti-webhook");
+    }
+  });
+
+  // ── Anti-spam + anti-insulte + émoji/lien/majuscules ──
   client.on(Events.MessageCreate, async (message: Message) => {
     if (!message.guild || message.author.bot) return;
     if (message.guildId && message.channelId === getConfig(message.guildId).logChannelId) return;
@@ -131,9 +195,11 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
     if (!member) return;
     if (member.permissions.has("ManageMessages")) return;
 
+    const cfg = getConfig(message.guildId!);
+    const secLvl = cfg.securityLevel;
+
     const key = `${message.guildId}-${message.author.id}`;
     const now = Date.now();
-
     const timestamps = (messageTimestamps.get(key) ?? []).filter((t) => now - t < SPAM_WINDOW_MS);
     timestamps.push(now);
     messageTimestamps.set(key, timestamps);
@@ -148,6 +214,22 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
 
     const content = message.content;
     if (!content) return;
+
+    // ── Anti-insulte ──
+    if (cfg.antiInsultEnabled && cfg.antiInsultWords.length > 0) {
+      const found = detectInsult(content, cfg.antiInsultWords);
+      if (found) {
+        const reason = `Insulte détectée : \`${found}\``;
+        if (secLvl >= 3) {
+          await applyTimeout(member, reason, message, TIMEOUT_24H_MS);
+        } else if (secLvl >= 2) {
+          await applyTimeout(member, reason, message, TIMEOUT_1H_MS);
+        } else {
+          await applyWarn(member, reason, message);
+        }
+        return;
+      }
+    }
 
     if (countEmojis(content) > EMOJI_LIMIT) {
       await applyTimeout(member, `Spam d'emojis : plus de ${EMOJI_LIMIT} emojis par message`, message);
@@ -165,5 +247,5 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
     }
   });
 
-  logger.info({ contentDetection: contentIntentEnabled }, "Système anti-spam enregistré");
+  logger.info({ contentDetection: contentIntentEnabled }, "Système anti-spam + anti-insulte + anti-webhook enregistrés");
 }
