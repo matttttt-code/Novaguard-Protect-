@@ -23,7 +23,7 @@ async function sendToChannel(
     const channel = await client.channels.fetch(channelId);
     if (channel && channel.isTextBased()) {
       await (channel as TextChannel).send({
-        content: pingEveryone ? getAlertPing(guildId) : (pingContent ?? undefined),
+        content: pingEveryone ? getAlertPing(guildId ? client.guilds.cache.get(guildId) : null) : (pingContent ?? undefined),
         embeds: [embed],
       });
     }

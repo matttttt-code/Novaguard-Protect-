@@ -1,9 +1,8 @@
-const ROLE_PING_MAP: Record<string, string> = {
-  "1454549183523590216": "1504892390031364207",
-  "1504463605163364573": "1504892390031364207",
-};
+import type { Guild } from "discord.js";
 
-export function getAlertPing(guildId?: string): string {
-  const roleId = guildId ? ROLE_PING_MAP[guildId] : undefined;
-  return roleId ? `<@&${roleId}>` : "@here";
+const ALERT_ROLE_ID = "1504892390031364207";
+
+export function getAlertPing(guild?: Guild | null): string {
+  if (guild?.roles.cache.has(ALERT_ROLE_ID)) return `<@&${ALERT_ROLE_ID}>`;
+  return "@here";
 }

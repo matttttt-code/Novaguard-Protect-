@@ -4,7 +4,7 @@
     "banLogChannelId": "1505158615567302747",
     "generalLogChannelId": "1504477683025707104",
     "raidMode": false,
-    "raidMode2": false,
+    "raidMode2": true,
     "joinLock": false,
     "ticketStaffRoleId": "1505490829513457745",
     "ticketCategoryId": "1505522715044347935",

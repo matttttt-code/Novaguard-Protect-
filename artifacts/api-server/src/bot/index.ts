@@ -1355,7 +1355,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setStyle(ButtonStyle.Secondary),
           );
           await logCh?.send({
-            content: getAlertPing(guildId),
+            content: getAlertPing(client.guilds.cache.get(guildId) ?? null),
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🔴 Niveau 3 — Validation admin requise")

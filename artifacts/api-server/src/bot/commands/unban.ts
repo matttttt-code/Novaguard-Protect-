@@ -68,7 +68,7 @@ async function sendUnbanApproval(
     const channel = await client.channels.fetch(logChannelId);
     if (channel && channel.isTextBased()) {
       await (channel as import("discord.js").TextChannel).send({
-        content: getAlertPing(guild.id),
+        content: getAlertPing(guild),
         embeds: [embed],
         components: [row],
       });
