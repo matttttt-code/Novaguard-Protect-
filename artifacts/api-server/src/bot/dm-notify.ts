@@ -1,4 +1,4 @@
-import { Client, User, EmbedBuilder, Guild } from "discord.js";
+import { Client, User, EmbedBuilder, Guild, PermissionFlagsBits } from "discord.js";
 import { logger } from "../lib/logger.js";
 import { getConfig } from "./guild-config-store.js";
 
@@ -106,5 +106,19 @@ export async function sendLogDM(client: Client, embed: EmbedBuilder): Promise<vo
     await user.send({ embeds: [embed] });
   } catch (err) {
     logger.error({ err }, "Impossible d'envoyer le log DM");
+  }
+}
+
+/**
+ * Envoie un embed DM à tous les membres avec la permission Administrateur du serveur.
+ * Les DMs fermés sont ignorés silencieusement.
+ */
+export async function sendAdminsDM(guild: Guild, embed: EmbedBuilder): Promise<void> {
+  try {
+    const members = await guild.members.fetch();
+    const admins = members.filter(m => !m.user.bot && m.permissions.has(PermissionFlagsBits.Administrator));
+    await Promise.all(admins.map(admin => admin.send({ embeds: [embed] }).catch(() => null)));
+  } catch {
+    // Membres non cachés ou erreur réseau — ignoré silencieusement
   }
 }

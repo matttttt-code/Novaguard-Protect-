@@ -156,13 +156,14 @@ function buildEmbeds(): EmbedBuilder[] {
         name: "🔧 Admin & diagnostic",
         value: [
           "`/restart` · `&restart` — **Redémarre le bot** (propriétaire uniquement)",
+          "`/notify [@utilisateur|@rôle]` · `&notify` (`&notif`) — Notifie par ping + DM depuis un ticket",
           "`/testcaptcha [simulation|apercu] [@m]` · `&testcaptcha` (`&testcap`)",
           "`/errortest` · `&errortest` (`&testalerte`) — Teste les alertes DM",
           "`/testinviteembed` · `&testinviteembed` (`&tinv`) — Aperçu logs invitations",
         ].join("\n"),
       },
     )
-    .setFooter({ text: "58 commandes slash · 58 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
+    .setFooter({ text: "59 commandes slash · 59 préfixes · Sécurité N1-N3 · Blacklist globale · Config persistante" })
     .setTimestamp();
 
   return [embed1, embed2, embed3];

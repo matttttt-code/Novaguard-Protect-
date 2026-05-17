@@ -57,6 +57,7 @@ import * as hoistrole from "./hoistrole.js";
 import * as secureinfo from "./secureinfo.js";
 import * as sendsecuredm from "./sendsecuredm.js";
 import * as creetestbot from "./creetestbot.js";
+import * as notify from "./notify.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -80,7 +81,7 @@ export const commands: Command[] = [
   setinvitelog, checkinvite, checkinvites,
   blacklistinvite, serverstats, testinviteembed,
   secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
-  creetestbot,
+  creetestbot, notify,
 ];
 
 type PrefixModule = {
@@ -104,7 +105,7 @@ const prefixModules: PrefixModule[] = [
   setinvitelog, checkinvite, checkinvites,
   blacklistinvite, serverstats, testinviteembed, restart,
   secure, antiinsult, antiwebhook, whitelistinvite, hoistrole, secureinfo, sendsecuredm,
-  creetestbot,
+  creetestbot, notify,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

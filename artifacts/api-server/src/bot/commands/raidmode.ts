@@ -10,8 +10,8 @@ import {
   ButtonStyle,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
-import { setRaidMode, isRaidMode, setRaidMode2, isRaidMode2 } from "../guild-config-store.js";
-import { sendLogDM, LOG_DM_USER_ID } from "../dm-notify.js";
+import { setRaidMode, isRaidMode, setRaidMode2, isRaidMode2, getConfig } from "../guild-config-store.js";
+import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM } from "../dm-notify.js";
 import { addPendingRaid2, getPendingRaid2, removePendingRaid2 } from "../raid2-pending-store.js";
 
 async function enableRaidMode(
@@ -22,9 +22,11 @@ async function enableRaidMode(
 ): Promise<EmbedBuilder> {
   setRaidMode(guild.id, true);
 
-  const invites = await guild.invites.fetch();
-  const deletedInvites = invites.size;
-  await Promise.all(invites.map((inv) => inv.delete("Mode Raid activé").catch(() => null)));
+  const whitelist = getConfig(guild.id).whitelistedInviteCodes;
+  const allInvites = await guild.invites.fetch();
+  const toDelete = allInvites.filter(inv => !whitelist.includes(inv.code));
+  const deletedInvites = toDelete.size;
+  await Promise.all(toDelete.map(inv => inv.delete("Mode Raid activé").catch(() => null)));
 
   await guild.setVerificationLevel(GuildVerificationLevel.High, "Mode Raid activé").catch(() => null);
 
@@ -32,10 +34,25 @@ async function enableRaidMode(
     client,
     logEmbed(0xef4444, "🚨 Mode Raid ACTIVÉ", [
       { name: "Invitations révoquées", value: String(deletedInvites), inline: true },
+      { name: "Invitations protégées", value: String(whitelist.length), inline: true },
       { name: "Vérification", value: "Élevée (téléphone requis)", inline: true },
-      { name: "⚠️ Action", value: "Toutes les invitations ont été supprimées. Les nouveaux membres sont bloqués." },
+      { name: "⚠️ Action", value: "Les invitations non-protégées ont été supprimées. Les nouveaux membres sont bloqués." },
     ], { tag: moderatorTag, id: moderatorId }),
     { guildId: guild.id, pingEveryone: false }
+  );
+
+  void sendAdminsDM(guild, new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle("🚨 Mode Raid ACTIVÉ")
+    .setDescription(`Le mode anti-raid a été activé sur **${guild.name}**.`)
+    .addFields(
+      { name: "Activé par", value: `${moderatorTag}`, inline: true },
+      { name: "Invitations révoquées", value: String(deletedInvites), inline: true },
+      { name: "⚠️ Effets actifs", value: "• Invitations non-protégées supprimées\n• Vérification Discord → Élevée\n• Nouveaux membres bloqués" },
+      { name: "Pour désactiver", value: "`/raidmode désactiver` ou `&raidmode off`" },
+    )
+    .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
+    .setTimestamp()
   );
 
   return new EmbedBuilder()

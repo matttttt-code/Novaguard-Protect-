@@ -56,7 +56,7 @@ import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
-import { sendLogDM, LOG_DM_USER_ID } from "./dm-notify.js";
+import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM } from "./dm-notify.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
@@ -1188,9 +1188,12 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
       await interaction.update({ content: `✅ Anti-Raid Niveau 2 **approuvé** pour **${raid2.guildName}**.`, embeds: [], components: [] });
       const tGuild = client.guilds.cache.get(r2GuildId);
       if (tGuild) {
-        // Révocation de toutes les invitations
+        // Révocation des invitations (sauf whitelist)
         const n2Invites = await tGuild.invites.fetch().catch(() => null);
-        if (n2Invites) await Promise.all(n2Invites.map(inv => inv.delete("Anti-Raid N2 activé").catch(() => null)));
+        if (n2Invites) {
+          const n2Whitelist = getConfig(r2GuildId).whitelistedInviteCodes;
+          await Promise.all(n2Invites.filter(inv => !n2Whitelist.includes(inv.code)).map(inv => inv.delete("Anti-Raid N2 activé").catch(() => null)));
+        }
         // Suppression de tous les webhooks
         const n2Webhooks = await tGuild.fetchWebhooks().catch(() => null);
         if (n2Webhooks) await Promise.all([...n2Webhooks.values()].map(wh => wh.delete("Anti-Raid N2 activé").catch(() => null)));
@@ -1210,6 +1213,18 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
               .setTimestamp()],
           }).catch(() => null);
         }
+        // DM à tous les admins du serveur
+        void sendAdminsDM(tGuild, new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
+          .setDescription(`L'**Anti-Raid Niveau 2** est actif sur **${tGuild.name}**.`)
+          .addFields(
+            { name: "Demandé par", value: `<@${raid2.requesterId}>`, inline: true },
+            { name: "⚠️ Effets actifs", value: "• Tout nouveau salon/rôle créé sera supprimé\n• Nouveaux membres : timeout 10 min\n• Invitations non-protégées révoquées\n• Webhooks supprimés\n• Vérification → Haute" },
+          )
+          .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
+          .setTimestamp()
+        );
         // Bouton envoi DM sécurité → DM owner uniquement
         await interaction.followUp({
           embeds: [new EmbedBuilder()
@@ -1266,6 +1281,19 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
           .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
           .setTimestamp()],
       }).catch(() => null);
+      // DM à tous les admins du serveur
+      if (guild) void sendAdminsDM(guild, new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("🔴 Niveau de sécurité 3 — Maximum ACTIVÉ")
+        .setDescription(`Le niveau de sécurité maximum est actif sur **${sacPending.guildName}**.`)
+        .addFields(
+          { name: "Demandé par", value: `<@${sacPending.requesterId}>`, inline: true },
+          { name: "Confirmé par", value: `${interaction.user.tag}`, inline: true },
+          { name: "⚠️ Effets actifs", value: "• Anti-insulte timeout 24h\n• Webhooks supprimés\n• Comptes < 7 jours suspects\n• Vocal gelé\n• Vérification → Très Haute" },
+        )
+        .setFooter({ text: "🔒 Notification réservée aux administrateurs du serveur" })
+        .setTimestamp()
+      );
       // Bouton envoi DM sécurité → DM owner uniquement
       try {
         const ownerUser = await client.users.fetch(LOG_DM_USER_ID);

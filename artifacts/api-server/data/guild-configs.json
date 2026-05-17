@@ -348,7 +348,7 @@
     "banLogChannelId": "1505649273738629265",
     "generalLogChannelId": "1505649273738629265",
     "raidMode": false,
-    "raidMode2": false,
+    "raidMode2": true,
     "joinLock": false,
     "ticketStaffRoleId": null,
     "ticketCategoryId": null,
