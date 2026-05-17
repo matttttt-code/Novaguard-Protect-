@@ -33,6 +33,18 @@ async function sendGenLog(client: Client, guildId: string, embed: EmbedBuilder):
   }
 }
 
+async function sendGenLogEmbeds(client: Client, guildId: string, embeds: EmbedBuilder[]): Promise<void> {
+  if (embeds.length === 0) return;
+  const cfg = getConfig(guildId);
+  if (!cfg.generalLogChannelId) return;
+  try {
+    const ch = await client.channels.fetch(cfg.generalLogChannelId);
+    if (ch?.isTextBased()) await (ch as TextChannel).send({ embeds: embeds.slice(0, 10) });
+  } catch (err) {
+    logger.error({ err }, "Erreur envoi log général (multi-embeds)");
+  }
+}
+
 function userField(user: User | PartialUser | null | undefined, label = "Exécuteur"): { name: string; value: string; inline: true } {
   return {
     name: label,
@@ -105,21 +117,44 @@ export function registerGeneralLog(client: Client): void {
     if (!newMsg.guildId) return;
     if (oldMsg.content === newMsg.content) return;
 
-    const before = (oldMsg.content || "*[Non disponible — contenu non mis en cache]*").slice(0, 1000);
-    const after = (newMsg.content || "*[Non disponible]*").slice(0, 1000);
+    const before = (oldMsg.content || "*[Non disponible — non mis en cache]*").slice(0, 1000);
+    const after = (newMsg.content || "*[Vide]*").slice(0, 1000);
 
-    await sendGenLog(client, newMsg.guildId, new EmbedBuilder()
-      .setColor(0xf59e0b).setTitle("✏️ Message modifié")
+    const embed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("✏️ Message modifié")
       .setURL(newMsg.url)
+      .setThumbnail(newMsg.author?.displayAvatarURL() ?? null)
       .addFields(
         { name: "Auteur", value: `${newMsg.author?.tag ?? "Inconnu"} (\`${newMsg.author?.id ?? "?"}\`)`, inline: true },
         { name: "Salon", value: `<#${newMsg.channelId}>`, inline: true },
-        { name: "📍 Lien", value: `[🟢 Voir le message](${newMsg.url})`, inline: true },
-        { name: "Avant", value: before },
-        { name: "Après", value: after },
+        { name: "📍 Lien", value: `[Voir le message](${newMsg.url})`, inline: true },
+        { name: "Avant", value: `\`\`\`\n${before}\n\`\`\`` },
+        { name: "Après", value: `\`\`\`\n${after}\n\`\`\`` },
       )
       .setFooter({ text: `ID auteur : ${newMsg.author?.id ?? "?"}` })
-      .setTimestamp());
+      .setTimestamp();
+
+    // Pièces jointes présentes sur le message modifié
+    const attachments = [...(newMsg.attachments?.values() ?? [])];
+    const imageAttachments = attachments.filter((a) => a.contentType?.startsWith("image/") ?? /\.(png|jpe?g|gif|webp)$/i.test(a.name));
+    const otherAttachments = attachments.filter((a) => !(a.contentType?.startsWith("image/") ?? /\.(png|jpe?g|gif|webp)$/i.test(a.name)));
+
+    if (imageAttachments[0]) embed.setImage(imageAttachments[0].url);
+    if (otherAttachments.length > 0) {
+      embed.addFields({
+        name: "📎 Pièces jointes",
+        value: otherAttachments.map((a) => `[${a.name}](${a.url})`).join("\n").slice(0, 1024),
+      });
+    }
+
+    const embeds: EmbedBuilder[] = [embed];
+    // Images supplémentaires (embed vierge avec uniquement l'image)
+    for (const img of imageAttachments.slice(1, 4)) {
+      embeds.push(new EmbedBuilder().setURL(newMsg.url).setImage(img.url).setColor(0xf59e0b));
+    }
+
+    await sendGenLogEmbeds(client, newMsg.guildId, embeds);
   });
 
   // ── MESSAGES SUPPRIMÉS ──
@@ -130,21 +165,56 @@ export function registerGeneralLog(client: Client): void {
     const guild = msg.guild;
     const executor = guild ? await getAuditExecutor(guild, AuditLogEvent.MessageDelete, msg.author?.id) : null;
 
+    const content = msg.content?.trim() || "";
+    const attachments = [...(msg.attachments?.values() ?? [])];
+    const imageAttachments = attachments.filter((a) => a.contentType?.startsWith("image/") ?? /\.(png|jpe?g|gif|webp)$/i.test(a.name));
+    const otherAttachments = attachments.filter((a) => !(a.contentType?.startsWith("image/") ?? /\.(png|jpe?g|gif|webp)$/i.test(a.name)));
+
     const embed = new EmbedBuilder()
-      .setColor(0xef4444).setTitle("🗑️ Message supprimé")
+      .setColor(0xef4444)
+      .setTitle("🗑️ Message supprimé")
+      .setThumbnail(msg.author?.displayAvatarURL() ?? null)
       .addFields(
         { name: "Auteur", value: msg.author ? `${msg.author.tag} (\`${msg.author.id}\`)` : "Inconnu", inline: true },
         { name: "Salon", value: `<#${msg.channelId}>`, inline: true },
-        { name: "Contenu", value: (msg.content || "*[Non disponible — contenu non mis en cache]*").slice(0, 1024) },
       );
 
     if (executor && executor.id !== msg.author?.id) {
       embed.addFields(userField(executor, "Supprimé par"));
     }
 
+    // Contenu texte
+    if (content) {
+      embed.addFields({ name: "Contenu", value: `\`\`\`\n${content.slice(0, 1000)}\n\`\`\`` });
+    } else if (attachments.length === 0) {
+      embed.addFields({ name: "Contenu", value: "*[Non disponible — non mis en cache]*" });
+    }
+
+    // Pièces jointes non-images
+    if (otherAttachments.length > 0) {
+      embed.addFields({
+        name: "📎 Pièces jointes",
+        value: otherAttachments.map((a) => `[${a.name}](${a.url})`).join("\n").slice(0, 1024),
+      });
+    }
+
+    // Première image dans l'embed principal
+    if (imageAttachments[0]) {
+      embed.setImage(imageAttachments[0].url);
+      if (imageAttachments.length > 1) {
+        embed.addFields({ name: "🖼️ Images", value: `${imageAttachments.length} image(s) ci-dessous` });
+      }
+    }
+
     embed.setFooter({ text: `ID auteur : ${msg.author?.id ?? "?"}` }).setTimestamp();
 
-    await sendGenLog(client, msg.guildId, embed);
+    const embeds: EmbedBuilder[] = [embed];
+    // Images supplémentaires en embeds liés (même URL = groupés par Discord)
+    for (const img of imageAttachments.slice(1, 4)) {
+      embeds.push(new EmbedBuilder().setURL(`https://discord.com/channels/${msg.guildId}/${msg.channelId}`).setImage(img.url).setColor(0xef4444));
+    }
+
+    await sendGenLogEmbeds(client, msg.guildId, embeds);
   });
 
   // ── SUPPRESSION MASSIVE ──
