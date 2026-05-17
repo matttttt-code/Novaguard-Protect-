@@ -38,7 +38,7 @@ async function enableRaidMode(
       { name: "Vérification", value: "Élevée (téléphone requis)", inline: true },
       { name: "⚠️ Action", value: "Les invitations non-protégées ont été supprimées. Les nouveaux membres sont bloqués." },
     ], { tag: moderatorTag, id: moderatorId }),
-    { guildId: guild.id, pingEveryone: false }
+    { guildId: guild.id, pingEveryone: true }
   );
 
   return new EmbedBuilder()

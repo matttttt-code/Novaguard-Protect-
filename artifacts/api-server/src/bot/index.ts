@@ -306,7 +306,7 @@ export function startBot(): void {
         { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
         { name: "Durée", value: "10 minutes", inline: true },
         { name: "Raison", value: "Anti-Raid Niveau 2 actif" },
-      ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+      ], { tag: client.user!.tag, id: client.user!.id }), { guildId, pingEveryone: true });
     }
 
     // Niveau 3 : quarantaine auto pour comptes < 7 jours
@@ -1416,6 +1416,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
         if (cfg.logChannelId) {
           const lCh = tGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
           await lCh?.send({
+            content: getAlertPing(tGuild),
             embeds: [new EmbedBuilder()
               .setColor(0xef4444)
               .setTitle("🛡️ Anti-Raid Niveau 2 ACTIVÉ")
