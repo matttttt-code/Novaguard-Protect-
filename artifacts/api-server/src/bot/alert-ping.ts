@@ -1,6 +1,9 @@
-const SPECIAL_GUILD_ID = "1454549183523590216";
-const SPECIAL_ROLE_ID = "1504892390031364207";
+const ROLE_PING_MAP: Record<string, string> = {
+  "1454549183523590216": "1504892390031364207",
+  "1504463605163364573": "1504892390031364207",
+};
 
 export function getAlertPing(guildId?: string): string {
-  return guildId === SPECIAL_GUILD_ID ? `<@&${SPECIAL_ROLE_ID}>` : "@here";
+  const roleId = guildId ? ROLE_PING_MAP[guildId] : undefined;
+  return roleId ? `<@&${roleId}>` : "@here";
 }
