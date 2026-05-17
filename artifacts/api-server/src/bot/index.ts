@@ -1006,6 +1006,59 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     return;
   }
 
+  // Boutons hoistrole (DM owner)
+  if (customId.startsWith("hoist_confirm:") || customId.startsWith("hoist_deny:")) {
+    const hoistGuildId = customId.split(":")[1] ?? "";
+    const hoistGuild = client.guilds.cache.get(hoistGuildId);
+
+    if (customId.startsWith("hoist_deny:")) {
+      await interaction.update({ content: `❌ Demande **refusée** pour **${hoistGuild?.name ?? hoistGuildId}**.`, embeds: [], components: [] });
+      return;
+    }
+
+    if (!hoistGuild) {
+      await interaction.update({ content: "❌ Serveur introuvable.", embeds: [], components: [] });
+      return;
+    }
+
+    const botMember = hoistGuild.members.me;
+    if (!botMember) {
+      await interaction.update({ content: "❌ Le bot n'est pas dans ce serveur.", embeds: [], components: [] });
+      return;
+    }
+
+    const botRole = botMember.roles.highest;
+    if (!botRole || botRole.id === hoistGuild.roles.everyone.id) {
+      await interaction.update({ content: "❌ Aucun rôle gérable trouvé pour le bot.", embeds: [], components: [] });
+      return;
+    }
+
+    try {
+      const maxPos = hoistGuild.roles.cache.size - 1;
+      await botRole.setPosition(maxPos, { reason: "Hoistrole — confirmé par le propriétaire du bot" });
+      await interaction.update({
+        content: `✅ Le rôle **${botRole.name}** a été hissé au-dessus de tous les rôles sur **${hoistGuild.name}**.`,
+        embeds: [],
+        components: [],
+      });
+      const cfg = getConfig(hoistGuildId);
+      if (cfg.logChannelId) {
+        const lCh = hoistGuild.channels.cache.get(cfg.logChannelId) as TextChannel | null;
+        await lCh?.send({
+          embeds: [new EmbedBuilder()
+            .setColor(0x22c55e)
+            .setTitle("⬆️ Bot hissé au-dessus de tous les rôles")
+            .addFields({ name: "Rôle", value: `**${botRole.name}** (\`${botRole.id}\`)`, inline: true })
+            .setFooter({ text: "Confirmé par le propriétaire du bot" })
+            .setTimestamp()],
+        }).catch(() => null);
+      }
+    } catch (err) {
+      await interaction.update({ content: `❌ Impossible de déplacer le rôle : \`${(err as Error).message}\``, embeds: [], components: [] });
+    }
+    return;
+  }
+
   // Boutons approbation niveau 3 (DM owner)
   if (customId.startsWith("sec_approve:") || customId.startsWith("sec_deny:")) {
     const guildId = customId.split(":")[1] ?? "";

@@ -52,7 +52,7 @@
     "captchaVerifiedRoleId": "1504538153900572672",
     "sanctionDmEnabled": true,
     "inviteLogChannelId": null,
-    "securityLevel": 3,
+    "securityLevel": 1,
     "antiInsultEnabled": false,
     "antiInsultWords": [
       "connard",
