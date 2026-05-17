@@ -158,36 +158,13 @@ export function buildDashboardRows(config: GuildConfig): ActionRowBuilder<Button
       .setLabel(config.joinLock ? "🔒 JoinLock ON" : "🔓 JoinLock OFF")
       .setStyle(config.joinLock ? ButtonStyle.Danger : ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId("dash_sanction_dm_toggle")
-      .setLabel(config.sanctionDmEnabled ? "📨 DM Sanctions ON" : "🔕 DM Sanctions OFF")
-      .setStyle(config.sanctionDmEnabled ? ButtonStyle.Success : ButtonStyle.Secondary),
-    new ButtonBuilder()
       .setLabel("🌐 Dashboard Web")
       .setStyle(ButtonStyle.Link)
       .setURL(DASHBOARD_URL ?? "https://discord.com")
       .setDisabled(!DASHBOARD_URL),
   );
 
-  const row5 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("dash_log_channel")
-      .setLabel("📋 Logs principal")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("dash_banlog_channel")
-      .setLabel("🔨 Logs bans")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("dash_genlog_channel")
-      .setLabel("🗂️ Logs généraux")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("dash_invitelog_channel")
-      .setLabel("📨 Logs invitations")
-      .setStyle(ButtonStyle.Primary),
-  );
-
-  return [row1, row2, row3, row4, row5];
+  return [row1, row2, row3, row4];
 }
 
 export const data = new SlashCommandBuilder()
