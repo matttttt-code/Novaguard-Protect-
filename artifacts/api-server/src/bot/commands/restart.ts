@@ -8,13 +8,15 @@ import {
 } from "discord.js";
 import { sendLogDM, LOG_DM_USER_ID } from "../dm-notify.js";
 
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
 async function doRestart(client: Client): Promise<void> {
   const uptimeMin = Math.floor(process.uptime() / 60);
   const mem = process.memoryUsage();
   const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
   const wsPing = client.ws.ping;
 
-  // 1. DM shutdown
+  // 1. DM shutdown — envoyé avant toute déconnexion
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("🔴 Redémarrage manuel — Bot déconnecté")
@@ -24,7 +26,7 @@ async function doRestart(client: Client): Promise<void> {
       { name: "Ping WS", value: wsPing >= 0 ? `**${wsPing} ms**` : "N/A", inline: true },
     )
     .setTimestamp()
-  ).catch(() => null);
+  );
 
   // 2. Inscrit un listener one-shot AVANT la déconnexion pour le DM "en ligne"
   client.once(Events.ClientReady, async (readyClient) => {
@@ -42,6 +44,8 @@ async function doRestart(client: Client): Promise<void> {
 
   // 3. Déconnexion puis reconnexion
   await client.destroy();
+  // Pause de 3s pour que la déconnexion soit visible sur Discord
+  await sleep(3000);
   const token = process.env["DISCORD_TOKEN"]!;
   await client.login(token);
 }
