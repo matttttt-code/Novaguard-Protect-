@@ -4,10 +4,13 @@ import {
   EmbedBuilder,
   Message,
   Client,
+  TextChannel,
 } from "discord.js";
 import { addSupportRequest, hasSupportRequest } from "../pending-support-store.js";
 import { sendLog, LOG_CHANNEL_ID } from "../log.js";
 import { getConfig } from "../guild-config-store.js";
+
+const SUPPORT_STAFF_ROLE_ID = "1505490829513457745";
 
 const QUESTIONNAIRE = `Bonjour ! Pour t'aider au mieux, réponds à ce message avec un seul message contenant les réponses suivantes :
 
@@ -24,7 +27,7 @@ async function sendQuestionnaire(
   guildId: string,
   guildName: string,
   channelId: string,
-  client: Message["client"]
+  client: Client
 ): Promise<boolean> {
   try {
     const user = await client.users.fetch(userId);
@@ -97,13 +100,24 @@ export async function handleSupportResponse(
 ): Promise<void> {
   const embed = new EmbedBuilder()
     .setColor(0x6366f1)
-    .setTitle("📩 Réponse Support reçue")
+    .setTitle("📩 Nouvelle demande de support")
     .setDescription(responseContent.slice(0, 1024))
     .addFields(
-      { name: "Utilisateur", value: `${username} (\`${userId}\`)`, inline: true },
+      { name: "Utilisateur", value: `${username} (\`${userId}\`) <@${userId}>`, inline: true },
       { name: "Serveur", value: guildName, inline: true }
     )
+    .setFooter({ text: "Répondre en DM à l'utilisateur directement." })
     .setTimestamp();
 
-  await sendLog(client, embed, { guildId });
+  try {
+    const channel = await client.channels.fetch(logChannelId);
+    if (channel && channel.isTextBased()) {
+      await (channel as TextChannel).send({
+        content: `<@&${SUPPORT_STAFF_ROLE_ID}>`,
+        embeds: [embed],
+      });
+    }
+  } catch {
+    await sendLog(client, embed, { guildId });
+  }
 }

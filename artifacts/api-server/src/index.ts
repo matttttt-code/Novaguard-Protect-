@@ -1,6 +1,7 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { startBot } from "./bot/index.js";
+import { startKeepAlive } from "./bot/keep-alive.js";
 
 const rawPort = process.env["PORT"];
 
@@ -26,3 +27,4 @@ app.listen(port, (err) => {
 });
 
 startBot();
+startKeepAlive();
