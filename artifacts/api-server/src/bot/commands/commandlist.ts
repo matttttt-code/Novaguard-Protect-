@@ -125,6 +125,7 @@ function buildEmbeds(): EmbedBuilder[] {
         value: [
           "`/secure voir|niveau <1|2|3>|suspicieux activer|désactiver` · `&secure`",
           "`/secureinfo` · `&secureinfo` (`&niveaux`) — **Explications détaillées** de chaque niveau",
+          "`/sendsecuredm membre @m|everyone` · `&sendsecuredm` (`&ssdm`) — Envoie DM info sécurité à un membre ou tous",
           "`/antiinsult activer|désactiver|ajouter|retirer|liste|charger-defaults` · `&antiinsult`",
           "`/antiwebhook activer|désactiver|statut` · `&antiwebhook`",
           "`/whitelistinvite ajouter|retirer|liste` · `&whitelistinvite` (`&wlinv`)",
