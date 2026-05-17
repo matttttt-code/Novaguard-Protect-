@@ -15,13 +15,13 @@ function buildCommandListEmbed(): EmbedBuilder {
         name: "🛡️ Modération",
         value: [
           "`/kick` · `&kick @membre` — Expulse un membre",
-          "`/ban` · `&ban @membre` — Bannit un membre",
-          "`/softban` · `&softban @membre` (`&sb`) — Ban + déban immédiat (supprime les messages)",
+          "`/ban` · `&ban @membre|<id>` — Bannit (fonctionne hors serveur par ID)",
+          "`/softban` · `&softban @membre|<id>` (`&sb`) — Ban + déban immédiat (supprime les messages)",
           "`/unban` · `&unban <userId>` — Débannit (approbation admin si blacklisté)",
           "`/timeout` · `&timeout @membre durée` (`&mute`) — Timeout (1m→28j)",
           "`/untimeout` · `&untimeout @membre` (`&unmute`) — Retire le timeout",
           "`/warn` · `&warn @membre raison` — Avertissement avec Case ID",
-          "`/warnings voir|effacer|retirer` · `&warnings voir|effacer|retirer @membre` — Gère les avertissements",
+          "`/warnings voir|effacer|retirer` · `&warnings voir|effacer|retirer @membre [caseId]` — Gère les avertissements",
           "`/clear` · `&clear [nombre]` (`&purge`) — Supprime des messages (1-100)",
         ].join("\n"),
       },
@@ -40,17 +40,29 @@ function buildCommandListEmbed(): EmbedBuilder {
       {
         name: "⛔ Liste noire (Blacklist)",
         value: [
-          "`/blacklist` · `&blacklist @membre raison` (`&bl`) — Blacklist définitif (déban nécessite approbation admin)",
+          "`/blacklist @membre|<id> raison` · `&blacklist @membre|<id> raison` (`&bl`) — Blacklist définitif par mention ou ID",
           "`/blacklistinfo` · `&blacklistinfo` (`&bli`) — Voir la liste noire",
-          "`/setbanlog` · `&setbanlog #salon` — Définit le salon des logs bans/blacklist",
           "🤖 **AntiDC** — Ban automatique si un membre blacklisté tente de rejoindre",
         ].join("\n"),
       },
       {
         name: "📋 Configuration",
         value: [
-          "`/setlog` · `&setlog #salon` — Définit le salon de logs principal",
-          "`/setbanlog` · `&setbanlog #salon` — Définit le salon de logs bans",
+          "`/setlog #salon` · `&setlog #salon` — Définit le salon de logs principal",
+          "`/setbanlog <id_salon>` · `&setbanlog <id>` — Salon de logs bans (autre serveur supporté)",
+          "`/ticketconfig role @role` · `&ticketconfig role @role` — Rôle staff des tickets",
+          "`/ticketconfig categorie` · `&ticketconfig categorie <id>` — Catégorie des tickets",
+          "`/ticketconfig voir` · `&ticketconfig voir` — Voir la config des tickets",
+        ].join("\n"),
+      },
+      {
+        name: "🎫 Tickets",
+        value: [
+          "`/ticketpanel` · `&ticketpanel` — Envoie le panel de tickets dans ce salon (Admin)",
+          "`/ticket fermer [raison]` · `&ticket fermer [raison]` — Ferme le ticket actuel",
+          "`/ticket ajouter @membre` · `&ticket ajouter @membre` — Ajoute un membre au ticket",
+          "`/ticket retirer @membre` · `&ticket retirer @membre` — Retire un membre du ticket",
+          "🔘 **Bouton** — Les membres cliquent sur 🎫 dans le panel pour créer leur ticket privé",
         ].join("\n"),
       },
       {
@@ -79,12 +91,12 @@ function buildCommandListEmbed(): EmbedBuilder {
       {
         name: "📩 Utilitaires",
         value: [
-          "`/support` · `&support` — Reçois un questionnaire d'aide en DM (transmis au staff)",
+          "`/support` · `&support` — Questionnaire d'aide en DM (transmis au staff avec ping rôle)",
           "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
         ].join("\n"),
       }
     )
-    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns" })
+    .setFooter({ text: "DMs de sanction • Logs salon + DM • Case IDs pour les warns • 1 ticket par utilisateur" })
     .setTimestamp();
 }
 

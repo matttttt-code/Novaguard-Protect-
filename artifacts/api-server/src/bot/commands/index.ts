@@ -26,6 +26,9 @@ import * as softban from "./softban.js";
 import * as revokeinvites from "./revokeinvites.js";
 import * as raidmode from "./raidmode.js";
 import * as support from "./support.js";
+import * as ticketconfig from "./ticketconfig.js";
+import * as ticketpanel from "./ticketpanel.js";
+import * as ticket from "./ticket.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -40,6 +43,7 @@ export const commands: Command[] = [
   sanctioninfo, infome, getid, botinfo, commandlist,
   blacklist, blacklistinfo, setlog, setbanlog,
   softban, revokeinvites, raidmode, support,
+  ticketconfig, ticketpanel, ticket,
 ];
 
 type PrefixModule = {
@@ -54,6 +58,7 @@ const prefixModules: PrefixModule[] = [
   sanctioninfo, infome, getid, botinfo, commandlist,
   blacklist, blacklistinfo, setlog, setbanlog,
   softban, revokeinvites, raidmode, support,
+  ticketconfig, ticketpanel, ticket,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({

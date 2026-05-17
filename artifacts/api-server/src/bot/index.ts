@@ -6,6 +6,11 @@ import {
   TextChannel,
   EmbedBuilder,
   ButtonInteraction,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  PermissionFlagsBits,
+  ChannelType,
   type ApplicationCommandDataResolvable,
 } from "discord.js";
 import { commands, prefixCommands } from "./commands/index.js";
@@ -22,6 +27,7 @@ import { sendLog, logEmbed, LOG_CHANNEL_ID } from "./log.js";
 import { isRaidMode, getConfig } from "./guild-config-store.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
+import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel } from "./ticket-store.js";
 
 export function startBot(): void {
   const token = process.env["DISCORD_TOKEN"];
@@ -168,10 +174,7 @@ export function startBot(): void {
       joinEmbed.setDescription("⚠️ Ce compte a moins de **24 heures**. Possible compte alternatif ou suspect.");
     }
 
-    await sendLog(client, joinEmbed, {
-      guildId,
-      pingEveryone: isSuspect,
-    });
+    await sendLog(client, joinEmbed, { guildId, pingEveryone: isSuspect });
   });
 
   client.on(Events.GuildMemberRemove, async (member) => {
@@ -204,6 +207,16 @@ export function startBot(): void {
 async function handleButtonInteraction(client: Client, interaction: ButtonInteraction): Promise<void> {
   const { customId, guild } = interaction;
   if (!guild) return;
+
+  if (customId === "ticket_create") {
+    await handleTicketCreate(client, interaction);
+    return;
+  }
+
+  if (customId === "ticket_close") {
+    await handleTicketClose(interaction);
+    return;
+  }
 
   const isApprove = customId.startsWith("bl_approve_");
   const isDeny = customId.startsWith("bl_deny_");
@@ -272,4 +285,154 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     ], { tag: interaction.user.tag, id: interaction.user.id }),
     { guildId: guild.id, logType: "ban" });
   }
+}
+
+async function handleTicketCreate(client: Client, interaction: ButtonInteraction): Promise<void> {
+  const guild = interaction.guild!;
+  const user = interaction.user;
+  const config = getConfig(guild.id);
+
+  const existingChannelId = getTicketChannelByUser(guild.id, user.id);
+  if (existingChannelId) {
+    await interaction.reply({
+      content: `❌ Tu as déjà un ticket ouvert : <#${existingChannelId}>`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const safeName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20);
+  const channelName = `🎫-${safeName}`;
+
+  const permOverwrites = [
+    {
+      id: guild.id,
+      deny: [PermissionFlagsBits.ViewChannel],
+    },
+    {
+      id: user.id,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles],
+    },
+    {
+      id: client.user!.id,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ReadMessageHistory],
+    },
+    ...(config.ticketStaffRoleId ? [{
+      id: config.ticketStaffRoleId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageMessages],
+    }] : []),
+  ];
+
+  let ticketChannel: TextChannel;
+  try {
+    ticketChannel = await guild.channels.create({
+      name: channelName,
+      type: ChannelType.GuildText,
+      parent: config.ticketCategoryId ?? undefined,
+      permissionOverwrites: permOverwrites,
+      topic: `Ticket de ${user.tag} — ${user.id}`,
+    }) as TextChannel;
+  } catch (err) {
+    logger.error({ err }, "Erreur lors de la création du salon ticket");
+    await interaction.editReply({ content: "❌ Impossible de créer le salon ticket. Vérifie les permissions du bot." });
+    return;
+  }
+
+  openTicket({
+    channelId: ticketChannel.id,
+    userId: user.id,
+    username: user.tag,
+    guildId: guild.id,
+    createdAt: new Date(),
+  });
+
+  const welcomeEmbed = new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle("🎫 Nouveau ticket")
+    .setDescription(
+      `Bonjour <@${user.id}> ! Le staff sera avec toi dans quelques instants.\n\n` +
+      "**Décris ton problème ou ta demande ci-dessous.**\n" +
+      "Pour fermer ce ticket, clique sur le bouton ci-dessous ou utilise `/ticket fermer`."
+    )
+    .addFields(
+      { name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true },
+      { name: "Ouvert le", value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: true },
+      ...(config.ticketStaffRoleId ? [{ name: "Staff notifié", value: `<@&${config.ticketStaffRoleId}>`, inline: true }] : [])
+    )
+    .setTimestamp();
+
+  const closeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId("ticket_close")
+      .setLabel("🔒  Fermer le ticket")
+      .setStyle(ButtonStyle.Danger)
+  );
+
+  const staffPing = config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "";
+  await ticketChannel.send({
+    content: `<@${user.id}>${staffPing ? ` ${staffPing}` : ""}`,
+    embeds: [welcomeEmbed],
+    components: [closeRow],
+  });
+
+  await interaction.editReply({ content: `✅ Ton ticket a été créé : <#${ticketChannel.id}>` });
+
+  await sendLog(client, new EmbedBuilder()
+    .setColor(0x6366f1)
+    .setTitle("🎫 Ticket ouvert")
+    .addFields(
+      { name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true },
+      { name: "Salon", value: `<#${ticketChannel.id}>`, inline: true },
+    ).setTimestamp(),
+    { guildId: guild.id }
+  );
+}
+
+async function handleTicketClose(interaction: ButtonInteraction): Promise<void> {
+  const channel = interaction.channel as TextChannel;
+  const guild = interaction.guild!;
+  const user = interaction.user;
+  const config = getConfig(guild.id);
+
+  if (!isTicketChannel(channel.id)) {
+    await interaction.reply({ content: "❌ Ce n'est pas un salon ticket.", ephemeral: true });
+    return;
+  }
+
+  const ticket = getTicketByChannel(channel.id);
+  const member = await guild.members.fetch(user.id).catch(() => null);
+
+  const isStaff = config.ticketStaffRoleId
+    ? member?.roles.cache.has(config.ticketStaffRoleId) ?? false
+    : member?.permissions.has(PermissionFlagsBits.ManageChannels) ?? false;
+
+  const isOwner = ticket?.userId === user.id;
+
+  if (!isStaff && !isOwner) {
+    await interaction.reply({ content: "❌ Seul le staff ou le créateur du ticket peut le fermer.", ephemeral: true });
+    return;
+  }
+
+  await interaction.reply({ content: "🔒 Fermeture du ticket...", ephemeral: true });
+
+  const embed = new EmbedBuilder()
+    .setColor(0xef4444)
+    .setTitle("🔒 Ticket fermé")
+    .addFields(
+      { name: "Fermé par", value: user.tag, inline: true },
+      ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : [])
+    )
+    .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  await interaction.message.edit({ components: [] }).catch(() => null);
+
+  closeTicket(channel.id);
+
+  setTimeout(async () => {
+    await channel.delete("Ticket fermé").catch(() => null);
+  }, 5000);
 }

@@ -2,19 +2,33 @@ export interface GuildConfig {
   logChannelId: string | null;
   banLogChannelId: string | null;
   raidMode: boolean;
+  ticketStaffRoleId: string | null;
+  ticketCategoryId: string | null;
 }
 
 const configs = new Map<string, GuildConfig>();
 
 function getOrCreate(guildId: string): GuildConfig {
   if (!configs.has(guildId)) {
-    configs.set(guildId, { logChannelId: null, banLogChannelId: null, raidMode: false });
+    configs.set(guildId, {
+      logChannelId: null,
+      banLogChannelId: null,
+      raidMode: false,
+      ticketStaffRoleId: null,
+      ticketCategoryId: null,
+    });
   }
   return configs.get(guildId)!;
 }
 
 export function getConfig(guildId: string): GuildConfig {
-  return configs.get(guildId) ?? { logChannelId: null, banLogChannelId: null, raidMode: false };
+  return configs.get(guildId) ?? {
+    logChannelId: null,
+    banLogChannelId: null,
+    raidMode: false,
+    ticketStaffRoleId: null,
+    ticketCategoryId: null,
+  };
 }
 
 export function setLogChannel(guildId: string, channelId: string): void {
@@ -34,4 +48,14 @@ export function setRaidMode(guildId: string, enabled: boolean): void {
 
 export function isRaidMode(guildId: string): boolean {
   return configs.get(guildId)?.raidMode ?? false;
+}
+
+export function setTicketStaffRole(guildId: string, roleId: string): void {
+  const c = getOrCreate(guildId);
+  configs.set(guildId, { ...c, ticketStaffRoleId: roleId });
+}
+
+export function setTicketCategory(guildId: string, categoryId: string): void {
+  const c = getOrCreate(guildId);
+  configs.set(guildId, { ...c, ticketCategoryId: categoryId });
 }
