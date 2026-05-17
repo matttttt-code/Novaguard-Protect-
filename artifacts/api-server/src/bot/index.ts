@@ -736,11 +736,34 @@ async function handleCaptchaDM(
       if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
 
       // Rétablir le rôle admin
+      const guild = client.guilds.cache.get(guildId);
+      const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
       if (rId !== "0") {
-        const guild = client.guilds.cache.get(guildId);
-        const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
         await gMember?.roles.add(rId, "Captcha admin — identité confirmée, rôle rétabli").catch(() => null);
       }
+
+      // DM propriétaire
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle("✅ Captcha admin — Vérification réussie")
+        .addFields(
+          { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+          { name: "Serveur", value: guild?.name ?? guildId, inline: true },
+          { name: "Résultat", value: "Captcha validé — rôle Administrateur rétabli", inline: false },
+        )
+        .setTimestamp()
+      ).catch(() => null);
+
+      // Log serveur
+      await sendLog(client, new EmbedBuilder()
+        .setColor(0x22c55e)
+        .setTitle("✅ Captcha admin — Identité confirmée")
+        .setThumbnail(message.author.displayAvatarURL())
+        .addFields(
+          { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+          { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
+        )
+        .setTimestamp(), { guildId });
 
       await message.reply({
         embeds: [new EmbedBuilder()
@@ -759,6 +782,32 @@ async function handleCaptchaDM(
         deleteCaptcha(message.author.id);
         const tid = captchaTimeouts.get(message.author.id);
         if (tid) { clearTimeout(tid); captchaTimeouts.delete(message.author.id); }
+
+        const guild = client.guilds.cache.get(guildId);
+
+        // DM propriétaire
+        await sendLogDM(client, new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("❌ Captcha admin — Vérification échouée")
+          .addFields(
+            { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+            { name: "Serveur", value: guild?.name ?? guildId, inline: true },
+            { name: "Résultat", value: "Trop de tentatives incorrectes — rôle non accordé", inline: false },
+          )
+          .setTimestamp()
+        ).catch(() => null);
+
+        // Log serveur
+        await sendLog(client, new EmbedBuilder()
+          .setColor(0xef4444)
+          .setTitle("❌ Captcha admin — Vérification échouée")
+          .setThumbnail(message.author.displayAvatarURL())
+          .addFields(
+            { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+            { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
+            { name: "Raison", value: "Trop de tentatives incorrectes — rôle non accordé", inline: false },
+          )
+          .setTimestamp(), { guildId });
 
         // Captcha échoué : le rôle admin n'est PAS rétabli
         await message.reply({
@@ -1058,6 +1107,11 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
       await interaction.update({ content: "❌ Membre introuvable.", embeds: [], components: [] }); return;
     }
 
+    // Annuler tout captcha/timer existant pour ce membre
+    const existingTid = captchaTimeouts.get(mId);
+    if (existingTid) { clearTimeout(existingTid); captchaTimeouts.delete(mId); }
+    if (hasCaptcha(mId)) deleteCaptcha(mId);
+
     // Retirer le rôle admin temporairement pendant la vérification
     if (rId !== "0") {
       await member.roles.remove(rId, "Captcha admin — retrait temporaire en attente de vérification").catch(() => null);
@@ -1065,30 +1119,6 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
 
     const { code } = generateChallenge();
     setCaptcha(mId, { code, guildId: gId, attempts: 3, adminRoleId: rId });
-
-    // Auto-approbation après 5 minutes si aucune réponse du membre
-    const autoApproveTimer = setTimeout(async () => {
-      if (!hasCaptcha(mId)) return;
-      deleteCaptcha(mId);
-      if (rId !== "0") {
-        const g = client.guilds.cache.get(gId);
-        const m = await g?.members.fetch(mId).catch(() => null);
-        await m?.roles.add(rId, "Captcha admin — rôle rétabli automatiquement après délai de 5 min").catch(() => null);
-        await m?.user.send({
-          embeds: [new EmbedBuilder()
-            .setColor(0xf59e0b)
-            .setTitle("⏱️ Délai de vérification écoulé")
-            .setDescription(
-              `Aucune réponse reçue dans les **5 minutes** imparties.\n\n` +
-              `Ton rôle **Administrateur** a été **rétabli automatiquement** sur **${g?.name ?? gId}**.`
-            )
-            .setFooter({ text: `${g?.name ?? gId} • Vérification sécurité` })
-            .setTimestamp(),
-          ],
-        }).catch(() => null);
-      }
-    }, 5 * 60_000);
-    captchaTimeouts.set(mId, autoApproveTimer);
 
     const captchaEmbed = new EmbedBuilder()
       .setColor(0xf59e0b)
@@ -1104,7 +1134,80 @@ async function handleOwnerAdminAlert(client: Client, interaction: ButtonInteract
       .setFooter({ text: `${targetGuild?.name ?? gId} • Confirmation de rôle admin` })
       .setTimestamp();
 
-    await member.user.send({ embeds: [captchaEmbed] }).catch(() => null);
+    const dmResult = await member.user.send({ embeds: [captchaEmbed] }).catch(() => null);
+
+    if (!dmResult) {
+      // DMs fermés — restaurer le rôle immédiatement sans vérification
+      deleteCaptcha(mId);
+      if (rId !== "0") {
+        await member.roles.add(rId, "Captcha admin — DMs fermés, rôle rétabli sans vérification").catch(() => null);
+      }
+      await interaction.update({
+        content: `⚠️ **Impossible d'envoyer le DM** à **${member.user.tag}** (DMs désactivés).\nLe rôle Administrateur a été **rétabli** sans vérification.`,
+        embeds: [], components: [],
+      });
+      return;
+    }
+
+    // Log serveur — captcha déclenché
+    await sendLog(client, new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("🔑 Captcha admin — Vérification déclenchée")
+      .setThumbnail(member.user.displayAvatarURL())
+      .addFields(
+        { name: "Membre", value: `${member.user.tag} (\`${mId}\`)`, inline: true },
+        { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
+        { name: "Délai", value: "5 min · auto-rétablissement si pas de réponse", inline: false },
+      )
+      .setTimestamp(), { guildId: gId });
+
+    // Auto-approbation après 5 minutes si aucune réponse du membre
+    const autoApproveTimer = setTimeout(async () => {
+      if (!hasCaptcha(mId)) return;
+      deleteCaptcha(mId);
+      const g = client.guilds.cache.get(gId);
+      const m = await g?.members.fetch(mId).catch(() => null);
+      if (rId !== "0") {
+        await m?.roles.add(rId, "Captcha admin — rôle rétabli automatiquement après délai de 5 min").catch(() => null);
+      }
+      // DM membre
+      await m?.user.send({
+        embeds: [new EmbedBuilder()
+          .setColor(0xf59e0b)
+          .setTitle("⏱️ Délai de vérification écoulé")
+          .setDescription(
+            `Aucune réponse reçue dans les **5 minutes** imparties.\n\n` +
+            `Ton rôle **Administrateur** a été **rétabli automatiquement** sur **${g?.name ?? gId}**.`
+          )
+          .setFooter({ text: `${g?.name ?? gId} • Vérification sécurité` })
+          .setTimestamp(),
+        ],
+      }).catch(() => null);
+      // DM propriétaire
+      await sendLogDM(client, new EmbedBuilder()
+        .setColor(0xf59e0b)
+        .setTitle("⏱️ Captcha admin — Auto-rétabli (délai expiré)")
+        .addFields(
+          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
+          { name: "Serveur", value: g?.name ?? gId, inline: true },
+          { name: "Résultat", value: "Aucune réponse dans les 5 min — rôle rétabli automatiquement", inline: false },
+        )
+        .setTimestamp()
+      ).catch(() => null);
+      // Log serveur
+      await sendLog(client, new EmbedBuilder()
+        .setColor(0xf59e0b)
+        .setTitle("⏱️ Captcha admin — Auto-rétablissement (timeout)")
+        .setThumbnail(m?.user.displayAvatarURL() ?? "")
+        .addFields(
+          { name: "Membre", value: `${m?.user.tag ?? mId} (\`${mId}\`)`, inline: true },
+          { name: "Rôle", value: rId !== "0" ? `<@&${rId}>` : "Inconnu", inline: true },
+          { name: "Raison", value: "5 min écoulées sans réponse", inline: false },
+        )
+        .setTimestamp(), { guildId: gId });
+    }, 5 * 60_000);
+    captchaTimeouts.set(mId, autoApproveTimer);
+
     await interaction.update({
       content: `🔑 Captcha de confirmation envoyé à **${member.user.tag}** — rôle admin retiré temporairement.\nDélai : **5 minutes** · Auto-rétablissement si aucune réponse.`,
       embeds: [], components: [],
