@@ -7,10 +7,42 @@ import {
   AuditLogEvent,
   Guild,
   User,
+  PermissionFlagsBits,
   type PartialUser,
 } from "discord.js";
 import { getConfig } from "./guild-config-store.js";
 import { logger } from "../lib/logger.js";
+import { sendLogDM } from "./dm-notify.js";
+
+const PERM_FR: Partial<Record<string, string>> = {
+  Administrator: "Administrateur",
+  ManageGuild: "Gérer le serveur",
+  ManageRoles: "Gérer les rôles",
+  ManageChannels: "Gérer les salons",
+  ManageMessages: "Gérer les messages",
+  ManageWebhooks: "Gérer les webhooks",
+  ManageNicknames: "Gérer les pseudos",
+  ManageEmojisAndStickers: "Gérer les emojis",
+  KickMembers: "Expulser des membres",
+  BanMembers: "Bannir des membres",
+  MentionEveryone: "Mentionner @everyone",
+  ViewAuditLog: "Voir les logs d'audit",
+  ModerateMembers: "Mettre en timeout",
+  MoveMembers: "Déplacer des membres",
+  MuteMembers: "Rendre muet",
+  DeafenMembers: "Rendre sourd",
+  ManageEvents: "Gérer les événements",
+  ManageThreads: "Gérer les fils",
+  ViewGuildInsights: "Voir les statistiques",
+  SendMessages: "Envoyer des messages",
+  EmbedLinks: "Intégrer des liens",
+  AttachFiles: "Joindre des fichiers",
+  ReadMessageHistory: "Lire l'historique",
+  UseApplicationCommands: "Utiliser les commandes",
+  Connect: "Se connecter (vocal)",
+  Speak: "Parler (vocal)",
+  Stream: "Streamer",
+};
 
 const CHANNEL_TYPE_FR: Partial<Record<ChannelType, string>> = {
   [ChannelType.GuildText]: "Texte",
@@ -345,18 +377,49 @@ export function registerGeneralLog(client: Client): void {
       changes.push(`**Affiché séparément** : ${oldRole.hoist ? "Oui" : "Non"} → ${newRole.hoist ? "Oui" : "Non"}`);
     if (oldRole.mentionable !== newRole.mentionable)
       changes.push(`**Mentionnable** : ${oldRole.mentionable ? "Oui" : "Non"} → ${newRole.mentionable ? "Oui" : "Non"}`);
+
+    // Diff des permissions
+    const addedPerms = newRole.permissions.missing(oldRole.permissions);
+    const removedPerms = oldRole.permissions.missing(newRole.permissions);
+    const fmtPerm = (p: string) => `\`${PERM_FR[p] ?? p}\``;
+    if (addedPerms.length)
+      changes.push(`**Permissions accordées** : ${addedPerms.map(fmtPerm).join(", ")}`);
+    if (removedPerms.length)
+      changes.push(`**Permissions retirées** : ${removedPerms.map(fmtPerm).join(", ")}`);
+
     if (!changes.length) return;
 
     const executor = await getAuditExecutor(newRole.guild, AuditLogEvent.RoleUpdate, newRole.id);
-    await sendGenLog(client, newRole.guild.id, new EmbedBuilder()
-      .setColor(0xf59e0b).setTitle("🎭 Rôle modifié")
+
+    // Alerte si la permission Administrateur vient d'être accordée à ce rôle
+    const adminJustGranted = addedPerms.includes("Administrator");
+    const color = adminJustGranted ? 0xef4444 : 0xf59e0b;
+    const title = adminJustGranted ? "🚨 Rôle modifié — Permission Admin accordée !" : "🎭 Rôle modifié";
+
+    const embed = new EmbedBuilder()
+      .setColor(color).setTitle(title)
       .addFields(
         { name: "Rôle", value: `<@&${newRole.id}> — \`${newRole.name}\` (\`${newRole.id}\`)`, inline: true },
         userField(executor, "Modifié par"),
-        { name: "Modifications", value: changes.join("\n") },
+        { name: "Modifications", value: changes.join("\n").slice(0, 1024) },
       )
       .setFooter({ text: `ID rôle : ${newRole.id}${executor ? ` • ID auteur : ${executor.id}` : ""}` })
-      .setTimestamp());
+      .setTimestamp();
+
+    await sendGenLog(client, newRole.guild.id, embed);
+
+    if (adminJustGranted) {
+      // Alerte propriétaire bot
+      const alertOwner = new EmbedBuilder()
+        .setColor(0xef4444).setTitle("🚨 Alerte sécurité — Permission Admin sur un rôle")
+        .addFields(
+          { name: "Serveur", value: `${newRole.guild.name} (\`${newRole.guild.id}\`)`, inline: true },
+          { name: "Rôle", value: `${newRole.name} (\`${newRole.id}\`)`, inline: true },
+          userField(executor, "Modifié par"),
+        )
+        .setTimestamp();
+      await sendLogDM(client, alertOwner);
+    }
   });
 
   // ── MEMBRES MODIFIÉS ──
@@ -377,15 +440,27 @@ export function registerGeneralLog(client: Client): void {
 
     if (!changes.length) return;
 
+    // Rôles admin nouvellement reçus
+    const newAdminRoles = addedRoles.filter((r) => r.permissions.has(PermissionFlagsBits.Administrator));
+
     const executor = await getAuditExecutor(newMember.guild, AuditLogEvent.MemberUpdate, newMember.id);
 
+    const isAdminAlert = newAdminRoles.size > 0;
     const embed = new EmbedBuilder()
-      .setColor(0x6366f1).setTitle("👤 Membre modifié")
+      .setColor(isAdminAlert ? 0xef4444 : 0x6366f1)
+      .setTitle(isAdminAlert ? "🚨 Membre modifié — Rôle Admin attribué !" : "👤 Membre modifié")
       .setThumbnail(newMember.user.displayAvatarURL())
       .addFields(
         { name: "Membre", value: `${newMember.user.tag} (\`${newMember.id}\`)`, inline: true },
-        { name: "Modifications", value: changes.join("\n") },
+        { name: "Modifications", value: changes.join("\n").slice(0, 1024) },
       );
+
+    if (isAdminAlert) {
+      embed.addFields({
+        name: "⚠️ Rôles admin accordés",
+        value: newAdminRoles.map((r) => `<@&${r.id}> — \`${r.name}\``).join("\n"),
+      });
+    }
 
     if (executor && executor.id !== newMember.id) {
       embed.addFields(userField(executor, "Modifié par"));
@@ -396,6 +471,44 @@ export function registerGeneralLog(client: Client): void {
 
     embed.setTimestamp();
     await sendGenLog(client, newMember.guild.id, embed);
+
+    if (isAdminAlert) {
+      // DM à l'utilisateur concerné
+      const dmEmbed = new EmbedBuilder()
+        .setColor(0xf59e0b)
+        .setTitle("⚠️ Alerte sécurité — Rôle Administrateur reçu")
+        .setThumbnail(newMember.guild.iconURL())
+        .setDescription(
+          `Tu viens de recevoir un rôle avec la permission **Administrateur** sur **${newMember.guild.name}**.\n` +
+          `Si tu ne t'attendais pas à cette action, contacte immédiatement un administrateur du serveur.`,
+        )
+        .addFields(
+          { name: "Serveur", value: newMember.guild.name, inline: true },
+          {
+            name: "Rôle(s) reçu(s)",
+            value: newAdminRoles.map((r) => `\`${r.name}\``).join(", "),
+            inline: true,
+          },
+          ...(executor ? [userField(executor, "Attribué par")] : []),
+        )
+        .setTimestamp();
+
+      try { await newMember.user.send({ embeds: [dmEmbed] }); }
+      catch { /* DMs fermés */ }
+
+      // Alerte propriétaire bot
+      const ownerEmbed = new EmbedBuilder()
+        .setColor(0xef4444)
+        .setTitle("🚨 Alerte sécurité — Rôle Admin attribué à un membre")
+        .addFields(
+          { name: "Serveur", value: `${newMember.guild.name} (\`${newMember.guild.id}\`)`, inline: true },
+          { name: "Membre", value: `${newMember.user.tag} (\`${newMember.id}\`)`, inline: true },
+          { name: "Rôle(s)", value: newAdminRoles.map((r) => `${r.name} (\`${r.id}\`)`).join(", "), inline: true },
+          ...(executor ? [userField(executor, "Attribué par")] : []),
+        )
+        .setTimestamp();
+      await sendLogDM(client, ownerEmbed);
+    }
   });
 
   // ── INVITATIONS CRÉÉES ──
