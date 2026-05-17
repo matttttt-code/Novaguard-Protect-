@@ -96,8 +96,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
 
   if (!target) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
   if (target.id === interaction.user.id) return interaction.reply({ content: "❌ Tu ne peux pas te muter toi-même.", ephemeral: true });
-  if (!target.voice.channel) return interaction.reply({ content: "❌ Ce membre n'est pas dans un salon vocal.", ephemeral: true });
+  if (target.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me muter moi-même.", ephemeral: true });
+
+  if (moderator.roles.highest.position <= target.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas muter vocalement un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
   if (target.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: "❌ Impossible de muter un administrateur.", ephemeral: true });
+  if (!target.voice.channel) return interaction.reply({ content: "❌ Ce membre n'est pas dans un salon vocal.", ephemeral: true });
 
   const durationMs = DURATIONS[durKey]!;
   const durationLabel = LABELS[durKey]!;
@@ -142,8 +147,12 @@ export async function executeMessage(message: Message, args: string[]) {
   const targetId = rawTarget.replace(/[<@!>]/g, "");
   const target = await message.guild.members.fetch(targetId).catch(() => null);
   if (!target) { await message.reply("❌ Membre introuvable."); return; }
-  if (!target.voice.channel) { await message.reply("❌ Ce membre n'est pas dans un salon vocal."); return; }
+  if (target.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas me muter moi-même."); return; }
+  if (target.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas muter vocalement un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
   if (target.permissions.has(PermissionFlagsBits.Administrator)) { await message.reply("❌ Impossible de muter un administrateur."); return; }
+  if (!target.voice.channel) { await message.reply("❌ Ce membre n'est pas dans un salon vocal."); return; }
 
   const durationMs = DURATIONS[durKey]!;
   const durationLabel = LABELS[durKey]!;

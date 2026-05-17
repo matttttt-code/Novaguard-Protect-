@@ -49,9 +49,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (!member.moderatable) return interaction.reply({ content: "Je ne peux pas mettre ce membre en timeout.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous mettre en timeout.", ephemeral: true });
+  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
+  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous mettre en timeout.", ephemeral: true });
+  if (member.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me mettre en timeout.", ephemeral: true });
+
+  const moderator = interaction.member as GuildMember | null;
+  if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas mettre en timeout un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
+  if (!member.moderatable) return interaction.reply({ content: "❌ Je ne peux pas mettre ce membre en timeout (son rôle est supérieur ou égal au mien).", ephemeral: true });
 
   const ms = DURATIONS[dureeKey]!;
   await member.timeout(ms, reason);
@@ -100,8 +106,12 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const reason = args.slice(2).join(" ") || "Aucune raison fournie";
 
-  if (!member.moderatable) { await message.reply("❌ Je ne peux pas mettre ce membre en timeout."); return; }
   if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous mettre en timeout."); return; }
+  if (member.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas me mettre en timeout."); return; }
+  if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas mettre en timeout un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
+  if (!member.moderatable) { await message.reply("❌ Je ne peux pas mettre ce membre en timeout (son rôle est supérieur ou égal au mien)."); return; }
 
   await member.timeout(DURATIONS[dureeKey]!, reason);
   await sendSanctionDM(member.user, "timeout", reason, message.guild, `Durée : ${LABELS[dureeKey] ?? dureeKey}`);

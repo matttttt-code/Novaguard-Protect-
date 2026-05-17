@@ -29,9 +29,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison", true);
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous avertir.", ephemeral: true });
-  if (!interaction.guildId) return interaction.reply({ content: "Commande serveur uniquement.", ephemeral: true });
+  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
+  if (!interaction.guildId) return interaction.reply({ content: "❌ Commande serveur uniquement.", ephemeral: true });
+  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous avertir vous-même.", ephemeral: true });
+  if (member.user.bot) return interaction.reply({ content: "❌ Impossible d'avertir un bot.", ephemeral: true });
+
+  const moderator = interaction.member as GuildMember | null;
+  if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
 
   const caseId = addWarning(interaction.guildId, member.id, {
     reason,
@@ -83,6 +89,12 @@ export async function executeMessage(message: Message, args: string[]) {
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
   catch { await message.reply("❌ Membre introuvable."); return; }
+
+  if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous avertir vous-même."); return; }
+  if (member.user.bot) { await message.reply("❌ Impossible d'avertir un bot."); return; }
+  if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
 
   const reason = args.slice(1).join(" ");
   if (!reason) { await message.reply("❌ Une raison est obligatoire."); return; }

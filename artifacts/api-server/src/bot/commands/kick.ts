@@ -28,9 +28,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (!member.kickable) return interaction.reply({ content: "Je ne peux pas expulser ce membre.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous expulser.", ephemeral: true });
+  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
+  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous expulser.", ephemeral: true });
+  if (member.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas m'expulser moi-même.", ephemeral: true });
+
+  const moderator = interaction.member as GuildMember | null;
+  if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
+  if (!member.kickable) return interaction.reply({ content: "❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
 
   await sendSanctionDM(member.user, "kick", reason, interaction.guild!, undefined, dmOption ?? undefined);
   await member.kick(reason);
@@ -69,8 +75,12 @@ export async function executeMessage(message: Message, args: string[]) {
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
 
-  if (!member.kickable) { await message.reply("❌ Je ne peux pas expulser ce membre."); return; }
   if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous expulser."); return; }
+  if (member.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas m'expulser moi-même."); return; }
+  if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
+  if (!member.kickable) { await message.reply("❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien)."); return; }
 
   await sendSanctionDM(member.user, "kick", reason, message.guild);
   await member.kick(reason);

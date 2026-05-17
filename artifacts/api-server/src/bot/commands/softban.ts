@@ -32,9 +32,15 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const days = interaction.options.getInteger("jours") ?? 1;
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member || !interaction.guild) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (!member.bannable) return interaction.reply({ content: "Je ne peux pas bannir ce membre.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "Vous ne pouvez pas vous softbannir.", ephemeral: true });
+  if (!member || !interaction.guild) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
+  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous softbannir.", ephemeral: true });
+  if (member.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me softbannir moi-même.", ephemeral: true });
+
+  const moderator = interaction.member as GuildMember | null;
+  if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas softbannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
+  if (!member.bannable) return interaction.reply({ content: "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
 
   await interaction.deferReply();
 
@@ -84,8 +90,12 @@ export async function executeMessage(message: Message, args: string[]) {
   try { member = await message.guild.members.fetch(userId); }
   catch { await message.reply("❌ Membre introuvable."); return; }
 
-  if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre."); return; }
   if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous softbannir."); return; }
+  if (member.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas me softbannir moi-même."); return; }
+  if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas softbannir un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
+  if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien)."); return; }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
 

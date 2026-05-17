@@ -39,11 +39,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const dmOption = interaction.options.getBoolean("dm");
 
   if (user.id === interaction.user.id) {
-    return interaction.reply({ content: "Vous ne pouvez pas vous bannir.", ephemeral: true });
+    return interaction.reply({ content: "❌ Vous ne pouvez pas vous bannir.", ephemeral: true });
+  }
+  if (user.id === interaction.client.user?.id) {
+    return interaction.reply({ content: "❌ Je ne peux pas me bannir moi-même.", ephemeral: true });
   }
 
+  const moderator = interaction.member as GuildMember | null;
+  if (member && moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
   if (member && !member.bannable) {
-    return interaction.reply({ content: "Je ne peux pas bannir ce membre (rôle supérieur ou égal au mien).", ephemeral: true });
+    return interaction.reply({ content: "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
   }
 
   await interaction.deferReply();
@@ -94,6 +101,9 @@ export async function executeMessage(message: Message, args: string[]) {
   if (rawId === message.author.id) {
     await message.reply("❌ Vous ne pouvez pas vous bannir."); return;
   }
+  if (rawId === message.client.user?.id) {
+    await message.reply("❌ Je ne peux pas me bannir moi-même."); return;
+  }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
 
@@ -103,7 +113,10 @@ export async function executeMessage(message: Message, args: string[]) {
   try {
     const member = await message.guild.members.fetch(rawId);
     inServer = true;
-    if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre (rôle supérieur ou égal au mien)."); return; }
+    if (member.roles.highest.position >= message.member!.roles.highest.position) {
+      await message.reply("❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre."); return;
+    }
+    if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien)."); return; }
     user = member.user;
     await sendSanctionDM(user, "ban", reason, message.guild);
   } catch {

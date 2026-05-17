@@ -21,8 +21,13 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
 
-  if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (!member.communicationDisabledUntil) return interaction.reply({ content: "Ce membre n'est pas en timeout.", ephemeral: true });
+  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
+  if (!member.communicationDisabledUntil) return interaction.reply({ content: "❌ Ce membre n'est pas en timeout.", ephemeral: true });
+
+  const moderator = interaction.member as GuildMember | null;
+  if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
+    return interaction.reply({ content: "❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+  }
 
   await member.timeout(null, reason);
 
@@ -58,6 +63,9 @@ export async function executeMessage(message: Message, args: string[]) {
   catch { await message.reply("❌ Membre introuvable."); return; }
 
   if (!member.communicationDisabledUntil) { await message.reply("❌ Ce membre n'est pas en timeout."); return; }
+  if (member.roles.highest.position >= message.member!.roles.highest.position) {
+    await message.reply("❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre."); return;
+  }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
   await member.timeout(null, reason);
