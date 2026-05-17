@@ -3,51 +3,25 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   Message,
-  Events,
-  Client,
 } from "discord.js";
 import { sendLogDM, LOG_DM_USER_ID } from "../dm-notify.js";
 
-const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
-
-async function doRestart(client: Client): Promise<void> {
+async function sendShutdownDM(client: import("discord.js").Client): Promise<void> {
   const uptimeMin = Math.floor(process.uptime() / 60);
   const mem = process.memoryUsage();
   const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
   const wsPing = client.ws.ping;
 
-  // 1. DM shutdown — envoyé avant toute déconnexion
   await sendLogDM(client, new EmbedBuilder()
     .setColor(0xef4444)
     .setTitle("🔴 Redémarrage manuel — Bot déconnecté")
     .addFields(
-      { name: "Uptime", value: `**${uptimeMin} min**`, inline: true },
-      { name: "Mémoire", value: `**${heapMB} MB** heap`, inline: true },
-      { name: "Ping WS", value: wsPing >= 0 ? `**${wsPing} ms**` : "N/A", inline: true },
+      { name: "Uptime",    value: `**${uptimeMin} min**`, inline: true },
+      { name: "Mémoire",   value: `**${heapMB} MB** heap`, inline: true },
+      { name: "Ping WS",   value: wsPing >= 0 ? `**${wsPing} ms**` : "N/A", inline: true },
     )
     .setTimestamp()
   );
-
-  // 2. Inscrit un listener one-shot AVANT la déconnexion pour le DM "en ligne"
-  client.once(Events.ClientReady, async (readyClient) => {
-    await sendLogDM(readyClient, new EmbedBuilder()
-      .setColor(0x22c55e)
-      .setTitle("🟢 Bot reconnecté (redémarrage manuel)")
-      .addFields(
-        { name: "Tag", value: readyClient.user.tag, inline: true },
-        { name: "Serveurs", value: `**${readyClient.guilds.cache.size}**`, inline: true },
-        { name: "Ping WS", value: readyClient.ws.ping >= 0 ? `**${readyClient.ws.ping} ms**` : "en attente…", inline: true },
-      )
-      .setTimestamp()
-    ).catch(() => null);
-  });
-
-  // 3. Déconnexion puis reconnexion
-  await client.destroy();
-  // Pause de 3s pour que la déconnexion soit visible sur Discord
-  await sleep(3000);
-  const token = process.env["DISCORD_TOKEN"]!;
-  await client.login(token);
 }
 
 export const data = new SlashCommandBuilder()
@@ -64,19 +38,22 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     embeds: [new EmbedBuilder()
       .setColor(0xf59e0b)
       .setTitle("🔄 Redémarrage en cours...")
-      .setDescription("Déconnexion et reconnexion à Discord. DM envoyé à la fin.")
+      .setDescription("Le bot va se déconnecter et redémarrer automatiquement.")
       .setTimestamp()],
   });
 
-  setTimeout(() => void doRestart(interaction.client), 800);
+  // Envoie le DM de shutdown puis quitte proprement (exit 0 → boucle dev relance le process)
+  setTimeout(async () => {
+    await sendShutdownDM(interaction.client);
+    process.exit(0);
+  }, 800);
+
   return;
 }
 
 export const prefixName = "restart";
 
 export async function executeMessage(message: Message, _args: string[]) {
-  if (!message.guild || !message.member) return;
-
   if (message.author.id !== LOG_DM_USER_ID) {
     await message.reply("❌ Cette commande est réservée au propriétaire du bot.");
     return;
@@ -86,9 +63,12 @@ export async function executeMessage(message: Message, _args: string[]) {
     embeds: [new EmbedBuilder()
       .setColor(0xf59e0b)
       .setTitle("🔄 Redémarrage en cours...")
-      .setDescription("Déconnexion et reconnexion à Discord. DM envoyé à la fin.")
+      .setDescription("Le bot va se déconnecter et redémarrer automatiquement.")
       .setTimestamp()],
   });
 
-  setTimeout(() => void doRestart(message.client), 800);
+  setTimeout(async () => {
+    await sendShutdownDM(message.client);
+    process.exit(0);
+  }, 800);
 }
