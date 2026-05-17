@@ -47,6 +47,7 @@ import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js
 import { registerGeneralLog } from "./general-log.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
+import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert } from "./bot-alerts.js";
 import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
@@ -83,7 +84,7 @@ export function startBot(): void {
 
   // Empêche le crash du process sur erreur non gérée du client
   client.on("error", (err) => { logger.error({ err }, "Erreur non gérée du client Discord"); });
-  process.on("unhandledRejection", (reason) => { logger.error({ reason }, "Promesse rejetée non gérée"); });
+  registerBotAlerts(client);
 
   client.once(Events.ClientReady, async (readyClient) => {
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
@@ -96,6 +97,8 @@ export function startBot(): void {
     } catch (err) {
       logger.error({ err }, "Erreur lors de l'enregistrement des commandes");
     }
+
+    await sendStartupAlert(readyClient).catch(() => null);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -116,6 +119,13 @@ export function startBot(): void {
       await command.execute(interaction);
     } catch (err) {
       logger.error({ err, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
+      void sendCommandErrorAlert(
+        client,
+        interaction.commandName,
+        interaction.guild?.name ?? null,
+        interaction.user.id,
+        err,
+      ).catch(() => null);
       try {
         const msg = "Une erreur est survenue lors de l'exécution de cette commande.";
         if (interaction.replied || interaction.deferred) {

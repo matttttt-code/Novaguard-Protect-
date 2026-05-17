@@ -113,6 +113,7 @@ function buildCommandListEmbed(): EmbedBuilder {
         name: "📩 Utilitaires",
         value: [
           "`/rolerequest` · `&rolerequest <rôle> <raison>` (`&rr`) — Demande de rôle envoyée au staff via formulaire",
+          "`/suggestion` · `&suggestion <texte>` (`&suggest`, `&idee`) — Envoie une suggestion/bug au développeur du bot",
           "`/support` · `&support` — Questionnaire d'aide en DM (transmis au staff)",
           "`/reglement #salon texte` · `&reglement` — Envoie le règlement + réaction :verification1:",
           "`/commandlist` · `&commandlist` (`&help`, `&cmds`) — Cette liste",
