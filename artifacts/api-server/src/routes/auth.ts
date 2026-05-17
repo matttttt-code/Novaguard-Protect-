@@ -146,6 +146,32 @@ router.get("/auth/callback", async (req, res) => {
   }
 });
 
+// ── POST /api/auth/verify ─────────────────────────────────────────────────────
+import { consumeVerifyCode } from "../bot/verify-code-store.js";
+
+router.post("/auth/verify", (req, res) => {
+  const code = String(req.body?.code ?? "").trim();
+  if (!code) {
+    res.status(400).json({ error: "Code manquant." });
+    return;
+  }
+  const entry = consumeVerifyCode(code);
+  if (!entry) {
+    res.status(401).json({ error: "Code invalide ou expiré." });
+    return;
+  }
+
+  const jwtToken = signToken({
+    userId: entry.userId,
+    userTag: entry.userTag,
+    avatarURL: entry.avatarURL,
+    isOwner: entry.isOwner,
+    guilds: entry.guilds,
+  });
+
+  res.json({ token: jwtToken });
+});
+
 // ── GET /api/auth/me ──────────────────────────────────────────────────────────
 import { authMiddleware } from "../lib/jwt-auth.js";
 
