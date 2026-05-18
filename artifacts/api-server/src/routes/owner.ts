@@ -6,7 +6,10 @@ import {
   PermissionsBitField,
   TextChannel,
   GuildMember,
+  WebhookClient,
 } from "discord.js";
+import { getConfig } from "../bot/guild-config-store.js";
+import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 
 const router = Router();
 
@@ -399,6 +402,101 @@ router.patch("/owner/guilds/:guildId/settings", async (req, res) => {
   try {
     const updated = await upsertGuildSettings(guildId, data as any);
     res.json(updated);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Test Bot (webhooks) ───────────────────────────────────────────────────────
+router.get("/owner/guilds/:guildId/testbot", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const webhooks = await guild.fetchWebhooks();
+    const list = [...webhooks.values()]
+      .filter((w) => w.name.startsWith("[TestBot] "))
+      .map((w) => ({ id: w.id, name: w.name.replace("[TestBot] ", ""), channelId: w.channelId ?? "" }));
+    res.json(list);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/testbot", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, nom } = (req.body ?? {}) as { channelId?: string; nom?: string };
+  if (!channelId || !nom) { res.status(400).json({ error: "channelId et nom requis" }); return; }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const ch = await guild.channels.fetch(channelId).catch(() => null);
+    if (!ch || ch.type !== ChannelType.GuildText) { res.status(400).json({ error: "Salon texte introuvable" }); return; }
+    const fullName = `[TestBot] ${String(nom).slice(0, 70)}`;
+    const webhooks = await guild.fetchWebhooks();
+    if (webhooks.find((w) => w.name === fullName)) {
+      res.status(409).json({ error: `Un bot de test nommé "${nom}" existe déjà.` }); return;
+    }
+    const wh = await (ch as TextChannel).createWebhook({ name: fullName, reason: "Bot de test — Dashboard Owner" });
+    res.json({ id: wh.id, name: nom, channelId: ch.id });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/testbot/send", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { nom, channelId, action, content, count } = (req.body ?? {}) as {
+    nom?: string; channelId?: string; action?: string; content?: string; count?: number;
+  };
+  if (!nom || !channelId || !action) { res.status(400).json({ error: "nom, channelId et action requis" }); return; }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const webhooks = await guild.fetchWebhooks();
+    const wh = webhooks.find((w) => w.name === `[TestBot] ${nom}` && w.channelId === channelId);
+    if (!wh?.token) { res.status(404).json({ error: `Bot de test "${nom}" introuvable dans ce salon.` }); return; }
+    const whClient = new WebhookClient({ id: wh.id, token: wh.token });
+    if (action === "message") {
+      await whClient.send({ content: String(content || "Test message") });
+    } else if (action === "spam") {
+      const n = Math.min(Math.max(Number(count ?? 6), 2), 10);
+      for (let i = 0; i < n; i++) {
+        await whClient.send({ content: `Test spam message ${i + 1} !!!` });
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    } else if (action === "insulte") {
+      const cfg = getConfig(guildId);
+      const mot = cfg.antiInsultWords[0] ?? "idiot";
+      await whClient.send({ content: `Test détection insulte : ${mot}` });
+    } else if (action === "lien") {
+      await whClient.send({ content: "Test lien non autorisé : discord.gg/testlink123" });
+    } else {
+      res.status(400).json({ error: "Action inconnue" }); return;
+    }
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/guilds/:guildId/testbot/:nom", async (req, res) => {
+  const { guildId, nom } = req.params as { guildId: string; nom: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const webhooks = await guild.fetchWebhooks();
+    const wh = webhooks.find((w) => w.name === `[TestBot] ${nom}` || w.name.replace("[TestBot] ", "") === nom);
+    if (!wh) { res.status(404).json({ error: "Bot de test introuvable" }); return; }
+    await wh.delete("Suppression via Dashboard Owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Error Test (alertes DM) ───────────────────────────────────────────────────
+router.post("/owner/errortest", async (req, res) => {
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const payload = (req as any).jwtPayload as { userTag?: string } | undefined;
+  try {
+    void sendErrTest(client, payload?.userTag ?? "Dashboard Owner");
+    res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

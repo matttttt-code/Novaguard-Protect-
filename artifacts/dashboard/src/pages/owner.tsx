@@ -14,7 +14,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw,
   Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
-  Sliders, Power, PowerOff, Eye, X, Search,
+  Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -153,6 +153,19 @@ export default function OwnerPanel() {
   const [clLoading, setClLoading] = useState(false);
   const [clFilter, setClFilter] = useState("");
 
+  // ── Test Bot state ────────────────────────────────────────────────────────
+  const [testBots, setTestBots] = useState<{ id: string; name: string; channelId: string }[]>([]);
+  const [tbLoading, setTbLoading] = useState(false);
+  const [tbNewName, setTbNewName] = useState("");
+  const [tbNewChannel, setTbNewChannel] = useState("");
+  const [tbCreating, setTbCreating] = useState(false);
+  const [tbSelected, setTbSelected] = useState("");
+  const [tbAction, setTbAction] = useState("message");
+  const [tbContent, setTbContent] = useState("");
+  const [tbCount, setTbCount] = useState(6);
+  const [tbSending, setTbSending] = useState(false);
+  const [errTestLoading, setErrTestLoading] = useState(false);
+
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
@@ -217,6 +230,15 @@ export default function OwnerPanel() {
     } finally { setClLoading(false); }
   }, [guildId]);
 
+  const fetchTestBots = useCallback(async () => {
+    if (!guildId) return;
+    setTbLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot`);
+      if (r.ok) setTestBots(await r.json());
+    } finally { setTbLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -226,7 +248,8 @@ export default function OwnerPanel() {
     fetchTranscripts();
     fetchBotSettings();
     fetchCaptchaLogs();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs]);
+    fetchTestBots();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs, fetchTestBots]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -355,6 +378,49 @@ export default function OwnerPanel() {
     } finally { setBsSaving(false); }
   }
 
+  // ── Test Bot actions ───────────────────────────────────────────────────────
+  async function createTestBot() {
+    if (!tbNewName.trim() || !tbNewChannel) return;
+    setTbCreating(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot`, { method: "POST", body: JSON.stringify({ channelId: tbNewChannel, nom: tbNewName.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `Bot de test "${tbNewName}" créé ✓` }); setTbNewName(""); setTbNewChannel(""); await fetchTestBots(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setTbCreating(false); }
+  }
+
+  async function deleteTestBot(name: string) {
+    if (!confirm(`Supprimer le bot de test "${name}" ?`)) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `"${name}" supprimé ✓` }); if (tbSelected === name) setTbSelected(""); await fetchTestBots(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function sendTestBotAction() {
+    const bot = testBots.find((b) => b.name === tbSelected);
+    if (!bot) return;
+    setTbSending(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot/send`, {
+        method: "POST",
+        body: JSON.stringify({ nom: bot.name, channelId: bot.channelId, action: tbAction, content: tbContent.trim() || undefined, count: tbCount }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: `Action "${tbAction}" exécutée ✓` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setTbSending(false); }
+  }
+
+  async function runErrTest() {
+    setErrTestLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/errortest", { method: "POST" });
+      if (r.ok) toast({ title: "Test alertes DM lancé ✓", description: "10 messages envoyés en DM au développeur." });
+      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+    } finally { setErrTestLoading(false); }
+  }
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -463,6 +529,7 @@ export default function OwnerPanel() {
           <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
           <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
           <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
+          <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -530,10 +597,10 @@ export default function OwnerPanel() {
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Catégorie parente</label>
-                  <Select value={newChannelParent} onValueChange={setNewChannelParent}>
+                  <Select value={newChannelParent || "__none__"} onValueChange={(v) => setNewChannelParent(v === "__none__" ? "" : v)}>
                     <SelectTrigger><SelectValue placeholder="Aucune" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Aucune</SelectItem>
+                      <SelectItem value="__none__">Aucune</SelectItem>
                       {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -641,10 +708,10 @@ export default function OwnerPanel() {
                 </div>
                 <div className="md:col-span-2">
                   <label className="text-sm font-medium mb-1.5 block">Salon système</label>
-                  <Select value={guildSystemChannel} onValueChange={setGuildSystemChannel}>
+                  <Select value={guildSystemChannel || "__none__"} onValueChange={(v) => setGuildSystemChannel(v === "__none__" ? "" : v)}>
                     <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Aucun</SelectItem>
+                      <SelectItem value="__none__">Aucun</SelectItem>
                       {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -869,10 +936,10 @@ export default function OwnerPanel() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium mb-1.5 block">Salon de vérification</label>
-                      <Select value={botSettings.captchaChannelId ?? ""} onValueChange={(v) => setBotSettings({ ...botSettings, captchaChannelId: v || null })}>
+                      <Select value={botSettings.captchaChannelId ?? "__none__"} onValueChange={(v) => setBotSettings({ ...botSettings, captchaChannelId: v === "__none__" ? null : v })}>
                         <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Aucun</SelectItem>
+                          <SelectItem value="__none__">Aucun</SelectItem>
                           {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
@@ -918,10 +985,10 @@ export default function OwnerPanel() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="text-sm font-medium mb-1.5 block">Salon</label>
-                      <Select value={botSettings.welcomeChannelId ?? ""} onValueChange={(v) => setBotSettings({ ...botSettings, welcomeChannelId: v || null })}>
+                      <Select value={botSettings.welcomeChannelId ?? "__none__"} onValueChange={(v) => setBotSettings({ ...botSettings, welcomeChannelId: v === "__none__" ? null : v })}>
                         <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Aucun</SelectItem>
+                          <SelectItem value="__none__">Aucun</SelectItem>
                           {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
@@ -1029,6 +1096,144 @@ export default function OwnerPanel() {
                   </div>
                 );
               })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tests Bot ────────────────────────────────────────────────────── */}
+        <TabsContent value="tests" className="space-y-4">
+          {/* Bots de test (webhooks) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🤖 Bots de test (Webhooks)</CardTitle>
+              <CardDescription>
+                Crée des pseudos-bots via webhooks Discord pour simuler du spam, des insultes ou des liens non autorisés et tester visuellement les logs d'automod.
+                <span className="block mt-1 text-xs text-amber-500/80">⚠️ Les webhooks ne sont pas sanctionnés par l'automod (pas de GuildMember). Ils servent uniquement à vérifier l'apparence des logs.</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Créer un bot */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pb-4 border-b border-border">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nom du bot de test</label>
+                  <Input value={tbNewName} onChange={(e) => setTbNewName(e.target.value)} placeholder="MonBotTest" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={tbNewChannel || "__none__"} onValueChange={(v) => setTbNewChannel(v === "__none__" ? "" : v)}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Choisir un salon</SelectItem>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end">
+                  <Button onClick={createTestBot} disabled={tbCreating || !tbNewName.trim() || !tbNewChannel} className="gap-2 w-full">
+                    {tbCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer
+                  </Button>
+                </div>
+              </div>
+
+              {/* Sélection + action */}
+              {testBots.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Bot sélectionné</label>
+                      <Select value={tbSelected || "__none__"} onValueChange={(v) => setTbSelected(v === "__none__" ? "" : v)}>
+                        <SelectTrigger><SelectValue placeholder="Sélectionner un bot…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sélectionner…</SelectItem>
+                          {testBots.map((b) => (
+                            <SelectItem key={b.id} value={b.name}>
+                              {b.name} — #{channels.find((c) => c.id === b.channelId)?.name ?? b.channelId}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Action</label>
+                      <Select value={tbAction} onValueChange={setTbAction}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="message">📝 Message personnalisé</SelectItem>
+                          <SelectItem value="spam">💬 Spam (rafale de messages)</SelectItem>
+                          <SelectItem value="insulte">🤬 Insulte (test détection)</SelectItem>
+                          <SelectItem value="lien">🔗 Lien non autorisé</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {tbAction === "message" && (
+                    <Input value={tbContent} onChange={(e) => setTbContent(e.target.value)} placeholder="Contenu du message à envoyer…" />
+                  )}
+                  {tbAction === "spam" && (
+                    <div className="flex items-center gap-3">
+                      <label className="text-sm font-medium">Nombre de messages :</label>
+                      <Input type="number" min={2} max={10} value={tbCount} onChange={(e) => setTbCount(Math.min(10, Math.max(2, Number(e.target.value))))} className="w-20 font-mono text-center" />
+                      <span className="text-xs text-muted-foreground">(max 10, délai 200 ms entre chaque)</span>
+                    </div>
+                  )}
+                  <Button onClick={sendTestBotAction} disabled={tbSending || !tbSelected} className="gap-2">
+                    {tbSending ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Exécuter</>}
+                  </Button>
+                </div>
+              ) : null}
+
+              {/* Liste des bots existants */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide text-xs">
+                    Bots créés {testBots.length > 0 ? `(${testBots.length})` : ""}
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={fetchTestBots} disabled={tbLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${tbLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                </div>
+                {testBots.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-lg">
+                    Aucun bot de test créé sur ce serveur.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {testBots.map((b) => (
+                      <div key={b.id} className="flex items-center gap-3 p-2.5 rounded-md border border-border bg-muted/30">
+                        <FlaskConical className="h-4 w-4 text-primary shrink-0" />
+                        <span className="flex-1 text-sm font-mono font-medium">{b.name}</span>
+                        <span className="text-xs text-muted-foreground">#{channels.find((c) => c.id === b.channelId)?.name ?? b.channelId}</span>
+                        <Badge variant="outline" className="font-mono text-xs hidden md:inline-flex">{b.id}</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => deleteTestBot(b.name)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Test alertes DM */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔔 Test Alertes DM</CardTitle>
+              <CardDescription>
+                Envoie 10 messages d'alerte simulés en DM au développeur du bot pour vérifier que toutes les notifications fonctionnent.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button onClick={runErrTest} disabled={errTestLoading} variant="outline" className="gap-2">
+                {errTestLoading
+                  ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi en cours…</>
+                  : <><Send className="h-4 w-4" />Lancer les 10 tests d'alertes</>}
+              </Button>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p className="font-medium text-foreground">Messages simulés :</p>
+                <p>1. 🟢 Démarrage complet · 2. ❌ Erreur de commande · 3. ⚠️ Ping élevé · 4. 💥 Promesse rejetée</p>
+                <p>5. 🔴 Arrêt · 6-9. 🔑 Captcha admin (déclenché / réussi / échoué / expiré) · 10. 📨 DM sécurité groupé</p>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>

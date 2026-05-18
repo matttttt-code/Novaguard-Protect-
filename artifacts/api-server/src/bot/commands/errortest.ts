@@ -18,7 +18,7 @@ async function delay(): Promise<void> {
   await new Promise((r) => setTimeout(r, 600));
 }
 
-async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: string): Promise<void> {
+export async function sendAll(client: Parameters<typeof sendLogDM>[0], triggeredBy: string): Promise<void> {
   const guild = client.guilds.cache.first();
   const guilds = client.guilds.cache.size;
   const totalMembers = client.guilds.cache.reduce((a, g) => a + (g.memberCount ?? 0), 0);
