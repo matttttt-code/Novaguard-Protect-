@@ -249,4 +249,136 @@ router.patch("/owner/guilds/:guildId/settings", async (req, res) => {
   }
 });
 
+// ── Transcripts ───────────────────────────────────────────────────────────────
+import { getTranscripts, getTranscriptById, deleteTranscript } from "../bot/transcript-db.js";
+
+router.get("/owner/transcripts", async (req, res) => {
+  try {
+    const guildId = req.query["guildId"] as string | undefined;
+    const limit = Math.min(Number(req.query["limit"] ?? 50), 200);
+    const rows = await getTranscripts(guildId, limit);
+    res.json(rows.map((r) => ({ ...r, content: undefined }))); // exclude content from list
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/owner/transcripts/:id", async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!id) { res.status(400).json({ error: "ID invalide" }); return; }
+    const row = await getTranscriptById(id);
+    if (!row) { res.status(404).json({ error: "Introuvable" }); return; }
+    res.json(row);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/transcripts/:id", async (req, res) => {
+  try {
+    const id = Number(req.params["id"]);
+    if (!id) { res.status(400).json({ error: "ID invalide" }); return; }
+    await deleteTranscript(id);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Global Blacklist ──────────────────────────────────────────────────────────
+import { getAllGlobalBlacklistedDB, addToGlobalBlacklistDB, removeFromGlobalBlacklistDB } from "../bot/global-blacklist-db.js";
+
+router.get("/owner/blacklist", async (_req, res) => {
+  try {
+    const rows = await getAllGlobalBlacklistedDB();
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/blacklist", async (req, res) => {
+  const { userId, userTag, reason, moderatorTag, moderatorId } = req.body ?? {};
+  if (!userId || !userTag || !reason || !moderatorTag || !moderatorId) {
+    res.status(400).json({ error: "Champs manquants" }); return;
+  }
+  try {
+    await addToGlobalBlacklistDB({ userId, userTag, reason, moderatorTag, moderatorId });
+    // Also ban from all guilds
+    const client = getClient();
+    if (client) {
+      const banPromises = [...client.guilds.cache.values()].map((g) =>
+        g.bans.create(userId, { reason: `[Blacklist globale] ${reason}` }).catch(() => null)
+      );
+      await Promise.allSettled(banPromises);
+    }
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/blacklist/:userId", async (req, res) => {
+  const { userId } = req.params as { userId: string };
+  try {
+    await removeFromGlobalBlacklistDB(userId);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Disabled Commands ─────────────────────────────────────────────────────────
+import { getDisabledCommands, disableCommand, enableCommand, enableAllCommands } from "../bot/disabled-commands-db.js";
+
+router.get("/owner/guilds/:guildId/disabled-commands", async (req, res) => {
+  try {
+    const rows = await getDisabledCommands(req.params["guildId"] as string);
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/disabled-commands", async (req, res) => {
+  const guildId = req.params["guildId"] as string;
+  const { commandName } = req.body ?? {};
+  if (!commandName) { res.status(400).json({ error: "commandName manquant" }); return; }
+  const payload = (req as any).jwtPayload as { userTag: string; userId: string };
+  try {
+    await disableCommand(guildId, commandName, payload.userTag, payload.userId);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/guilds/:guildId/disabled-commands/:commandName", async (req, res) => {
+  const { guildId, commandName } = req.params as { guildId: string; commandName: string };
+  try {
+    await enableCommand(guildId, commandName);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/guilds/:guildId/disabled-commands", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  try {
+    await enableAllCommands(guildId);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Guild Settings (captcha, welcome, etc.) ──────────────────────────────────
+import { getGuildSettings, upsertGuildSettings } from "../bot/guild-settings-db.js";
+
+router.get("/owner/guilds/:guildId/settings", async (req, res) => {
+  try {
+    const settings = await getGuildSettings(req.params["guildId"] as string);
+    res.json(settings);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/guilds/:guildId/settings", async (req, res) => {
+  const guildId = req.params["guildId"] as string;
+  const allowed = [
+    "captchaEnabled", "captchaChannelId", "captchaRoleId", "captchaVerifiedRoleId",
+    "captchaTimeoutMins", "captchaMaxAttempts", "captchaMode",
+    "customPrefix", "welcomeEnabled", "welcomeChannelId", "welcomeMessage",
+  ] as const;
+  const data: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (req.body && key in req.body) data[key] = req.body[key];
+  }
+  try {
+    const updated = await upsertGuildSettings(guildId, data as any);
+    res.json(updated);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

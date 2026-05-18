@@ -11,9 +11,28 @@ import {
 import { isTicketChannel, getTicketByChannel, claimTicket, resetTickets } from "../ticket-store.js";
 import { getConfig } from "../guild-config-store.js";
 import { sendLog, logEmbed } from "../log.js";
+import { buildTranscriptContent, saveTranscriptToDB } from "../transcript-db.js";
 
 async function doClose(client: Client, channel: TextChannel, closedBy: string, closedById: string, reason: string, guildId: string): Promise<void> {
   const ticket = getTicketByChannel(channel.id);
+
+  // Save transcript to DB before channel is deleted
+  if (ticket) {
+    try {
+      const guild = client.guilds.cache.get(guildId);
+      const { content, count } = await buildTranscriptContent(channel);
+      await saveTranscriptToDB({
+        ticket,
+        guildName: guild?.name ?? guildId,
+        channelName: channel.name,
+        content,
+        messageCount: count,
+        closedBy,
+        closedById,
+        reason,
+      });
+    } catch { /* non-blocking */ }
+  }
 
   const embed = new EmbedBuilder()
     .setColor(0xef4444)

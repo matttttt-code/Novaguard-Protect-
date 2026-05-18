@@ -10,8 +10,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw, Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw,
+  Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
+  Sliders, Power, PowerOff, Eye, X, Search,
+} from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
   const token = getToken();
@@ -27,116 +31,350 @@ function apiFetch(path: string, opts: RequestInit = {}) {
 
 type Channel = { id: string; name: string; type: number; parentId: string | null; position: number };
 type Member = { id: string; tag: string; displayName: string; avatarURL: string; bot: boolean; joinedAt: string | null; roles: string[] };
+type BlacklistEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; createdAt: string };
+type DisabledCommand = { id: number; guildId: string; commandName: string; disabledBy: string; createdAt: string };
+type TranscriptMeta = { id: number; guildId: string; guildName: string; channelName: string; ticketNumber: number; userId: string; userTag: string; closedBy: string; reason: string; messageCount: number; createdAt: string; closedAt: string };
+type TranscriptFull = TranscriptMeta & { content: string };
+type BotSettings = {
+  guildId: string; captchaEnabled: boolean; captchaChannelId: string | null;
+  captchaRoleId: string | null; captchaVerifiedRoleId: string | null;
+  captchaTimeoutMins: number; captchaMaxAttempts: number; captchaMode: string;
+  welcomeEnabled: boolean; welcomeChannelId: string | null; welcomeMessage: string | null;
+};
 
 const CHANNEL_TYPE_ICON: Record<number, React.ReactNode> = {
-  0: <Hash className="h-3.5 w-3.5" />,
-  2: <Volume2 className="h-3.5 w-3.5" />,
-  4: <FolderOpen className="h-3.5 w-3.5" />,
-  5: <Hash className="h-3.5 w-3.5" />,
-  15: <Hash className="h-3.5 w-3.5" />,
+  0: <Hash className="h-3.5 w-3.5" />, 2: <Volume2 className="h-3.5 w-3.5" />,
+  4: <FolderOpen className="h-3.5 w-3.5" />, 5: <Hash className="h-3.5 w-3.5" />, 15: <Hash className="h-3.5 w-3.5" />,
 };
-
-const CHANNEL_TYPE_LABEL: Record<number, string> = {
-  0: "Texte",
-  2: "Vocal",
-  4: "Catégorie",
-  5: "Annonce",
-  15: "Forum",
-};
-
 const VERIFICATION_LABELS = ["Aucune", "Faible", "Moyenne", "Élevée", "Très élevée"];
+
+const ALL_COMMANDS = [
+  "kick","ban","unban","softban","timeout","untimeout","voicemute","warn","warnings","clear",
+  "slowmode","lock","unlock","lockserver","nuke","role","nickname","revokeinvites","raidmode",
+  "joinlock","hoistrole","blacklist","blacklistinfo","sanctioninfo","blacklistinvite",
+  "dashboard","setlog","setbanlog","settranscript","ticketconfig","setgenlog","setinvitelog",
+  "ticketpanel","ticket","transcript","testcaptcha","checkinvite","checkinvites",
+  "userinfo","serverinfo","serverstats","infome","getid","botinfo","commandlist",
+  "rolerequest","suggestion","support","reglement",
+  "secure","secureinfo","sendsecuredm","antiinsult","antiwebhook","whitelistinvite",
+  "notify","errortest","testinviteembed","tempban","massban","note","purge",
+  "antilink","antighostping","autokick","scamlink","badname","antialt","verify-dashboard",
+].sort();
 
 export default function OwnerPanel() {
   const { guildId } = useParams<{ guildId: string }>();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
-
   const user = decodeToken();
 
-  // ── Owner password gate ────────────────────────────────────────────────────
-  const [unlocked, setUnlocked] = useState<boolean>(
-    () => sessionStorage.getItem("owner_unlocked") === "1"
-  );
+  // ── Password gate ──────────────────────────────────────────────────────────
+  const [unlocked, setUnlocked] = useState<boolean>(() => sessionStorage.getItem("owner_unlocked") === "1");
   const [pwInput, setPwInput] = useState("");
   const [pwLoading, setPwLoading] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
 
   async function handleUnlock(e: React.FormEvent) {
     e.preventDefault();
-    setPwLoading(true);
-    setPwError(null);
+    setPwLoading(true); setPwError(null);
     try {
-      const res = await apiFetch("/api/owner/unlock", {
-        method: "POST",
-        body: JSON.stringify({ password: pwInput }),
-      });
-      if (res.ok) {
-        sessionStorage.setItem("owner_unlocked", "1");
-        setUnlocked(true);
-        setPwInput("");
-      } else {
-        const data = await res.json() as { error?: string };
-        setPwError(data.error ?? "Mot de passe incorrect.");
-        setPwInput("");
-      }
-    } catch {
-      setPwError("Erreur réseau. Réessayez.");
-    } finally {
-      setPwLoading(false);
-    }
+      const res = await apiFetch("/api/owner/unlock", { method: "POST", body: JSON.stringify({ password: pwInput }) });
+      if (res.ok) { sessionStorage.setItem("owner_unlocked", "1"); setUnlocked(true); setPwInput(""); }
+      else { const d = await res.json() as { error?: string }; setPwError(d.error ?? "Mot de passe incorrect."); setPwInput(""); }
+    } catch { setPwError("Erreur réseau."); }
+    finally { setPwLoading(false); }
   }
-  // ──────────────────────────────────────────────────────────────────────────
 
-  useEffect(() => {
-    if (!getToken()) { setLocation("/"); return; }
-  }, [setLocation]);
+  useEffect(() => { if (!getToken()) { setLocation("/"); return; } }, [setLocation]);
 
+  // ── Core state ─────────────────────────────────────────────────────────────
   const [channels, setChannels] = useState<Channel[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [memberSearch, setMemberSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [guildName, setGuildName] = useState("");
 
+  // Messages
   const [selectedChannelId, setSelectedChannelId] = useState("");
   const [messageContent, setMessageContent] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
 
+  // Channels
   const [newChannelName, setNewChannelName] = useState("");
   const [newChannelType, setNewChannelType] = useState<string>("text");
   const [newChannelParent, setNewChannelParent] = useState("");
   const [newChannelTopic, setNewChannelTopic] = useState("");
   const [creatingChannel, setCreatingChannel] = useState(false);
 
+  // Members
   const [actionMemberId, setActionMemberId] = useState("");
   const [actionReason, setActionReason] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
+  // Server
   const [guildEditName, setGuildEditName] = useState("");
   const [guildVerifLevel, setGuildVerifLevel] = useState<string>("0");
   const [guildSystemChannel, setGuildSystemChannel] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
 
+  // ── Blacklist state ────────────────────────────────────────────────────────
+  const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
+  const [blLoading, setBlLoading] = useState(false);
+  const [newBlUserId, setNewBlUserId] = useState("");
+  const [newBlUserTag, setNewBlUserTag] = useState("");
+  const [newBlReason, setNewBlReason] = useState("");
+  const [addingBl, setAddingBl] = useState(false);
+  const [blSearch, setBlSearch] = useState("");
+
+  // ── Disabled commands state ────────────────────────────────────────────────
+  const [disabledCmds, setDisabledCmds] = useState<DisabledCommand[]>([]);
+  const [dcLoading, setDcLoading] = useState(false);
+  const [newCmdName, setNewCmdName] = useState("");
+  const [addingDc, setAddingDc] = useState(false);
+
+  // ── Transcripts state ─────────────────────────────────────────────────────
+  const [transcripts, setTranscripts] = useState<TranscriptMeta[]>([]);
+  const [trLoading, setTrLoading] = useState(false);
+  const [viewTranscript, setViewTranscript] = useState<TranscriptFull | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [trSearch, setTrSearch] = useState("");
+
+  // ── Bot settings state ────────────────────────────────────────────────────
+  const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
+  const [bsLoading, setBsLoading] = useState(false);
+  const [bsSaving, setBsSaving] = useState(false);
+
+  // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
     if (r.status === 401 || r.status === 403) { clearToken(); setLocation("/"); return; }
     if (r.ok) setChannels(await r.json());
   }, [guildId, setLocation]);
 
-  const fetchMembers = useCallback(async () => {
-    const q = memberSearch ? `?search=${encodeURIComponent(memberSearch)}&limit=50` : "?limit=50";
-    const r = await apiFetch(`/api/owner/guilds/${guildId}/members${q}`);
+  const fetchMembers = useCallback(async (search = "") => {
+    const qs = search ? `?search=${encodeURIComponent(search)}&limit=50` : "?limit=50";
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/members${qs}`);
     if (r.ok) setMembers(await r.json());
-  }, [guildId, memberSearch]);
+  }, [guildId]);
+
+  const fetchGuildMeta = useCallback(async () => {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
+    if (!r.ok) return;
+    const r2 = await apiFetch(`/api/dashboard/guilds`);
+    if (r2.ok) {
+      const guilds = await r2.json() as Array<{ id: string; name: string }>;
+      const g = guilds.find((g) => g.id === guildId);
+      if (g) setGuildName(g.name);
+    }
+  }, [guildId]);
+
+  const fetchBlacklist = useCallback(async () => {
+    setBlLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/blacklist");
+      if (r.ok) setBlacklist(await r.json());
+    } finally { setBlLoading(false); }
+  }, []);
+
+  const fetchDisabledCmds = useCallback(async () => {
+    setDcLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`);
+      if (r.ok) setDisabledCmds(await r.json());
+    } finally { setDcLoading(false); }
+  }, [guildId]);
+
+  const fetchTranscripts = useCallback(async () => {
+    setTrLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/transcripts?guildId=${guildId}&limit=100`);
+      if (r.ok) setTranscripts(await r.json());
+    } finally { setTrLoading(false); }
+  }, [guildId]);
+
+  const fetchBotSettings = useCallback(async () => {
+    setBsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`);
+      if (r.ok) setBotSettings(await r.json());
+    } finally { setBsLoading(false); }
+  }, [guildId]);
 
   useEffect(() => {
+    if (!unlocked) return;
     setLoading(true);
-    Promise.all([fetchChannels(), fetchMembers()]).finally(() => setLoading(false));
-  }, [fetchChannels, fetchMembers]);
+    Promise.all([fetchChannels(), fetchMembers(), fetchGuildMeta()]).finally(() => setLoading(false));
+    fetchBlacklist();
+    fetchDisabledCmds();
+    fetchTranscripts();
+    fetchBotSettings();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings]);
 
-  const textChannels = channels.filter((c) => c.type === 0 || c.type === 5);
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
   const categories = channels.filter((c) => c.type === 4);
+  const channelById = Object.fromEntries(channels.map((c) => [c.id, c]));
 
-  // Not owner → show access denied
+  // ── Actions ────────────────────────────────────────────────────────────────
+  async function sendMessage() {
+    if (!selectedChannelId || !messageContent.trim()) return;
+    setSendingMsg(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/send`, { method: "POST", body: JSON.stringify({ channelId: selectedChannelId, content: messageContent.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message envoyé ✓", description: `ID: ${d.messageId}` }); setMessageContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSendingMsg(false); }
+  }
+
+  async function createChannel() {
+    if (!newChannelName.trim()) return;
+    setCreatingChannel(true);
+    try {
+      const body: Record<string, string> = { name: newChannelName.trim(), type: newChannelType };
+      if (newChannelParent) body["parentId"] = newChannelParent;
+      if (newChannelTopic.trim()) body["topic"] = newChannelTopic.trim();
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`, { method: "POST", body: JSON.stringify(body) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Salon créé ✓", description: `#${d.name}` }); setNewChannelName(""); setNewChannelTopic(""); setNewChannelParent(""); await fetchChannels(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setCreatingChannel(false); }
+  }
+
+  async function deleteChannel(channelId: string, channelName: string) {
+    if (!confirm(`Supprimer #${channelName} ? Cette action est irréversible.`)) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${channelId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Salon supprimé ✓" }); await fetchChannels(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function memberAction(action: "kick" | "ban", memberId: string, displayName: string) {
+    if (!confirm(`${action === "kick" ? "Expulser" : "Bannir"} ${displayName} ?`)) return;
+    setActionLoading(true); setActionMemberId(memberId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/${memberId}/${action}`, { method: "POST", body: JSON.stringify({ reason: actionReason || undefined }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `${action === "kick" ? "Expulsé" : "Banni"} ✓`, description: displayName }); setActionReason(""); await fetchMembers(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setActionLoading(false); setActionMemberId(""); }
+  }
+
+  async function saveGuildSettings() {
+    setSavingSettings(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`, { method: "PATCH", body: JSON.stringify({ name: guildEditName.trim() || undefined, verificationLevel: Number(guildVerifLevel), systemChannelId: guildSystemChannel || null }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Paramètres sauvegardés ✓", description: d.name }); setGuildName(d.name); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSavingSettings(false); }
+  }
+
+  async function addToBlacklist() {
+    if (!newBlUserId.trim() || !newBlUserTag.trim() || !newBlReason.trim()) return;
+    setAddingBl(true);
+    try {
+      const r = await apiFetch("/api/owner/blacklist", { method: "POST", body: JSON.stringify({ userId: newBlUserId.trim(), userTag: newBlUserTag.trim(), reason: newBlReason.trim(), moderatorTag: user?.userTag ?? "Dashboard", moderatorId: user?.userId ?? "0" }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Blacklist mise à jour ✓", description: `${newBlUserTag} banni de tous les serveurs.` }); setNewBlUserId(""); setNewBlUserTag(""); setNewBlReason(""); await fetchBlacklist(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAddingBl(false); }
+  }
+
+  async function removeFromBlacklist(userId: string, userTag: string) {
+    if (!confirm(`Retirer ${userTag} de la blacklist globale ?`)) return;
+    const r = await apiFetch(`/api/owner/blacklist/${userId}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Retiré de la blacklist ✓" }); await fetchBlacklist(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function disableCmd() {
+    if (!newCmdName) return;
+    setAddingDc(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`, { method: "POST", body: JSON.stringify({ commandName: newCmdName }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `/${newCmdName} désactivée ✓` }); setNewCmdName(""); await fetchDisabledCmds(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAddingDc(false); }
+  }
+
+  async function enableCmd(commandName: string) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands/${commandName}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `/${commandName} réactivée ✓` }); await fetchDisabledCmds(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function enableAllCmds() {
+    if (!confirm("Réactiver toutes les commandes ?")) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Toutes les commandes réactivées ✓" }); await fetchDisabledCmds(); }
+  }
+
+  async function openTranscript(id: number) {
+    setViewLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/transcripts/${id}`);
+      if (r.ok) setViewTranscript(await r.json());
+      else toast({ title: "Erreur de chargement", variant: "destructive" });
+    } finally { setViewLoading(false); }
+  }
+
+  async function deleteTranscriptFn(id: number) {
+    if (!confirm("Supprimer ce transcript ?")) return;
+    const r = await apiFetch(`/api/owner/transcripts/${id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Transcript supprimé ✓" }); setTranscripts((prev) => prev.filter((t) => t.id !== id)); if (viewTranscript?.id === id) setViewTranscript(null); }
+  }
+
+  async function saveBotSettings() {
+    if (!botSettings) return;
+    setBsSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`, { method: "PATCH", body: JSON.stringify(botSettings) });
+      const d = await r.json();
+      if (r.ok) { setBotSettings(d); toast({ title: "Réglages sauvegardés ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBsSaving(false); }
+  }
+
+  // ── Password gate render ───────────────────────────────────────────────────
+  if (!unlocked) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="text-center space-y-1">
+            <div className="flex justify-center mb-3">
+              <div className="rounded-full bg-primary/10 p-4"><Lock className="h-8 w-8 text-primary" /></div>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tighter uppercase font-mono">Panneau Propriétaire</h1>
+            <p className="text-muted-foreground font-mono text-xs">Accès restreint — mot de passe requis.</p>
+          </div>
+          <Card className="border-muted bg-card">
+            <CardHeader>
+              <CardTitle>Vérification</CardTitle>
+              <CardDescription>Entrez le mot de passe propriétaire pour continuer.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUnlock} className="space-y-4">
+                {pwError && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{pwError}</AlertDescription></Alert>}
+                <Input type="password" value={pwInput} onChange={(e) => setPwInput(e.target.value)} placeholder="••••••••" disabled={pwLoading} autoFocus className="font-mono" />
+                <Button type="submit" disabled={pwLoading || pwInput.length === 0} className="w-full font-mono uppercase tracking-widest">
+                  {pwLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Vérification…</> : "Déverrouiller"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+          <div className="text-center">
+            <Link href="/guilds">
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
+                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (user && !user.isOwner) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-6">
@@ -149,119 +387,11 @@ export default function OwnerPanel() {
             <CardDescription>Le panneau propriétaire est réservé au propriétaire du bot.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/guilds">
-              <Button variant="outline" className="gap-2">
-                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
-              </Button>
-            </Link>
+            <Link href="/guilds"><Button variant="outline" className="gap-2"><ArrowLeft className="h-4 w-4" /> Retour</Button></Link>
           </CardContent>
         </Card>
       </div>
     );
-  }
-
-  async function sendMessage() {
-    if (!selectedChannelId || !messageContent.trim()) return;
-    setSendingMsg(true);
-    try {
-      const r = await apiFetch(`/api/owner/guilds/${guildId}/send`, {
-        method: "POST",
-        body: JSON.stringify({ channelId: selectedChannelId, content: messageContent.trim() }),
-      });
-      const data = await r.json();
-      if (r.ok) {
-        toast({ title: "Message envoyé ✓", description: `ID: ${data.messageId}` });
-        setMessageContent("");
-      } else {
-        toast({ title: "Erreur", description: data.error, variant: "destructive" });
-      }
-    } finally {
-      setSendingMsg(false);
-    }
-  }
-
-  async function createChannel() {
-    if (!newChannelName.trim()) return;
-    setCreatingChannel(true);
-    try {
-      const body: Record<string, string> = { name: newChannelName.trim(), type: newChannelType };
-      if (newChannelParent) body["parentId"] = newChannelParent;
-      if (newChannelTopic.trim()) body["topic"] = newChannelTopic.trim();
-      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`, {
-        method: "POST",
-        body: JSON.stringify(body),
-      });
-      const data = await r.json();
-      if (r.ok) {
-        toast({ title: "Salon créé ✓", description: `#${data.name}` });
-        setNewChannelName(""); setNewChannelTopic(""); setNewChannelParent("");
-        await fetchChannels();
-      } else {
-        toast({ title: "Erreur", description: data.error, variant: "destructive" });
-      }
-    } finally {
-      setCreatingChannel(false);
-    }
-  }
-
-  async function deleteChannel(channelId: string, channelName: string) {
-    if (!confirm(`Supprimer #${channelName} ? Cette action est irréversible.`)) return;
-    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${channelId}`, { method: "DELETE" });
-    const data = await r.json();
-    if (r.ok) {
-      toast({ title: "Salon supprimé ✓" });
-      await fetchChannels();
-    } else {
-      toast({ title: "Erreur", description: data.error, variant: "destructive" });
-    }
-  }
-
-  async function memberAction(action: "kick" | "ban", memberId: string, displayName: string) {
-    const confirmed = confirm(`${action === "kick" ? "Expulser" : "Bannir"} ${displayName} ?`);
-    if (!confirmed) return;
-    setActionLoading(true);
-    setActionMemberId(memberId);
-    try {
-      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/${memberId}/${action}`, {
-        method: "POST",
-        body: JSON.stringify({ reason: actionReason || undefined }),
-      });
-      const data = await r.json();
-      if (r.ok) {
-        toast({ title: `${action === "kick" ? "Expulsé" : "Banni"} ✓`, description: displayName });
-        setActionReason("");
-        await fetchMembers();
-      } else {
-        toast({ title: "Erreur", description: data.error, variant: "destructive" });
-      }
-    } finally {
-      setActionLoading(false);
-      setActionMemberId("");
-    }
-  }
-
-  async function saveGuildSettings() {
-    setSavingSettings(true);
-    try {
-      const body: Record<string, unknown> = {
-        name: guildEditName.trim() || undefined,
-        verificationLevel: Number(guildVerifLevel),
-        systemChannelId: guildSystemChannel || null,
-      };
-      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      });
-      const data = await r.json();
-      if (r.ok) {
-        toast({ title: "Paramètres sauvegardés ✓", description: data.name });
-        setGuildName(data.name);
-      } else {
-        toast({ title: "Erreur", description: data.error, variant: "destructive" });
-      }
-    } finally {
-      setSavingSettings(false);
-    }
   }
 
   if (loading) {
@@ -273,85 +403,25 @@ export default function OwnerPanel() {
     );
   }
 
-  const channelById = Object.fromEntries(channels.map((c) => [c.id, c]));
-
-  // ── Password gate ──────────────────────────────────────────────────────────
-  if (!unlocked) {
-    return (
-      <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background">
-        <div className="w-full max-w-sm space-y-6">
-          <div className="text-center space-y-1">
-            <div className="flex justify-center mb-3">
-              <div className="rounded-full bg-primary/10 p-4">
-                <Lock className="h-8 w-8 text-primary" />
-              </div>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tighter uppercase font-mono">Panneau Propriétaire</h1>
-            <p className="text-muted-foreground font-mono text-xs">Accès restreint — mot de passe requis.</p>
-          </div>
-
-          <Card className="border-muted bg-card">
-            <CardHeader>
-              <CardTitle>Vérification</CardTitle>
-              <CardDescription>Entrez le mot de passe propriétaire pour continuer.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={handleUnlock} className="space-y-4">
-                {pwError && (
-                  <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>{pwError}</AlertDescription>
-                  </Alert>
-                )}
-                <Input
-                  type="password"
-                  value={pwInput}
-                  onChange={(e) => setPwInput(e.target.value)}
-                  placeholder="••••••••"
-                  disabled={pwLoading}
-                  autoFocus
-                  className="font-mono"
-                />
-                <Button
-                  type="submit"
-                  disabled={pwLoading || pwInput.length === 0}
-                  className="w-full font-mono uppercase tracking-widest"
-                >
-                  {pwLoading ? (
-                    <><Loader2 className="h-4 w-4 animate-spin mr-2" /> Vérification…</>
-                  ) : (
-                    "Déverrouiller"
-                  )}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-
-          <div className="text-center">
-            <Link href="/guilds">
-              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
-                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
-              </Button>
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
-  // ──────────────────────────────────────────────────────────────────────────
+  // ── Filtered lists ─────────────────────────────────────────────────────────
+  const filteredBl = blacklist.filter((e) =>
+    !blSearch || e.userTag.toLowerCase().includes(blSearch.toLowerCase()) || e.userId.includes(blSearch) || e.reason.toLowerCase().includes(blSearch.toLowerCase())
+  );
+  const filteredTr = transcripts.filter((t) =>
+    !trSearch || t.channelName.includes(trSearch) || t.userTag.toLowerCase().includes(trSearch.toLowerCase()) || String(t.ticketNumber).includes(trSearch)
+  );
+  const disabledCmdNames = new Set(disabledCmds.map((d) => d.commandName));
+  const availableCmds = ALL_COMMANDS.filter((c) => !disabledCmdNames.has(c));
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6 md:p-10 space-y-6">
+    <div className="min-h-screen bg-background text-foreground p-4 md:p-8 space-y-6">
       <header className="flex items-center gap-4 border-b border-border pb-5">
         <Link href="/guilds">
-          <Button variant="ghost" size="sm" className="gap-2">
-            <ArrowLeft className="h-4 w-4" /> Retour
-          </Button>
+          <Button variant="ghost" size="sm" className="gap-2"><ArrowLeft className="h-4 w-4" /> Retour</Button>
         </Link>
         <div className="flex-1">
           <h1 className="text-2xl font-bold font-mono uppercase tracking-tight flex items-center gap-2">
-            <Shield className="h-6 w-6 text-primary" />
-            Panneau Propriétaire
+            <Shield className="h-6 w-6 text-primary" /> Panneau Propriétaire
           </h1>
           <p className="text-muted-foreground font-mono text-sm">{guildName || guildId}</p>
         </div>
@@ -364,13 +434,18 @@ export default function OwnerPanel() {
       </header>
 
       <Tabs defaultValue="messages" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="messages" className="gap-2"><Send className="h-4 w-4" /> Messages</TabsTrigger>
-          <TabsTrigger value="channels" className="gap-2"><Hash className="h-4 w-4" /> Salons</TabsTrigger>
-          <TabsTrigger value="members" className="gap-2"><UserX className="h-4 w-4" /> Membres</TabsTrigger>
-          <TabsTrigger value="settings" className="gap-2"><Settings className="h-4 w-4" /> Serveur</TabsTrigger>
+        <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1 rounded-lg">
+          <TabsTrigger value="messages" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5" />Messages</TabsTrigger>
+          <TabsTrigger value="channels" className="gap-1.5 text-xs"><Hash className="h-3.5 w-3.5" />Salons</TabsTrigger>
+          <TabsTrigger value="members" className="gap-1.5 text-xs"><UserX className="h-3.5 w-3.5" />Membres</TabsTrigger>
+          <TabsTrigger value="server" className="gap-1.5 text-xs"><Settings className="h-3.5 w-3.5" />Serveur</TabsTrigger>
+          <TabsTrigger value="blacklist" className="gap-1.5 text-xs"><Ban className="h-3.5 w-3.5" />Blacklist</TabsTrigger>
+          <TabsTrigger value="disabled" className="gap-1.5 text-xs"><PowerOff className="h-3.5 w-3.5" />Commandes</TabsTrigger>
+          <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
+          <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
         </TabsList>
 
+        {/* ── Messages ──────────────────────────────────────────────────────── */}
         <TabsContent value="messages" className="space-y-4">
           <Card>
             <CardHeader>
@@ -381,68 +456,55 @@ export default function OwnerPanel() {
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Salon de destination</label>
                 <Select value={selectedChannelId} onValueChange={setSelectedChannelId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choisir un salon..." />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
                   <SelectContent>
                     {categories.map((cat) => (
                       <div key={cat.id}>
                         <div className="px-2 py-1 text-xs text-muted-foreground uppercase tracking-wider font-semibold">{cat.name}</div>
                         {textChannels.filter((c) => c.parentId === cat.id).map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            <span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span>
-                          </SelectItem>
+                          <SelectItem key={c.id} value={c.id}><span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span></SelectItem>
                         ))}
                       </div>
                     ))}
                     {textChannels.filter((c) => !c.parentId).map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        <span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span>
-                      </SelectItem>
+                      <SelectItem key={c.id} value={c.id}><span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span></SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div>
-                <label className="text-sm font-medium mb-1.5 block">Message</label>
-                <Textarea
-                  value={messageContent}
-                  onChange={(e) => setMessageContent(e.target.value)}
-                  placeholder="Tapez votre message... (Markdown Discord supporté)"
-                  rows={5}
-                  onKeyDown={(e) => { if (e.key === "Enter" && e.ctrlKey) sendMessage(); }}
-                />
-                <p className="text-xs text-muted-foreground mt-1">Ctrl+Entrée pour envoyer</p>
+                <label className="text-sm font-medium mb-1.5 block">Contenu du message</label>
+                <Textarea value={messageContent} onChange={(e) => setMessageContent(e.target.value)} placeholder="Votre message (supporte le markdown Discord)..." rows={4} className="font-mono text-sm resize-none" />
               </div>
               <Button onClick={sendMessage} disabled={sendingMsg || !selectedChannelId || !messageContent.trim()} className="gap-2">
-                <Send className="h-4 w-4" />
-                {sendingMsg ? "Envoi..." : "Envoyer"}
+                {sendingMsg ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer</>}
               </Button>
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Channels ──────────────────────────────────────────────────────── */}
         <TabsContent value="channels" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base font-mono uppercase">➕ Créer un Salon</CardTitle>
+              <CardTitle className="text-base font-mono uppercase">➕ Créer un salon</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Nom</label>
-                  <Input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="mon-salon" />
+                  <Input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="nouveau-salon" />
                 </div>
                 <div>
                   <label className="text-sm font-medium mb-1.5 block">Type</label>
                   <Select value={newChannelType} onValueChange={setNewChannelType}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="text">💬 Texte</SelectItem>
-                      <SelectItem value="voice">🔊 Vocal</SelectItem>
-                      <SelectItem value="category">📁 Catégorie</SelectItem>
-                      <SelectItem value="announcement">📢 Annonce</SelectItem>
-                      <SelectItem value="forum">💬 Forum</SelectItem>
+                      <SelectItem value="text">Texte</SelectItem>
+                      <SelectItem value="voice">Vocal</SelectItem>
+                      <SelectItem value="category">Catégorie</SelectItem>
+                      <SelectItem value="announcement">Annonce</SelectItem>
+                      <SelectItem value="forum">Forum</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -457,49 +519,36 @@ export default function OwnerPanel() {
                   </Select>
                 </div>
                 <div>
-                  <label className="text-sm font-medium mb-1.5 block">Topic (optionnel)</label>
-                  <Input value={newChannelTopic} onChange={(e) => setNewChannelTopic(e.target.value)} placeholder="Description..." />
+                  <label className="text-sm font-medium mb-1.5 block">Topic (facultatif)</label>
+                  <Input value={newChannelTopic} onChange={(e) => setNewChannelTopic(e.target.value)} placeholder="Description du salon..." />
                 </div>
               </div>
               <Button onClick={createChannel} disabled={creatingChannel || !newChannelName.trim()} className="gap-2">
-                <Plus className="h-4 w-4" />{creatingChannel ? "Création..." : "Créer"}
+                {creatingChannel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer
               </Button>
             </CardContent>
           </Card>
-
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <div>
-                <CardTitle className="text-base font-mono uppercase">📋 Salons existants</CardTitle>
-                <CardDescription>{channels.length} salons</CardDescription>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Salons existants</CardTitle>
+              <div className="flex justify-end">
+                <Button variant="ghost" size="sm" onClick={fetchChannels} className="gap-1.5 text-xs">
+                  <RefreshCw className="h-3.5 w-3.5" /> Actualiser
+                </Button>
               </div>
-              <Button variant="ghost" size="sm" onClick={fetchChannels} className="gap-1">
-                <RefreshCw className="h-4 w-4" />
-              </Button>
             </CardHeader>
             <CardContent>
               <div className="space-y-1 max-h-96 overflow-y-auto">
                 {channels.map((c) => (
-                  <div key={c.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/40 group">
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="text-muted-foreground">{CHANNEL_TYPE_ICON[c.type]}</span>
-                      <span className={c.type === 4 ? "font-semibold uppercase text-xs text-muted-foreground" : ""}>
-                        {c.type !== 4 ? "#" : ""}{c.name}
-                      </span>
-                      {c.parentId && c.type !== 4 && (
-                        <span className="text-xs text-muted-foreground">— {channelById[c.parentId]?.name ?? "?"}</span>
-                      )}
-                      <Badge variant="secondary" className="text-xs hidden group-hover:inline-flex">
-                        {CHANNEL_TYPE_LABEL[c.type] ?? c.type}
-                      </Badge>
-                    </div>
-                    <Button
-                      variant="ghost" size="sm"
-                      onClick={() => deleteChannel(c.id, c.name)}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 transition-opacity h-7 px-2"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                  <div key={c.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted/50 group">
+                    <span className="text-muted-foreground">{CHANNEL_TYPE_ICON[c.type]}</span>
+                    <span className="flex-1 text-sm font-mono">{c.type === 4 ? c.name.toUpperCase() : `#${c.name}`}</span>
+                    <Badge variant="outline" className="text-xs hidden group-hover:flex">{c.id}</Badge>
+                    {c.type !== 4 && (
+                      <Button variant="ghost" size="sm" onClick={() => deleteChannel(c.id, c.name)} className="h-7 w-7 p-0 text-destructive opacity-0 group-hover:opacity-100 hover:bg-destructive/10">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -507,64 +556,34 @@ export default function OwnerPanel() {
           </Card>
         </TabsContent>
 
+        {/* ── Members ───────────────────────────────────────────────────────── */}
         <TabsContent value="members" className="space-y-4">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between gap-4">
-              <div>
-                <CardTitle className="text-base font-mono uppercase">👥 Membres</CardTitle>
-                <CardDescription>{members.filter((m) => !m.bot).length} membres affichés</CardDescription>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">👥 Membres</CardTitle>
+              <div className="flex gap-2 mt-2">
+                <Input placeholder="Rechercher un membre..." value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") fetchMembers(memberSearch); }} className="max-w-xs" />
+                <Button variant="outline" size="sm" onClick={() => fetchMembers(memberSearch)} className="gap-1.5"><Search className="h-3.5 w-3.5" /></Button>
               </div>
-              <div className="flex items-center gap-2 flex-1 max-w-xs">
-                <Input
-                  value={memberSearch}
-                  onChange={(e) => setMemberSearch(e.target.value)}
-                  placeholder="Rechercher..."
-                  onKeyDown={(e) => { if (e.key === "Enter") fetchMembers(); }}
-                />
-                <Button variant="outline" size="sm" onClick={fetchMembers}><RefreshCw className="h-4 w-4" /></Button>
+              <div className="mt-2">
+                <label className="text-sm font-medium mb-1.5 block">Raison (kick/ban)</label>
+                <Input value={actionReason} onChange={(e) => setActionReason(e.target.value)} placeholder="Raison (facultatif)" className="max-w-xs" />
               </div>
             </CardHeader>
             <CardContent>
-              <div className="mb-3">
-                <Input
-                  value={actionReason}
-                  onChange={(e) => setActionReason(e.target.value)}
-                  placeholder="Raison pour les actions..."
-                  className="max-w-sm"
-                />
-              </div>
               <div className="space-y-2 max-h-[500px] overflow-y-auto">
                 {members.filter((m) => !m.bot).map((m) => (
-                  <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <img src={m.avatarURL} alt={m.tag} className="h-9 w-9 rounded-full border border-border" />
-                      <div>
-                        <div className="font-medium text-sm">{m.displayName}</div>
-                        <div className="text-xs text-muted-foreground font-mono">{m.tag}</div>
-                        {m.roles.length > 0 && (
-                          <div className="flex gap-1 flex-wrap mt-0.5">
-                            {m.roles.slice(0, 3).map((r) => (
-                              <Badge key={r} variant="outline" className="text-xs py-0 px-1 h-4">{r}</Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                  <div key={m.id} className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50">
+                    <img src={m.avatarURL} alt={m.tag} className="h-8 w-8 rounded-full border border-border" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{m.displayName}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">{m.tag}</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline" size="sm"
-                        onClick={() => memberAction("kick", m.id, m.displayName)}
-                        disabled={actionLoading && actionMemberId === m.id}
-                        className="gap-1.5 text-orange-500 border-orange-500/30 hover:bg-orange-500/10"
-                      >
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button variant="outline" size="sm" onClick={() => memberAction("kick", m.id, m.displayName)} disabled={actionLoading && actionMemberId === m.id} className="gap-1.5 text-xs">
                         <UserX className="h-3.5 w-3.5" /> Kick
                       </Button>
-                      <Button
-                        variant="outline" size="sm"
-                        onClick={() => memberAction("ban", m.id, m.displayName)}
-                        disabled={actionLoading && actionMemberId === m.id}
-                        className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
-                      >
+                      <Button variant="outline" size="sm" onClick={() => memberAction("ban", m.id, m.displayName)} disabled={actionLoading && actionMemberId === m.id} className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
                         <Shield className="h-3.5 w-3.5" /> Ban
                       </Button>
                     </div>
@@ -578,11 +597,12 @@ export default function OwnerPanel() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="settings" className="space-y-4">
+        {/* ── Server settings ───────────────────────────────────────────────── */}
+        <TabsContent value="server" className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base font-mono uppercase">⚙️ Paramètres du Serveur</CardTitle>
-              <CardDescription>Modification directe des paramètres Discord. Le bot doit avoir la permission Gérer le serveur.</CardDescription>
+              <CardTitle className="text-base font-mono uppercase">⚙️ Paramètres Discord</CardTitle>
+              <CardDescription>Modification directe des paramètres Discord du serveur.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -595,9 +615,7 @@ export default function OwnerPanel() {
                   <Select value={guildVerifLevel} onValueChange={setGuildVerifLevel}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {VERIFICATION_LABELS.map((label, i) => (
-                        <SelectItem key={i} value={String(i)}>{label}</SelectItem>
-                      ))}
+                      {VERIFICATION_LABELS.map((label, i) => <SelectItem key={i} value={String(i)}>{label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>
@@ -613,11 +631,296 @@ export default function OwnerPanel() {
                 </div>
               </div>
               <Button onClick={saveGuildSettings} disabled={savingSettings} className="gap-2">
-                <Settings className="h-4 w-4" />
-                {savingSettings ? "Sauvegarde..." : "Appliquer"}
+                <Settings className="h-4 w-4" />{savingSettings ? "Sauvegarde..." : "Appliquer"}
               </Button>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Blacklist globale ─────────────────────────────────────────────── */}
+        <TabsContent value="blacklist" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⛔ Ajouter à la Blacklist Globale</CardTitle>
+              <CardDescription>L'utilisateur sera banni de tous les serveurs où le bot est présent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Discord ID</label>
+                  <Input value={newBlUserId} onChange={(e) => setNewBlUserId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Tag / Nom</label>
+                  <Input value={newBlUserTag} onChange={(e) => setNewBlUserTag(e.target.value)} placeholder="user#1234 ou pseudo" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Raison</label>
+                  <Input value={newBlReason} onChange={(e) => setNewBlReason(e.target.value)} placeholder="Raison du ban global..." />
+                </div>
+              </div>
+              <Button onClick={addToBlacklist} disabled={addingBl || !newBlUserId.trim() || !newBlUserTag.trim() || !newBlReason.trim()} variant="destructive" className="gap-2">
+                {addingBl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Blacklister
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">📋 Liste ({blacklist.length})</CardTitle>
+                <Button variant="ghost" size="sm" onClick={fetchBlacklist} disabled={blLoading} className="gap-1.5 text-xs">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blLoading ? "animate-spin" : ""}`} /> Actualiser
+                </Button>
+              </div>
+              <Input placeholder="Rechercher..." value={blSearch} onChange={(e) => setBlSearch(e.target.value)} className="mt-2 max-w-xs" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {filteredBl.length === 0 && <p className="text-center text-muted-foreground py-8 text-sm">Aucune entrée.</p>}
+                {filteredBl.map((e) => (
+                  <div key={e.userId} className="flex items-start gap-3 p-3 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{e.userTag}</span>
+                        <Badge variant="outline" className="font-mono text-xs">{e.userId}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Raison : {e.reason}</p>
+                      <p className="text-xs text-muted-foreground">Par {e.moderatorTag} · {new Date(e.createdAt).toLocaleDateString("fr-FR")}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => removeFromBlacklist(e.userId, e.userTag)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0">
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Commandes désactivées ─────────────────────────────────────────── */}
+        <TabsContent value="disabled" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔇 Désactiver une Commande</CardTitle>
+              <CardDescription>Les commandes désactivées seront ignorées sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-3">
+                <Select value={newCmdName} onValueChange={setNewCmdName}>
+                  <SelectTrigger className="max-w-xs font-mono">
+                    <SelectValue placeholder="Choisir une commande..." />
+                  </SelectTrigger>
+                  <SelectContent className="font-mono">
+                    {availableCmds.map((c) => <SelectItem key={c} value={c}>/{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button onClick={disableCmd} disabled={addingDc || !newCmdName} variant="destructive" className="gap-2">
+                  {addingDc ? <Loader2 className="h-4 w-4 animate-spin" /> : <PowerOff className="h-4 w-4" />} Désactiver
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">⛔ Commandes désactivées ({disabledCmds.length})</CardTitle>
+                {disabledCmds.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={enableAllCmds} className="gap-1.5 text-xs">
+                    <Power className="h-3.5 w-3.5" /> Tout réactiver
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {dcLoading && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+              {!dcLoading && disabledCmds.length === 0 && <p className="text-center text-muted-foreground py-8 text-sm">Aucune commande désactivée.</p>}
+              <div className="space-y-2">
+                {disabledCmds.map((d) => (
+                  <div key={d.id} className="flex items-center gap-3 p-3 rounded-md border border-destructive/30 bg-destructive/5">
+                    <code className="flex-1 text-sm font-mono text-foreground">/{d.commandName}</code>
+                    <span className="text-xs text-muted-foreground hidden md:block">désactivée par {d.disabledBy}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString("fr-FR")}</span>
+                    <Button variant="ghost" size="sm" onClick={() => enableCmd(d.commandName)} className="h-7 gap-1.5 text-xs text-green-500 hover:bg-green-500/10 hover:text-green-500">
+                      <Power className="h-3.5 w-3.5" /> Réactiver
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Transcripts ───────────────────────────────────────────────────── */}
+        <TabsContent value="transcripts" className="space-y-4">
+          {viewTranscript ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base font-mono uppercase">📄 Ticket #{viewTranscript.ticketNumber} — #{viewTranscript.channelName}</CardTitle>
+                    <CardDescription>
+                      Créé par {viewTranscript.userTag} · Fermé par {viewTranscript.closedBy} · {viewTranscript.messageCount} messages
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { const blob = new Blob([viewTranscript.content], { type: "text/plain" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `transcript-${viewTranscript.ticketNumber}.txt`; a.click(); }} className="gap-1.5 text-xs">
+                      ⬇ Télécharger
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setViewTranscript(null)} className="gap-1.5">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-xs font-mono bg-muted rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">{viewTranscript.content}</pre>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-mono uppercase">📄 Transcripts de tickets ({transcripts.length})</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={fetchTranscripts} disabled={trLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${trLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                </div>
+                <Input placeholder="Rechercher par salon, utilisateur, numéro..." value={trSearch} onChange={(e) => setTrSearch(e.target.value)} className="mt-2 max-w-xs" />
+              </CardHeader>
+              <CardContent>
+                {trLoading && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+                {!trLoading && filteredTr.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun transcript. Les transcripts sont générés automatiquement à la fermeture d'un ticket.</p>
+                )}
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                  {filteredTr.map((t) => (
+                    <div key={t.id} className="flex items-center gap-3 p-3 rounded-md border border-border bg-card hover:bg-muted/30 group">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">Ticket #{t.ticketNumber}</span>
+                          <Badge variant="secondary" className="text-xs font-mono">#{t.channelName}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {t.userTag} · Fermé par {t.closedBy} · {t.messageCount} msgs · {new Date(t.closedAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        {t.reason && t.reason !== "Aucune raison" && <p className="text-xs text-muted-foreground italic">Raison : {t.reason}</p>}
+                      </div>
+                      <div className="flex gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="outline" size="sm" onClick={() => openTranscript(t.id)} disabled={viewLoading} className="h-7 gap-1.5 text-xs">
+                          <Eye className="h-3.5 w-3.5" /> Voir
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => deleteTranscriptFn(t.id)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── Réglages Bot ──────────────────────────────────────────────────── */}
+        <TabsContent value="botsettings" className="space-y-4">
+          {bsLoading || !botSettings ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🤖 Configuration Captcha</CardTitle>
+                  <CardDescription>Vérifie les nouveaux membres via un code captcha.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Captcha activé</label>
+                    <Button
+                      size="sm" variant={botSettings.captchaEnabled ? "default" : "outline"}
+                      onClick={() => setBotSettings({ ...botSettings, captchaEnabled: !botSettings.captchaEnabled })}
+                      className="gap-1.5 w-28"
+                    >
+                      {botSettings.captchaEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Salon de vérification</label>
+                      <Select value={botSettings.captchaChannelId ?? ""} onValueChange={(v) => setBotSettings({ ...botSettings, captchaChannelId: v || null })}>
+                        <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Aucun</SelectItem>
+                          {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Rôle vérifié (à attribuer)</label>
+                      <Input value={botSettings.captchaVerifiedRoleId ?? ""} onChange={(e) => setBotSettings({ ...botSettings, captchaVerifiedRoleId: e.target.value || null })} placeholder="ID du rôle" className="font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Mode</label>
+                      <Select value={botSettings.captchaMode} onValueChange={(v) => setBotSettings({ ...botSettings, captchaMode: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="channel">Salon (visible)</SelectItem>
+                          <SelectItem value="dm">DM (privé)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Tentatives max ({botSettings.captchaMaxAttempts})</label>
+                      <Input type="number" min={1} max={10} value={botSettings.captchaMaxAttempts} onChange={(e) => setBotSettings({ ...botSettings, captchaMaxAttempts: Number(e.target.value) })} className="font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Timeout (minutes · {botSettings.captchaTimeoutMins})</label>
+                      <Input type="number" min={1} max={60} value={botSettings.captchaTimeoutMins} onChange={(e) => setBotSettings({ ...botSettings, captchaTimeoutMins: Number(e.target.value) })} className="font-mono" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">👋 Message de Bienvenue</CardTitle>
+                  <CardDescription>Envoie un message quand un nouveau membre rejoint.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Bienvenue activé</label>
+                    <Button size="sm" variant={botSettings.welcomeEnabled ? "default" : "outline"} onClick={() => setBotSettings({ ...botSettings, welcomeEnabled: !botSettings.welcomeEnabled })} className="gap-1.5 w-28">
+                      {botSettings.welcomeEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                      <Select value={botSettings.welcomeChannelId ?? ""} onValueChange={(v) => setBotSettings({ ...botSettings, welcomeChannelId: v || null })}>
+                        <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Aucun</SelectItem>
+                          {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-sm font-medium mb-1.5 block">Message <span className="text-muted-foreground text-xs">(variables : {"{user}"}, {"{server}"}, {"{memberCount}"})</span></label>
+                      <Textarea value={botSettings.welcomeMessage ?? ""} onChange={(e) => setBotSettings({ ...botSettings, welcomeMessage: e.target.value || null })} placeholder="Bienvenue {user} sur {server} ! Tu es le {memberCount}ème membre." rows={3} className="font-mono text-sm resize-none" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={saveBotSettings} disabled={bsSaving} className="gap-2 font-mono uppercase tracking-widest">
+                  {bsSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <><Sliders className="h-4 w-4" />Sauvegarder les réglages</>}
+                </Button>
+              </div>
+            </>
+          )}
         </TabsContent>
       </Tabs>
     </div>
