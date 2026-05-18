@@ -84,23 +84,26 @@ async function applySlowmode(channel: TextChannel, seconds: number): Promise<voi
 }
 
 async function applyTimeout(member: GuildMember, reason: string, message: Message, durationMs = TIMEOUT_24H_MS): Promise<void> {
-  if (!member.moderatable) return;
   const label = durationMs >= TIMEOUT_24H_MS ? "24h" : "1h";
   try {
     await message.delete().catch(() => null);
-    await member.timeout(durationMs, reason);
-    await sendChannelAlert(message, `⏱️ <@${member.id}> a reçu un **timeout ${label}** — ${reason}`, 0xa855f7);
-    await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, `Durée : ${label}`);
-    await sendLog(message.client, logEmbed(
-      0xa855f7, "🤖 Auto-mod — Timeout",
-      [
-        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Durée", value: label, inline: true },
-        { name: "Raison", value: reason },
-        { name: "Salon", value: `<#${message.channelId}>`, inline: true },
-      ],
-      { tag: "Auto-Mod", id: message.client.user!.id }
-    ), { guildId: message.guildId ?? undefined });
+    if (member.moderatable) {
+      await member.timeout(durationMs, reason);
+      await sendChannelAlert(message, `⏱️ <@${member.id}> a reçu un **timeout ${label}** — ${reason}`, 0xa855f7);
+      await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, `Durée : ${label}`);
+      await sendLog(message.client, logEmbed(
+        0xa855f7, "🤖 Auto-mod — Timeout",
+        [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Durée", value: label, inline: true },
+          { name: "Raison", value: reason },
+          { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+        ],
+        { tag: "Auto-Mod", id: message.client.user!.id }
+      ), { guildId: message.guildId ?? undefined });
+    } else {
+      await sendChannelAlert(message, `⚠️ <@${member.id}> — ${reason} *(message supprimé — rôle trop élevé pour timeout)*`, 0xf59e0b);
+    }
   } catch (err) {
     logger.error({ err }, "Erreur auto-mod timeout");
   }
@@ -134,10 +137,8 @@ async function applyWarn(member: GuildMember, reason: string, message: Message):
 }
 
 async function applyKick(member: GuildMember, reason: string, message: Message): Promise<void> {
-  if (!member.kickable) return;
   try {
     await message.delete().catch(() => null);
-    await sendChannelAlert(message, `🚫 <@${member.id}> a été **expulsé** — ${reason}`, 0xef4444);
     if (message.guildId) {
       addWarning(message.guildId, member.id, {
         reason,
@@ -146,20 +147,35 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
         timestamp: new Date(),
       });
     }
-    await sendSanctionDM(member.user, "automod-kick", reason, message.guild!);
-    await member.kick(reason);
-    const channel = message.channel as TextChannel;
-    await applySlowmode(channel, AUTOMOD_SLOWMODE_SECONDS);
-    await sendLog(message.client, logEmbed(
-      0xf59e0b, "🤖 Auto-mod — Expulsion (spam)",
-      [
-        { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
-        { name: "Raison", value: reason },
-        { name: "Salon", value: `<#${message.channelId}>`, inline: true },
-        { name: "Slowmode", value: `${AUTOMOD_SLOWMODE_SECONDS}s activé (1 heure)`, inline: true },
-      ],
-      { tag: "Auto-Mod", id: message.client.user!.id }
-    ), { guildId: message.guildId ?? undefined });
+    if (member.kickable) {
+      await sendSanctionDM(member.user, "automod-kick", reason, message.guild!);
+      await member.kick(reason);
+      await sendChannelAlert(message, `🚫 <@${member.id}> a été **expulsé** — ${reason}`, 0xef4444);
+      const channel = message.channel as TextChannel;
+      await applySlowmode(channel, AUTOMOD_SLOWMODE_SECONDS);
+      await sendLog(message.client, logEmbed(
+        0xf59e0b, "🤖 Auto-mod — Expulsion (spam)",
+        [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Raison", value: reason },
+          { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+          { name: "Slowmode", value: `${AUTOMOD_SLOWMODE_SECONDS}s activé (1 heure)`, inline: true },
+        ],
+        { tag: "Auto-Mod", id: message.client.user!.id }
+      ), { guildId: message.guildId ?? undefined });
+    } else {
+      await sendChannelAlert(message, `⚠️ <@${member.id}> — ${reason} *(message supprimé — rôle trop élevé pour expulsion)*`, 0xf59e0b);
+      await sendLog(message.client, logEmbed(
+        0xf59e0b, "🤖 Auto-mod — Spam détecté (expulsion impossible)",
+        [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Raison", value: reason },
+          { name: "Salon", value: `<#${message.channelId}>`, inline: true },
+          { name: "Note", value: "Rôle trop élevé pour être expulsé par le bot", inline: true },
+        ],
+        { tag: "Auto-Mod", id: message.client.user!.id }
+      ), { guildId: message.guildId ?? undefined });
+    }
   } catch (err) {
     logger.error({ err }, "Erreur auto-mod kick");
   }

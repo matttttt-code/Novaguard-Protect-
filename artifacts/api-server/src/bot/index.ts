@@ -105,7 +105,6 @@ export function startBot(): void {
     return;
   }
 
-  const hasMessageContent = process.env["DISCORD_MESSAGE_CONTENT_INTENT"] === "true";
   const hasPresenceIntent = process.env["DISCORD_PRESENCE_INTENT"] === "true";
 
   const client = new Client({
@@ -117,7 +116,7 @@ export function startBot(): void {
       GatewayIntentBits.GuildVoiceStates,
       GatewayIntentBits.GuildInvites,
       GatewayIntentBits.GuildModeration,
-      ...(hasMessageContent ? [GatewayIntentBits.MessageContent] : []),
+      GatewayIntentBits.MessageContent,
       ...(hasPresenceIntent ? [GatewayIntentBits.GuildPresences] : []),
     ],
   });
@@ -346,7 +345,7 @@ export function startBot(): void {
     }
   });
 
-  registerAutoMod(client, hasMessageContent);
+  registerAutoMod(client, true);
   registerPrefixHandler(client, prefixCommands);
   registerVoiceMonitor(client);
   registerGeneralLog(client);
