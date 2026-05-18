@@ -57,6 +57,21 @@ function detectInsult(text: string, words: string[]): string | null {
   return null;
 }
 
+async function sendChannelAlert(message: Message, text: string, color = 0xef4444): Promise<void> {
+  try {
+    const channel = message.channel as TextChannel;
+    const alert = await channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor(color)
+          .setDescription(text)
+          .setFooter({ text: "Auto-Mod · Supprimé dans 8 secondes" }),
+      ],
+    }).catch(() => null);
+    if (alert) setTimeout(() => alert.delete().catch(() => null), 8_000);
+  } catch { /* ignore */ }
+}
+
 async function applySlowmode(channel: TextChannel, seconds: number): Promise<void> {
   try {
     if ("rateLimitPerUser" in channel) {
@@ -70,10 +85,11 @@ async function applySlowmode(channel: TextChannel, seconds: number): Promise<voi
 
 async function applyTimeout(member: GuildMember, reason: string, message: Message, durationMs = TIMEOUT_24H_MS): Promise<void> {
   if (!member.moderatable) return;
-  const label = durationMs >= TIMEOUT_24H_MS ? "24 heures" : "1 heure";
+  const label = durationMs >= TIMEOUT_24H_MS ? "24h" : "1h";
   try {
     await message.delete().catch(() => null);
     await member.timeout(durationMs, reason);
+    await sendChannelAlert(message, `⏱️ <@${member.id}> a reçu un **timeout ${label}** — ${reason}`, 0xa855f7);
     await sendSanctionDM(member.user, "automod-timeout", reason, message.guild!, `Durée : ${label}`);
     await sendLog(message.client, logEmbed(
       0xa855f7, "🤖 Auto-mod — Timeout",
@@ -93,6 +109,7 @@ async function applyTimeout(member: GuildMember, reason: string, message: Messag
 async function applyWarn(member: GuildMember, reason: string, message: Message): Promise<void> {
   try {
     await message.delete().catch(() => null);
+    await sendChannelAlert(message, `⚠️ <@${member.id}> a reçu un **avertissement** — ${reason}`, 0xf59e0b);
     if (message.guildId) {
       addWarning(message.guildId, member.id, {
         reason,
@@ -120,6 +137,7 @@ async function applyKick(member: GuildMember, reason: string, message: Message):
   if (!member.kickable) return;
   try {
     await message.delete().catch(() => null);
+    await sendChannelAlert(message, `🚫 <@${member.id}> a été **expulsé** — ${reason}`, 0xef4444);
     if (message.guildId) {
       addWarning(message.guildId, member.id, {
         reason,
@@ -246,6 +264,7 @@ export function registerAutoMod(client: Client, contentIntentEnabled: boolean): 
             await applyWarn(member, "Lien non autorisé détecté (anti-lien)", message);
           } else {
             await message.delete().catch(() => null);
+            await sendChannelAlert(message, `🗑️ Message de <@${member.id}> supprimé — lien non autorisé.`, 0x6b7280);
           }
           return;
         }

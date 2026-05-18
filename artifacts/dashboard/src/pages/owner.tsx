@@ -1215,6 +1215,45 @@ export default function OwnerPanel() {
             </CardContent>
           </Card>
 
+          {/* Idées de commandes */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">💡 Idées de commandes à ajouter</CardTitle>
+              <CardDescription>Suggestions de nouvelles commandes pour enrichir le bot.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {([
+                  { icon: "🧹", cmd: "/purge", desc: "Supprimer X messages d'un salon ou d'un utilisateur en masse", tag: "Modération" },
+                  { icon: "🔒", cmd: "/lock / /unlock", desc: "Verrouiller ou déverrouiller un salon en urgence (lecture seule)", tag: "Modération" },
+                  { icon: "📢", cmd: "/announce", desc: "Envoyer une annonce embed formatée dans un salon cible", tag: "Utilitaire" },
+                  { icon: "📊", cmd: "/poll", desc: "Créer un sondage avec plusieurs choix et réactions", tag: "Utilitaire" },
+                  { icon: "⏰", cmd: "/rappel", desc: "Planifier un rappel dans un salon ou en DM après X minutes/heures", tag: "Utilitaire" },
+                  { icon: "🏷️", cmd: "/role", desc: "Ajouter ou retirer un rôle à un membre directement", tag: "Modération" },
+                  { icon: "✏️", cmd: "/nickname", desc: "Changer le pseudo d'un membre sur le serveur", tag: "Modération" },
+                  { icon: "🔤", cmd: "/antinick", desc: "Détecter et réinitialiser les pseudos contenant des mots interdits", tag: "Auto-mod" },
+                  { icon: "🌐", cmd: "/translate", desc: "Traduire un message dans la langue cible via API", tag: "Utilitaire" },
+                  { icon: "📁", cmd: "/archive", desc: "Passer un salon en lecture seule (archivage)", tag: "Modération" },
+                  { icon: "📈", cmd: "/stats-serveur", desc: "Afficher les statistiques du serveur (messages, membres actifs, nouveaux)", tag: "Info" },
+                  { icon: "🔍", cmd: "/userinfo++", desc: "Infos étendues sur un membre : avertissements, temps passé, rôles", tag: "Info" },
+                  { icon: "🤖", cmd: "/automod-log", desc: "Voir un résumé des 20 dernières actions de l'automod sur le serveur", tag: "Auto-mod" },
+                  { icon: "🎭", cmd: "/roleplay", desc: "Envoyer un message en tant qu'un rôle/personnage (webhook déguisé)", tag: "Fun" },
+                ] as const).map((item) => (
+                  <div key={item.cmd} className="flex gap-3 p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-colors">
+                    <span className="text-xl shrink-0">{item.icon}</span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <code className="text-xs font-mono font-bold text-primary">{item.cmd}</code>
+                        <Badge variant="outline" className="text-xs px-1.5 py-0">{item.tag}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{item.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
           {/* Test alertes DM */}
           <Card>
             <CardHeader>
