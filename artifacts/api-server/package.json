@@ -8,7 +8,8 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "recover-blacklist": "tsx src/scripts/recover-blacklist.ts"
+    "recover-blacklist": "tsx src/scripts/recover-blacklist.ts",
+    "ban-blacklisted": "tsx src/scripts/ban-blacklisted.ts"
   },
   "dependencies": {
     "@workspace/api-zod": "workspace:*",

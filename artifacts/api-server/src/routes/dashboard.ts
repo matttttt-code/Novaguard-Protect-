@@ -4,8 +4,20 @@ import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { UpdateGuildConfigBody } from "@workspace/api-zod";
 import { getGuildLogs, getAllBotErrors, logConfigChange } from "../bot/event-log-store.js";
 import { authMiddleware, type JwtPayload } from "../lib/jwt-auth.js";
+import { notifyActionDM } from "../bot/dm-notify.js";
 
 const router = Router();
+
+// ── DM notification pour toutes les actions mutantes du dashboard ─────────────
+router.use((req, _res, next) => {
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const client = getClient();
+    if (client?.isReady()) {
+      notifyActionDM(client, req.method, req.path, req.body).catch(() => null);
+    }
+  }
+  next();
+});
 
 // ── GET /api/dashboard/stats ─────────────────────────────────────────────────
 router.get("/dashboard/stats", authMiddleware, (req, res) => {

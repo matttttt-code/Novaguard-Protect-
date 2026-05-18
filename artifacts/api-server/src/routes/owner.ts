@@ -16,11 +16,23 @@ import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { addToGlobalBlacklist, removeFromGlobalBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
+import { notifyActionDM } from "../bot/dm-notify.js";
 
 const router = Router();
 
 router.use(authMiddleware);
 router.use(ownerMiddleware);
+
+// ── DM notification pour toutes les actions mutantes du panneau owner ─────────
+router.use((req, _res, next) => {
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    const client = getClient();
+    if (client?.isReady()) {
+      notifyActionDM(client, req.method, req.path, req.body).catch(() => null);
+    }
+  }
+  next();
+});
 
 // ── POST /api/owner/unlock ────────────────────────────────────────────────────
 router.post("/owner/unlock", (req, res) => {

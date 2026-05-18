@@ -29,6 +29,7 @@ import { logger } from "../lib/logger.js";
 import {
   isBlacklisted,
   isGloballyBlacklisted,
+  addToBlacklist,
   addToGlobalBlacklist,
   getPendingUnban,
   removePendingUnban,
@@ -161,14 +162,19 @@ export function startBot(): void {
     try {
       const dbBlacklist = await getAllGlobalBlacklistedDB();
       for (const row of dbBlacklist) {
-        addToGlobalBlacklist({
+        const entry = {
           userId: row.userId,
           userTag: row.userTag,
           reason: row.reason,
           moderatorTag: row.moderatorTag,
           moderatorId: row.moderatorId,
           timestamp: row.createdAt,
-        });
+        };
+        addToGlobalBlacklist(entry);
+        // Alimente aussi le store guild-level pour que blacklistinfo les affiche
+        for (const [guildId] of readyClient.guilds.cache) {
+          addToBlacklist(guildId, entry);
+        }
       }
       logger.info({ count: dbBlacklist.length }, "Blacklist globale chargée depuis la DB");
     } catch (err) {

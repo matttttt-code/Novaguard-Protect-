@@ -165,3 +165,39 @@ export async function requestAdminDMApproval(
     // DMs owner fermés — ignoré
   }
 }
+
+// ── Notification DM pour les actions Owner Panel / Dashboard ─────────────────
+
+const SENSITIVE_KEYS = new Set(["password", "token", "secret", "key"]);
+
+function sanitizeBody(body: unknown): string {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return "—";
+  const filtered = Object.fromEntries(
+    Object.entries(body as Record<string, unknown>)
+      .filter(([k]) => !SENSITIVE_KEYS.has(k.toLowerCase()))
+      .map(([k, v]) => {
+        const str = typeof v === "string" ? v : JSON.stringify(v);
+        return [k, str.length > 80 ? str.slice(0, 77) + "…" : str];
+      })
+  );
+  const out = JSON.stringify(filtered);
+  return out.length > 500 ? out.slice(0, 497) + "…" : out;
+}
+
+export async function notifyActionDM(
+  client: Client,
+  method: string,
+  path: string,
+  body: unknown,
+): Promise<void> {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("🔧 Action Panneau Owner / Dashboard")
+    .addFields(
+      { name: "Méthode", value: method, inline: true },
+      { name: "Route", value: path.length > 100 ? path.slice(0, 97) + "…" : path, inline: true },
+      { name: "Données", value: sanitizeBody(body) },
+    )
+    .setTimestamp();
+  await sendLogDM(client, embed);
+}
