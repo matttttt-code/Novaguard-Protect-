@@ -123,7 +123,7 @@ const ALL_COMMANDS = [
 // ── Catégories de navigation ──────────────────────────────────────────────────
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
   general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence"] },
-  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
   moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
   config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl"] },
@@ -312,6 +312,16 @@ export default function OwnerPanel() {
   const [broadcastMsg, setBroadcastMsg] = useState("");
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
+
+  // ── Spy Members state ──────────────────────────────────────────────────────
+  interface SpyMember { id: string; tag: string; username: string; joinedAt: string | null; }
+  const [spyGuildId, setSpyGuildId] = useState("");
+  const [spyResult, setSpyResult] = useState<{ guildName: string; memberCount: number; members: SpyMember[] } | null>(null);
+  const [spyLoading, setSpyLoading] = useState(false);
+  const [spyBanGuildId, setSpyBanGuildId] = useState("");
+  const [spyBanReason, setSpyBanReason] = useState("");
+  const [spyBanning, setSpyBanning] = useState(false);
+  const [spyFilter, setSpyFilter] = useState("");
 
   // ── Server Blacklist state ─────────────────────────────────────────────────
   interface ServerBlEntry { guildId: string; label: string; addedAt: string; }
@@ -1545,6 +1555,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
             <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
             <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
+            <TabsTrigger value="spy-members" className="gap-1.5 text-xs" onClick={() => { if (!spyBanGuildId) setSpyBanGuildId(guildId ?? ""); fetchAllGuilds(); }}><Users className="h-3.5 w-3.5" />Membres Serveur</TabsTrigger>
             <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
             <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
             <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
@@ -3977,6 +3988,155 @@ export default function OwnerPanel() {
               }}>
                 {massLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />} Exécuter la masse-action
               </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Membres Serveur (Spy) ─────────────────────────────────────────── */}
+        <TabsContent value="spy-members" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Users className="h-4 w-4 text-orange-400" /> Membres d'un Serveur
+              </CardTitle>
+              <CardDescription>
+                Récupère tous les IDs des membres d'un serveur où le bot est présent, puis bannit la liste entière d'un de vos serveurs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Récupérer */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Récupérer les membres</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={spyGuildId}
+                    onChange={(e) => setSpyGuildId(e.target.value.trim())}
+                    placeholder="ID du serveur cible…"
+                    className="font-mono text-sm flex-1"
+                  />
+                  <Button
+                    disabled={spyLoading || !spyGuildId.trim()}
+                    className="gap-2 shrink-0"
+                    onClick={async () => {
+                      setSpyLoading(true);
+                      setSpyResult(null);
+                      try {
+                        const r = await apiFetch(`/api/owner/server-members?guildId=${encodeURIComponent(spyGuildId)}`);
+                        if (r.ok) { setSpyResult(await r.json()); setSpyFilter(""); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setSpyLoading(false); }
+                    }}
+                  >
+                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Récupérer
+                  </Button>
+                </div>
+              </div>
+
+              {/* Résultats */}
+              {spyResult && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">
+                      <span className="text-orange-400 font-mono">{spyResult.guildName}</span> — {spyResult.memberCount} membre(s) humain(s)
+                    </p>
+                    <Button
+                      size="sm" variant="outline"
+                      className="gap-1.5 text-xs"
+                      onClick={() => {
+                        const txt = spyResult.members.map((m) => m.id).join("\n");
+                        navigator.clipboard.writeText(txt).then(() => toast({ title: "IDs copiés ✓" })).catch(() => {
+                          const a = document.createElement("a");
+                          a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
+                          a.download = `membres-${spyGuildId}.txt`; a.click();
+                        });
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" /> Copier les IDs
+                    </Button>
+                  </div>
+
+                  {/* Filtre */}
+                  <Input
+                    value={spyFilter}
+                    onChange={(e) => setSpyFilter(e.target.value)}
+                    placeholder="Filtrer par pseudo ou ID…"
+                    className="text-sm"
+                  />
+
+                  {/* Liste scrollable */}
+                  <div className="rounded-lg border border-border bg-muted/10 max-h-64 overflow-y-auto divide-y divide-border/50">
+                    {spyResult.members
+                      .filter((m) => !spyFilter || m.id.includes(spyFilter) || m.username.toLowerCase().includes(spyFilter.toLowerCase()) || m.tag.toLowerCase().includes(spyFilter.toLowerCase()))
+                      .slice(0, 200)
+                      .map((m) => (
+                        <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                          <span className="font-mono text-muted-foreground w-32 shrink-0">{m.id}</span>
+                          <span className="flex-1 truncate">{m.tag}</span>
+                          {m.joinedAt && <span className="text-muted-foreground shrink-0">{new Date(m.joinedAt).toLocaleDateString("fr-FR")}</span>}
+                        </div>
+                      ))}
+                    {spyResult.members.filter((m) => !spyFilter || m.id.includes(spyFilter) || m.username.toLowerCase().includes(spyFilter.toLowerCase()) || m.tag.toLowerCase().includes(spyFilter.toLowerCase())).length > 200 && (
+                      <div className="px-3 py-2 text-xs text-muted-foreground text-center">… et plus. Utilisez le filtre pour affiner.</div>
+                    )}
+                  </div>
+
+                  {/* Ban la liste */}
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-red-400 flex items-center gap-2">
+                      <Gavel className="h-4 w-4" /> Bannir toute la liste
+                    </p>
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Serveur où appliquer les bans</label>
+                        <Select value={spyBanGuildId} onValueChange={setSpyBanGuildId}>
+                          <SelectTrigger className="text-sm font-mono">
+                            <SelectValue placeholder="Choisir un serveur…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allGuilds.map((g) => (
+                              <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Raison du ban (optionnel)</label>
+                        <Input
+                          value={spyBanReason}
+                          onChange={(e) => setSpyBanReason(e.target.value)}
+                          placeholder="Raison…"
+                          className="text-sm"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      variant="destructive"
+                      className="gap-2 w-full"
+                      disabled={spyBanning || !spyBanGuildId || spyResult.memberCount === 0}
+                      onClick={async () => {
+                        if (!confirm(`Bannir ${spyResult.memberCount} membre(s) du serveur "${spyResult.guildName}" depuis "${allGuilds.find(g => g.id === spyBanGuildId)?.name ?? spyBanGuildId}" ?`)) return;
+                        setSpyBanning(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${spyBanGuildId}/ban-list`, {
+                            method: "POST",
+                            body: JSON.stringify({
+                              userIds: spyResult.members.map((m) => m.id),
+                              reason: spyBanReason || `Banni via Dashboard Owner — Membre de ${spyResult.guildName} (${spyGuildId})`,
+                            }),
+                          });
+                          const d = await r.json() as { banned?: number; skipped?: number; error?: string };
+                          if (r.ok) toast({ title: `✓ ${d.banned} banni(s), ${d.skipped} ignoré(s)` });
+                          else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                        } finally { setSpyBanning(false); }
+                      }}
+                    >
+                      {spyBanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />}
+                      Bannir {spyResult.memberCount} membre(s)
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

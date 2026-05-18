@@ -1698,6 +1698,52 @@ router.post("/owner/guilds/:guildId/members/:memberId/timeout", async (req, res)
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Server Members (spy) ──────────────────────────────────────────────────────
+router.get("/owner/server-members", async (req, res) => {
+  const { guildId: targetGuildId } = req.query as { guildId?: string };
+  if (!targetGuildId?.trim()) { res.status(400).json({ error: "guildId requis" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  try {
+    const guild = client.guilds.cache.get(targetGuildId) ?? await client.guilds.fetch(targetGuildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable (le bot n'y est peut-être pas présent)." }); return; }
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) { res.status(403).json({ error: "Permissions insuffisantes pour lire les membres." }); return; }
+    const ids = members.filter((m) => !m.user.bot).map((m) => ({
+      id: m.user.id,
+      tag: m.user.tag,
+      username: m.user.username,
+      joinedAt: m.joinedAt?.toISOString() ?? null,
+    }));
+    res.json({ guildName: guild.name, memberCount: ids.length, members: ids });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/ban-list", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { userIds, reason } = (req.body ?? {}) as { userIds?: string[]; reason?: string };
+  if (!Array.isArray(userIds) || userIds.length === 0) { res.status(400).json({ error: "userIds requis (tableau non vide)" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId) ?? await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  const banReason = reason?.trim() || "Banni via Dashboard Owner — liste de membres";
+  let banned = 0; let skipped = 0;
+  for (const uid of userIds) {
+    try {
+      await guild.bans.create(uid, { reason: banReason });
+      banned++;
+    } catch { skipped++; }
+  }
+  const payload = (req as any).jwtPayload as { userTag?: string; userId?: string } | undefined;
+  await sendLog(client, logEmbed(0xef4444, "🔨 Ban en masse (liste)", [
+    { name: "Bannis", value: String(banned), inline: true },
+    { name: "Ignorés", value: String(skipped), inline: true },
+    { name: "Raison", value: banReason, inline: false },
+  ], { tag: payload?.userTag ?? "Owner Dashboard", id: payload?.userId ?? "0" }), { guildId });
+  res.json({ ok: true, banned, skipped });
+});
+
 // ── Server Blacklist ──────────────────────────────────────────────────────────
 import { addBlacklistedServer, removeBlacklistedServer, getBlacklistedServers } from "../bot/server-blacklist-store.js";
 

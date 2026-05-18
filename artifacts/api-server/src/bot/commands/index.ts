@@ -70,7 +70,6 @@ import * as badname from "./badname.js";
 import * as antialt from "./antialt.js";
 import * as verifyDashboard from "./verify-dashboard.js";
 import * as verif from "./verif.js";
-import * as membres from "./membres.js";
 import type { ChatInputCommandInteraction, Message } from "discord.js";
 import type { PrefixCommand } from "../prefix-handler.js";
 
@@ -97,7 +96,7 @@ export const commands: Command[] = [
   creetestbot, notify,
   tempban, massban, note, purge, antilink, antighostping,
   autokick, scamlink, badname, antialt,
-  verifyDashboard, verif, membres,
+  verifyDashboard, verif,
 ];
 
 type PrefixModule = {
@@ -124,7 +123,7 @@ const prefixModules: PrefixModule[] = [
   creetestbot, notify,
   tempban, massban, note, purge, antilink, antighostping,
   autokick, scamlink, badname, antialt,
-  verifyDashboard, verif, membres,
+  verifyDashboard, verif,
 ];
 
 export const prefixCommands: PrefixCommand[] = prefixModules.map((mod) => ({
