@@ -1,7 +1,9 @@
 /**
- * Stocke les événements de statut du bot en mémoire (ring buffer).
+ * Stocke les événements de statut du bot — mémoire (ring buffer) + persistance DB.
  * Événements : démarrage, ping élevé, reconnexion, déconnexion, DM échoué, erreur client, etc.
  */
+
+import { insertBotStatusEventDB, getBotStatusEventsDB } from "./bot-status-db.js";
 
 export type BotStatusEventType =
   | "ready"
@@ -45,8 +47,13 @@ export function logBotStatusEvent(
   };
   events.unshift(entry);
   if (events.length > MAX_EVENTS) events.splice(MAX_EVENTS);
+  void insertBotStatusEventDB(entry);
 }
 
-export function getBotStatusEvents(limit = 200): BotStatusEvent[] {
-  return events.slice(0, Math.min(limit, MAX_EVENTS));
+export async function getBotStatusEvents(limit = 200): Promise<BotStatusEvent[]> {
+  try {
+    return await getBotStatusEventsDB(Math.min(limit, MAX_EVENTS));
+  } catch {
+    return events.slice(0, Math.min(limit, MAX_EVENTS));
+  }
 }

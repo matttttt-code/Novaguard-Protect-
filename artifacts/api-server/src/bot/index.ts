@@ -469,6 +469,16 @@ export function startBot(): void {
 
     const cfg = getConfig(guildId);
 
+    // ── Détection de localisation (script du pseudo) ─────────────────────
+    let userLocale: string | null = null;
+    if (/[\u0400-\u04FF]/.test(member.user.username)) userLocale = "Cyrillique (RU/UA)";
+    else if (/[\u4E00-\u9FFF\u3400-\u4DBF]/.test(member.user.username)) userLocale = "Chinois";
+    else if (/[\u3040-\u309F\u30A0-\u30FF]/.test(member.user.username)) userLocale = "Japonais";
+    else if (/[\u0600-\u06FF]/.test(member.user.username)) userLocale = "Arabe";
+    else if (/[\uAC00-\uD7AF]/.test(member.user.username)) userLocale = "Coréen";
+
+    let vpnSuspicion = false;
+
     // ── Détection VPN/Proxy heuristique ────────────────────────────────────
     // Signaux : compte trop récent + (optionnel) pas d'avatar → potentiel
     // contournement de ban via VPN + compte jetable.
@@ -485,6 +495,7 @@ export function startBot(): void {
           { name: "Raison", value: `Compte < ${cfg.vpnCheckMinAgeDays}j${cfg.vpnCheckRequireNoAvatar ? " + pas d'avatar" : ""} — suspect VPN/proxy` },
         ] as const;
 
+        vpnSuspicion = true;
         if (cfg.vpnCheckAction === "ban") {
           await member.ban({ reason: "[VPN CHECK] Compte suspect — contournement possible via VPN" }).catch(() => null);
           await sendLog(client, logEmbed(0xdc2626, "🌐 VPN Check — Ban automatique", [...suspectFields], { tag: client.user!.tag, id: client.user!.id }), { guildId, logType: "ban" });
@@ -651,6 +662,8 @@ export function startBot(): void {
         reasons: suspectReasons,
         actionTaken: "flagged",
         securityLevel: secLvl,
+        vpnSuspicion,
+        userLocale,
       }).catch(() => null);
     }
   });

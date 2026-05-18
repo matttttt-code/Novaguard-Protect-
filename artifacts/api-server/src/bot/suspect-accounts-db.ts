@@ -11,6 +11,8 @@ export interface SaveSuspectAccountOpts {
   reasons: string[];
   actionTaken: "flagged" | "timeout" | "kicked" | "banned";
   securityLevel: number;
+  vpnSuspicion?: boolean;
+  userLocale?: string | null;
 }
 
 export async function saveSuspectAccount(opts: SaveSuspectAccountOpts): Promise<void> {
@@ -24,6 +26,9 @@ export async function saveSuspectAccount(opts: SaveSuspectAccountOpts): Promise<
     reasons: opts.reasons.join("|"),
     actionTaken: opts.actionTaken,
     securityLevel: opts.securityLevel,
+    vpnSuspicion: opts.vpnSuspicion ?? false,
+    userLocale: opts.userLocale ?? null,
+    verified: false,
   });
 }
 
@@ -43,4 +48,12 @@ export async function getSuspectAccounts(opts: {
     .limit(limit);
 
   return rows.map((r) => ({ ...r, reasons: r.reasons.split("|").filter(Boolean) }));
+}
+
+export async function deleteSuspectAccount(id: number): Promise<void> {
+  await db.delete(suspectAccountsTable).where(eq(suspectAccountsTable.id, id));
+}
+
+export async function markSuspectVerified(id: number, verified: boolean): Promise<void> {
+  await db.update(suspectAccountsTable).set({ verified }).where(eq(suspectAccountsTable.id, id));
 }

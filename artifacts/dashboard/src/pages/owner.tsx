@@ -92,7 +92,7 @@ type GlobalMemberResult = { guildId: string; guildName: string; userTag: string;
 type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
 type BotStatusEvent = { id: string; type: string; timestamp: number; detail: string; ping?: number; errCode?: string };
 type UserCmd = { id: number; type: string; guildId: string | null; guildName: string | null; userId: string; userTag: string; data: Record<string, unknown>; createdAt: string };
-type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string };
+type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string; vpnSuspicion: boolean; userLocale: string | null; verified: boolean };
 type MemberProfile = {
   userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
   joinedAt: string | null; roles: { id: string; name: string; color: string }[];
@@ -362,6 +362,12 @@ export default function OwnerPanel() {
   const [suspectAccounts, setSuspectAccounts] = useState<SuspectAcc[]>([]);
   const [saLoading, setSaLoading] = useState(false);
   const [saActionLoading, setSaActionLoading] = useState<number | null>(null);
+  const [saFilterGuild, setSaFilterGuild] = useState<string>("all");
+  const [saFilterAction, setSaFilterAction] = useState<string>("all");
+  const [saFilterVpn, setSaFilterVpn] = useState<boolean>(false);
+  const [saFilterVerified, setSaFilterVerified] = useState<"all" | "verified" | "unverified">("all");
+  const [saTimeoutDuration, setSaTimeoutDuration] = useState<number>(86_400_000);
+  const [saBulkLoading, setSaBulkLoading] = useState(false);
 
   // ── Masse-action ──────────────────────────────────────────────────────────
   const [massRoleId, setMassRoleId] = useState("");
@@ -1116,19 +1122,19 @@ export default function OwnerPanel() {
   const fetchSuspectAccounts = useCallback(async () => {
     setSaLoading(true);
     try {
-      const r = await apiFetch(`/api/owner/suspect-accounts?limit=200`);
+      const r = await apiFetch(`/api/owner/suspect-accounts?limit=500`);
       if (r.ok) setSuspectAccounts(await r.json() as SuspectAcc[]);
     } finally { setSaLoading(false); }
   }, []);
 
-  async function doSuspectAction(sa: SuspectAcc, action: "timeout" | "kick" | "ban") {
+  async function doSuspectAction(sa: SuspectAcc, action: "timeout" | "kick" | "ban", durationMs?: number) {
     setSaActionLoading(sa.id);
     try {
       let r: Response;
       const reasonBase = `[Dashboard Owner] Compte suspect (${sa.reasons.join(", ")})`;
       if (action === "timeout") {
         r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/timeout`, {
-          method: "POST", body: JSON.stringify({ durationMs: 24 * 3_600_000, reason: reasonBase }),
+          method: "POST", body: JSON.stringify({ durationMs: durationMs ?? saTimeoutDuration, reason: reasonBase }),
         });
       } else if (action === "kick") {
         r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/kick`, {
@@ -1143,6 +1149,56 @@ export default function OwnerPanel() {
       if (r.ok) toast({ title: `Action appliquée ✓ (${action})` });
       else toast({ title: "Erreur", description: (d as { error?: string }).error, variant: "destructive" });
     } finally { setSaActionLoading(null); }
+  }
+
+  async function deleteSuspect(sa: SuspectAcc) {
+    setSaActionLoading(sa.id);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}`, { method: "DELETE" });
+      if (r.ok) { setSuspectAccounts(prev => prev.filter(x => x.id !== sa.id)); toast({ title: "Entrée supprimée ✓" }); }
+      else toast({ title: "Erreur suppression", variant: "destructive" });
+    } finally { setSaActionLoading(null); }
+  }
+
+  async function toggleSuspectVerified(sa: SuspectAcc) {
+    setSaActionLoading(sa.id);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}/verify`, {
+        method: "PATCH", body: JSON.stringify({ verified: !sa.verified }),
+      });
+      if (r.ok) {
+        setSuspectAccounts(prev => prev.map(x => x.id === sa.id ? { ...x, verified: !sa.verified } : x));
+        toast({ title: sa.verified ? "Marqué comme suspect ✓" : "Marqué comme vérifié ✓" });
+      }
+    } finally { setSaActionLoading(null); }
+  }
+
+  async function doBulkSuspectAction(guildId: string, userIds: string[], action: "timeout" | "kick" | "ban") {
+    if (userIds.length === 0) return;
+    if (!confirm(`Appliquer "${action}" à ${userIds.length} compte(s) suspect(s) sur ce serveur ?`)) return;
+    setSaBulkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/bulk-action`, {
+        method: "POST", body: JSON.stringify({ guildId, userIds, action, durationMs: saTimeoutDuration }),
+      });
+      const d = await r.json() as { results?: { userId: string; ok: boolean; error?: string }[] };
+      const ok = d.results?.filter(x => x.ok).length ?? 0;
+      const fail = d.results?.filter(x => !x.ok).length ?? 0;
+      toast({ title: `Action en masse — ${ok} OK, ${fail} échec(s)` });
+    } finally { setSaBulkLoading(false); }
+  }
+
+  function exportSuspectsCsv(accounts: SuspectAcc[]) {
+    const headers = ["id","guildId","guildName","userId","userTag","accountAgeDays","hasNoAvatar","reasons","actionTaken","securityLevel","vpnSuspicion","userLocale","verified","detectedAt"];
+    const rows = accounts.map(sa => [
+      sa.id, sa.guildId, sa.guildName, sa.userId, sa.userTag, sa.accountAgeDays,
+      sa.hasNoAvatar, sa.reasons.join("; "), sa.actionTaken, sa.securityLevel,
+      sa.vpnSuspicion, sa.userLocale ?? "", sa.verified, sa.detectedAt,
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = "suspects.csv"; a.click();
+    URL.revokeObjectURL(url);
   }
 
   const fetchInvites = useCallback(async () => {
@@ -3949,6 +4005,35 @@ export default function OwnerPanel() {
 
         {/* ── COMPTES SUSPECTS ────────────────────────────────────────────── */}
         <TabsContent value="suspectaccounts" className="space-y-4">
+          {/* Stats résumées */}
+          {suspectAccounts.length > 0 && (() => {
+            const guilds = [...new Set(suspectAccounts.map(s => s.guildId))];
+            const vpnCount = suspectAccounts.filter(s => s.vpnSuspicion).length;
+            const verifiedCount = suspectAccounts.filter(s => s.verified).length;
+            const actionCounts = suspectAccounts.reduce((acc, s) => { acc[s.actionTaken] = (acc[s.actionTaken] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { label: "Total suspects", value: suspectAccounts.length, color: "text-orange-600" },
+                  { label: "VPN suspicion", value: vpnCount, color: "text-red-600" },
+                  { label: "Vérifiés ✓", value: verifiedCount, color: "text-green-600" },
+                  { label: "Serveurs concernés", value: guilds.length, color: "text-blue-600" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded-md border bg-card px-3 py-2 text-center">
+                    <p className={`text-lg font-bold font-mono ${color}`}>{value}</p>
+                    <p className="text-[10px] text-muted-foreground">{label}</p>
+                  </div>
+                ))}
+                {Object.entries(actionCounts).map(([action, count]) => (
+                  <div key={action} className="rounded-md border bg-card px-3 py-2 text-center">
+                    <p className="text-lg font-bold font-mono text-muted-foreground">{count}</p>
+                    <p className="text-[10px] text-muted-foreground">Action: {action}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
@@ -3956,72 +4041,189 @@ export default function OwnerPanel() {
                 Comptes Suspects
               </CardTitle>
               <CardDescription>
-                Historique des comptes signalés comme suspects à l'arrivée sur les serveurs. Actions rapides disponibles.
+                Historique des comptes signalés comme suspects à l'arrivée. Localisation, suspicion VPN, et actions disponibles.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
+              {/* Barre d'outils */}
               <div className="flex items-center gap-2 flex-wrap">
                 <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchSuspectAccounts} disabled={saLoading}>
                   {saLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Rafraîchir
                 </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => exportSuspectsCsv(suspectAccounts)} disabled={suspectAccounts.length === 0}>
+                  ⬇️ CSV
+                </Button>
                 <span className="text-xs text-muted-foreground">{suspectAccounts.length} entrée(s)</span>
               </div>
 
+              {/* Filtres */}
+              <div className="flex gap-2 flex-wrap items-center border rounded-md p-2 bg-muted/20">
+                <span className="text-xs font-medium text-muted-foreground">Filtres :</span>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterGuild} onChange={e => setSaFilterGuild(e.target.value)}>
+                  <option value="all">Tous les serveurs</option>
+                  {[...new Set(suspectAccounts.map(s => s.guildId))].map(gid => {
+                    const name = suspectAccounts.find(s => s.guildId === gid)?.guildName ?? gid;
+                    return <option key={gid} value={gid}>{name}</option>;
+                  })}
+                </select>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterAction} onChange={e => setSaFilterAction(e.target.value)}>
+                  <option value="all">Toutes actions</option>
+                  {[...new Set(suspectAccounts.map(s => s.actionTaken))].map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterVerified} onChange={e => setSaFilterVerified(e.target.value as "all"|"verified"|"unverified")}>
+                  <option value="all">Tous statuts</option>
+                  <option value="unverified">Non vérifiés</option>
+                  <option value="verified">Vérifiés ✓</option>
+                </select>
+                <label className="flex items-center gap-1 text-xs cursor-pointer">
+                  <input type="checkbox" checked={saFilterVpn} onChange={e => setSaFilterVpn(e.target.checked)} className="rounded" />
+                  VPN uniquement
+                </label>
+              </div>
+
+              {/* Durée timeout global */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground font-medium">Durée timeout :</span>
+                {[
+                  { label: "1h", ms: 3_600_000 }, { label: "6h", ms: 21_600_000 },
+                  { label: "24h", ms: 86_400_000 }, { label: "7j", ms: 604_800_000 },
+                ].map(({ label, ms }) => (
+                  <button key={ms} onClick={() => setSaTimeoutDuration(ms)}
+                    className={`px-2 py-0.5 rounded border text-[10px] font-mono transition-colors ${saTimeoutDuration === ms ? "bg-amber-500 text-white border-amber-500" : "border-border hover:bg-muted"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
               <div className="rounded-md border border-orange-200 bg-orange-500/5 px-3 py-2 text-xs text-orange-700 dark:text-orange-400">
-                ⚠️ Les actions rapides agissent <strong>immédiatement</strong> sur le membre dans son serveur d'origine. Assure-toi que le bot y est toujours présent.
+                ⚠️ Les actions agissent <strong>immédiatement</strong> sur le membre dans son serveur. Assure-toi que le bot y est présent.
               </div>
 
               {saLoading ? (
-                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
-              ) : suspectAccounts.length === 0 ? (
-                <p className="text-sm text-center text-muted-foreground py-8">Aucun compte suspect enregistré. Les comptes suspects sont détectés à l'arrivée (niveau sécurité ≥ 2 ou détection activée).</p>
-              ) : (
-                <div className="space-y-2 max-h-[700px] overflow-y-auto pr-1">
-                  {suspectAccounts.map((sa) => (
-                    <div key={sa.id} className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge variant="outline" className="text-[10px] font-mono uppercase px-1.5 py-0 bg-orange-500/10 text-orange-600 border-orange-300">
-                          🕵️ suspect
-                        </Badge>
-                        <span className="text-xs font-medium">{sa.userTag}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground">{sa.userId}</span>
-                        <Badge variant="secondary" className="text-[10px]">{sa.guildName || sa.guildId}</Badge>
-                        <Badge variant="outline" className="text-[10px]">Niv. sécu {sa.securityLevel}</Badge>
-                        <span className="text-xs text-muted-foreground ml-auto">{new Date(sa.detectedAt).toLocaleString("fr-FR")}</span>
-                      </div>
-                      <div className="text-xs space-y-0.5">
-                        <p><span className="text-muted-foreground">Âge du compte :</span> <span className="font-medium">{sa.accountAgeDays < 1 ? "< 1 jour" : `${sa.accountAgeDays} jour(s)`}</span></p>
-                        {sa.hasNoAvatar && <p className="text-amber-600">• Aucune photo de profil</p>}
-                        {sa.reasons.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {sa.reasons.map((r, i) => <Badge key={i} variant="secondary" className="text-[9px] font-normal">{r}</Badge>)}
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
+              ) : (() => {
+                const filtered = suspectAccounts.filter(sa =>
+                  (saFilterGuild === "all" || sa.guildId === saFilterGuild) &&
+                  (saFilterAction === "all" || sa.actionTaken === saFilterAction) &&
+                  (saFilterVerified === "all" || (saFilterVerified === "verified" ? sa.verified : !sa.verified)) &&
+                  (!saFilterVpn || sa.vpnSuspicion)
+                );
+                if (filtered.length === 0) return (
+                  <p className="text-sm text-center text-muted-foreground py-8">
+                    {suspectAccounts.length === 0 ? "Aucun compte suspect enregistré. Les comptes sont détectés à l'arrivée (niveau sécurité ≥ 2 ou détection activée)." : "Aucun résultat avec ces filtres."}
+                  </p>
+                );
+
+                // Grouper par serveur pour l'action en masse
+                const byGuild = filtered.reduce((acc, sa) => {
+                  if (!acc[sa.guildId]) acc[sa.guildId] = { name: sa.guildName, accounts: [] };
+                  acc[sa.guildId]!.accounts.push(sa);
+                  return acc;
+                }, {} as Record<string, { name: string; accounts: SuspectAcc[] }>);
+
+                return (
+                  <div className="space-y-4">
+                    {Object.entries(byGuild).map(([gid, { name, accounts }]) => (
+                      <div key={gid} className="space-y-2">
+                        {/* En-tête serveur + action en masse */}
+                        {saFilterGuild === "all" && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="secondary" className="text-xs font-medium">{name || gid}</Badge>
+                            <span className="text-xs text-muted-foreground">{accounts.length} suspect(s)</span>
+                            <div className="ml-auto flex gap-1">
+                              <Button size="sm" variant="outline" className="h-5 text-[9px] gap-0.5 border-amber-300 text-amber-700"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "timeout")}>
+                                {saBulkLoading ? <Loader2 className="h-2 w-2 animate-spin" /> : <Clock className="h-2 w-2" />} Timeout tous
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-5 text-[9px] gap-0.5 border-orange-300 text-orange-700"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "kick")}>
+                                <UserX className="h-2 w-2" /> Kick tous
+                              </Button>
+                              <Button size="sm" variant="destructive" className="h-5 text-[9px] gap-0.5"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "ban")}>
+                                <Ban className="h-2 w-2" /> Ban tous
+                              </Button>
+                            </div>
                           </div>
                         )}
+
+                        <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                          {accounts.map((sa) => (
+                            <div key={sa.id} className={`rounded-md border px-3 py-2 space-y-2 transition-opacity ${sa.verified ? "border-green-200 bg-green-500/5 opacity-60" : "border-border bg-muted/20"}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {sa.verified
+                                  ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-700 border-green-300">✅ vérifié</Badge>
+                                  : <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-600 border-orange-300">🕵️ suspect</Badge>
+                                }
+                                {sa.vpnSuspicion && <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/10 text-red-600 border-red-300">🌐 VPN</Badge>}
+                                {sa.userLocale && <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-300">🌍 {sa.userLocale}</Badge>}
+                                <a href={`https://discord.com/users/${sa.userId}`} target="_blank" rel="noreferrer"
+                                  className="text-xs font-medium hover:underline text-primary">{sa.userTag}</a>
+                                <span className="font-mono text-[10px] text-muted-foreground">{sa.userId}</span>
+                                {saFilterGuild === "all" && <Badge variant="secondary" className="text-[10px]">{sa.guildName || sa.guildId}</Badge>}
+                                <Badge variant="outline" className="text-[10px]">N{sa.securityLevel}</Badge>
+                                <span className="text-[10px] text-muted-foreground ml-auto">{new Date(sa.detectedAt).toLocaleString("fr-FR")}</span>
+                              </div>
+                              <div className="text-xs space-y-0.5">
+                                <div className="flex gap-3 flex-wrap">
+                                  <span><span className="text-muted-foreground">Âge :</span> <span className="font-medium">{sa.accountAgeDays < 1 ? "< 1 jour" : `${sa.accountAgeDays}j`}</span></span>
+                                  {sa.hasNoAvatar && <span className="text-amber-600">• Sans avatar</span>}
+                                  {sa.vpnSuspicion && <span className="text-red-600">• Suspicion VPN/proxy</span>}
+                                </div>
+                                {sa.reasons.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {sa.reasons.map((r, i) => <Badge key={i} variant="secondary" className="text-[9px] font-normal">{r}</Badge>)}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex gap-1 flex-wrap">
+                                {!sa.verified && <>
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => doSuspectAction(sa, "timeout")}>
+                                    {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Clock className="h-2.5 w-2.5" />}
+                                    Timeout
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => doSuspectAction(sa, "kick")}>
+                                    <UserX className="h-2.5 w-2.5" /> Kick
+                                  </Button>
+                                  <Button size="sm" variant="destructive" className="h-6 text-[10px] gap-1"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => { if (confirm(`Bannir ${sa.userTag} ?`)) doSuspectAction(sa, "ban"); }}>
+                                    <Ban className="h-2.5 w-2.5" /> Ban
+                                  </Button>
+                                </>}
+                                <Button size="sm" variant="outline" className={`h-6 text-[10px] gap-1 ${sa.verified ? "border-green-300 text-green-700" : "border-green-200 text-green-600"}`}
+                                  disabled={saActionLoading === sa.id}
+                                  onClick={() => toggleSuspectVerified(sa)}>
+                                  {sa.verified ? "↩ Réouvrir" : "✅ Vérifié"}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-[10px] gap-1 text-muted-foreground hover:text-destructive"
+                                  disabled={saActionLoading === sa.id}
+                                  onClick={() => { if (confirm(`Supprimer cet enregistrement ?`)) deleteSuspect(sa); }}>
+                                  🗑️
+                                </Button>
+                                <a href={`https://discord.com/users/${sa.userId}`} target="_blank" rel="noreferrer"
+                                  className="flex items-center h-6 px-2 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted gap-1">
+                                  🔗 Profil
+                                </a>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
-                      <div className="flex gap-1.5 flex-wrap">
-                        <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
-                          disabled={saActionLoading === sa.id}
-                          onClick={() => doSuspectAction(sa, "timeout")}>
-                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Clock className="h-2.5 w-2.5" />}
-                          Timeout 24h
-                        </Button>
-                        <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
-                          disabled={saActionLoading === sa.id}
-                          onClick={() => doSuspectAction(sa, "kick")}>
-                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <UserX className="h-2.5 w-2.5" />}
-                          Expulser
-                        </Button>
-                        <Button size="sm" variant="destructive" className="h-6 text-[10px] gap-1"
-                          disabled={saActionLoading === sa.id}
-                          onClick={() => { if (confirm(`Bannir ${sa.userTag} de ${sa.guildName} ?`)) doSuspectAction(sa, "ban"); }}>
-                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Ban className="h-2.5 w-2.5" />}
-                          Bannir
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
         </TabsContent>

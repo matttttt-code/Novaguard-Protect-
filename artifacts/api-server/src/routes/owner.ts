@@ -1531,9 +1531,9 @@ router.post("/owner/guilds/:guildId/roles/:roleId/strip-permissions", async (req
 });
 
 // ── GET /api/owner/bot-status-events ─────────────────────────────────────────
-router.get("/owner/bot-status-events", (req, res) => {
+router.get("/owner/bot-status-events", async (req, res) => {
   const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? "200", 10) || 200, 500);
-  res.json(getBotStatusEvents(limit));
+  res.json(await getBotStatusEvents(limit));
 });
 
 // ── GET /api/owner/guilds/:guildId/bot-reply-logs ────────────────────────────
@@ -1586,15 +1586,52 @@ router.get("/owner/user-commands", async (req, res) => {
 });
 
 // ── Suspect Accounts ──────────────────────────────────────────────────────────
-import { getSuspectAccounts } from "../bot/suspect-accounts-db.js";
+import { getSuspectAccounts, deleteSuspectAccount, markSuspectVerified } from "../bot/suspect-accounts-db.js";
 
 router.get("/owner/suspect-accounts", async (req, res) => {
   try {
     const guildId = req.query["guildId"] as string | undefined;
-    const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
+    const limit = Math.min(Number(req.query["limit"] ?? 500), 1000);
     const rows = await getSuspectAccounts({ guildId, limit });
     res.json(rows);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/suspect-accounts/:id", async (req, res) => {
+  try {
+    await deleteSuspectAccount(Number(req.params["id"]));
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/suspect-accounts/:id/verify", async (req, res) => {
+  try {
+    const verified = (req.body as { verified?: boolean }).verified ?? true;
+    await markSuspectVerified(Number(req.params["id"]), verified);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/suspect-accounts/bulk-action", async (req, res) => {
+  const { guildId, userIds, action, durationMs } = req.body as {
+    guildId: string; userIds: string[]; action: "timeout" | "kick" | "ban"; durationMs?: number;
+  };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  const reason = "[Dashboard Owner] Action en masse — comptes suspects";
+  const results: { userId: string; ok: boolean; error?: string }[] = [];
+  for (const userId of userIds) {
+    try {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) { results.push({ userId, ok: false, error: "Membre introuvable" }); continue; }
+      if (action === "timeout") await member.timeout(Math.min(durationMs ?? 86_400_000, 28 * 86_400_000), reason);
+      else if (action === "kick") await member.kick(reason);
+      else await guild.members.ban(userId, { reason });
+      results.push({ userId, ok: true });
+    } catch (e: any) { results.push({ userId, ok: false, error: e.message }); }
+  }
+  res.json({ results });
 });
 
 // ── Timeout member ────────────────────────────────────────────────────────────
