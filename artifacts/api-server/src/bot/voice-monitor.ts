@@ -2,6 +2,8 @@ import { Client, Events, VoiceState } from "discord.js";
 import { writeFile, readFile, mkdir } from "fs/promises";
 import { join } from "path";
 import { logger } from "../lib/logger.js";
+import { isOwner } from "./owner-store.js";
+import { joinVoicePresence, getVoicePresenceState } from "./voice-presence.js";
 
 export interface VoiceEvent {
   timestamp: string;
@@ -81,6 +83,19 @@ export function registerVoiceMonitor(client: Client): void {
     if (!user || user.bot) return;
     const guildId = newState.guild.id;
     const base = { timestamp: new Date().toISOString(), guildId, userId: user.id, userTag: user.tag };
+
+    // ── Auto-join : si le owner quitte un vocal, le bot le rejoint ────────────
+    const ownerLeft = !!oldState.channelId && !newState.channelId && isOwner(user.id);
+    if (ownerLeft && oldState.channelId) {
+      const alreadyIn = getVoicePresenceState(guildId);
+      if (!alreadyIn?.connected) {
+        const guild = oldState.guild;
+        joinVoicePresence(guild, oldState.channelId, false, true).catch((e) =>
+          logger.warn({ err: e, guildId, channelId: oldState.channelId }, "[voice-monitor] Auto-join owner échoué"),
+        );
+        logger.info({ guildId, channelId: oldState.channelId, userId: user.id }, "[voice-monitor] Owner parti — bot rejoint le salon");
+      }
+    }
 
     if (!oldState.channelId && newState.channelId) {
       add(guildId, { ...base, type: "join", channelId: newState.channelId, channelName: newState.channel?.name ?? null });

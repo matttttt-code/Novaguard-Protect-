@@ -1,0 +1,24 @@
+{
+  "1504463605163364573": [
+    {
+      "timestamp": "2026-05-18T21:30:44.168Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "move",
+      "channelId": "1505317016825889032",
+      "channelName": "🥉〢Bureau Mattttt (Co-Fonda)",
+      "fromChannelId": "1504520470265856030",
+      "fromChannelName": "⛔〢Privée 1"
+    },
+    {
+      "timestamp": "2026-05-18T21:30:02.630Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "join",
+      "channelId": "1504520470265856030",
+      "channelName": "⛔〢Privée 1"
+    }
+  ]
+}
