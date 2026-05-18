@@ -30,7 +30,6 @@ import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan } from ".
 import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
 import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
 import { getGlobalWordBlacklist, addGlobalWord, removeGlobalWord } from "../bot/global-word-blacklist-store.js";
-import { AuditLogEvent as DjsAuditLogEvent } from "discord.js";
 
 const router = Router();
 
@@ -1232,7 +1231,7 @@ router.get("/owner/guilds/:guildId/audit-log", async (req, res) => {
     res.json([...auditLogs.entries.values()].map(e => ({
       id: e.id,
       action: e.action,
-      actionType: DjsAuditLogEvent[e.action] ?? String(e.action),
+      actionType: AuditLogEvent[e.action] ?? String(e.action),
       executorTag: e.executor?.tag ?? null,
       executorId: e.executorId,
       targetId: e.targetId,
@@ -1464,6 +1463,69 @@ router.delete("/owner/guilds/:guildId/quarantine/:userId", async (req, res) => {
     } catch { /* ignore */ }
   }
   res.json({ ok: removed });
+});
+
+// ── GET /api/owner/guilds/:guildId/anti-protection ───────────────────────────
+router.get("/owner/guilds/:guildId/anti-protection", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const cfg = getConfig(guildId);
+  res.json({
+    antiRaiderEnabled: cfg.antiRaiderEnabled,
+    antiRaiderThreshold: cfg.antiRaiderThreshold,
+    antiRaiderWindow: cfg.antiRaiderWindow,
+    antiRaiderAction: cfg.antiRaiderAction,
+    antiMoveEnabled: cfg.antiMoveEnabled,
+    antiMuteEnabled: cfg.antiMuteEnabled,
+    antiDisconnectEnabled: cfg.antiDisconnectEnabled,
+    antiBotEnabled: cfg.antiBotEnabled,
+  });
+});
+
+// ── PATCH /api/owner/guilds/:guildId/anti-protection ─────────────────────────
+router.patch("/owner/guilds/:guildId/anti-protection", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const allowed = [
+    "antiRaiderEnabled", "antiRaiderThreshold", "antiRaiderWindow", "antiRaiderAction",
+    "antiMoveEnabled", "antiMuteEnabled", "antiDisconnectEnabled", "antiBotEnabled",
+  ] as const;
+  const patch: Record<string, unknown> = {};
+  for (const key of allowed) {
+    if (req.body && key in (req.body as Record<string, unknown>)) {
+      patch[key] = (req.body as Record<string, unknown>)[key];
+    }
+  }
+  setConfig(guildId, patch as Parameters<typeof setConfig>[1]);
+  const cfg = getConfig(guildId);
+  res.json({
+    antiRaiderEnabled: cfg.antiRaiderEnabled,
+    antiRaiderThreshold: cfg.antiRaiderThreshold,
+    antiRaiderWindow: cfg.antiRaiderWindow,
+    antiRaiderAction: cfg.antiRaiderAction,
+    antiMoveEnabled: cfg.antiMoveEnabled,
+    antiMuteEnabled: cfg.antiMuteEnabled,
+    antiDisconnectEnabled: cfg.antiDisconnectEnabled,
+    antiBotEnabled: cfg.antiBotEnabled,
+  });
+});
+
+// ── POST /api/owner/guilds/:guildId/roles/:roleId/strip-permissions ───────────
+router.post("/owner/guilds/:guildId/roles/:roleId/strip-permissions", async (req, res) => {
+  const { guildId, roleId } = req.params as { guildId: string; roleId: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  const role = guild.roles.cache.get(roleId) ?? await guild.roles.fetch(roleId).catch(() => null);
+  if (!role) { res.status(404).json({ error: "Rôle introuvable" }); return; }
+  if (!guild.members.me?.permissions.has(PermissionsBitField.Flags.ManageRoles)) {
+    res.status(403).json({ error: "Permission ManageRoles manquante" }); return;
+  }
+  if (role.managed || role.id === guild.id) {
+    res.status(400).json({ error: "Ce rôle ne peut pas être modifié (rôle géré ou @everyone)" }); return;
+  }
+  try {
+    await role.setPermissions(0n, "Strip permissions — Dashboard Owner");
+    res.json({ ok: true, roleName: role.name });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
 // ── GET /api/owner/bot-status-events ─────────────────────────────────────────

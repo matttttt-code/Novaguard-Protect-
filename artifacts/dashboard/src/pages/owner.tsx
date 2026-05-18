@@ -69,6 +69,10 @@ type BotSettings = {
   captchaTimeoutMins: number; captchaMaxAttempts: number; captchaMode: string;
   welcomeEnabled: boolean; welcomeChannelId: string | null; welcomeMessage: string | null;
 };
+type AntiProtection = {
+  antiRaiderEnabled: boolean; antiRaiderThreshold: number; antiRaiderWindow: number; antiRaiderAction: string;
+  antiMoveEnabled: boolean; antiMuteEnabled: boolean; antiDisconnectEnabled: boolean; antiBotEnabled: boolean;
+};
 type NoteEntry = { id: number; content: string; moderator: string; moderatorId: string; timestamp: string };
 type NotesByUser = { userId: string; notes: NoteEntry[] };
 type InviteBlEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; timestamp: string };
@@ -265,6 +269,13 @@ export default function OwnerPanel() {
   const [amSaving, setAmSaving] = useState(false);
   const [amNewWord, setAmNewWord] = useState("");
   const [amNewDomain, setAmNewDomain] = useState("");
+
+  // ── Anti-protection state ────────────────────────────────────────────────────
+  const [antiProtection, setAntiProtection] = useState<AntiProtection | null>(null);
+  const [apLoading, setApLoading] = useState(false);
+  const [apSaving, setApSaving] = useState(false);
+  const [stripRoleId, setStripRoleId] = useState("");
+  const [strippingPerms, setStrippingPerms] = useState(false);
 
   // ── Bot status state ────────────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
@@ -489,6 +500,14 @@ export default function OwnerPanel() {
     } finally { setTicketsLoading(false); }
   }, [guildId]);
 
+  const fetchAntiProtectionCb = useCallback(async () => {
+    setApLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-protection`);
+      if (r.ok) setAntiProtection(await r.json() as AntiProtection);
+    } finally { setApLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -497,12 +516,13 @@ export default function OwnerPanel() {
     fetchDisabledCmds();
     fetchTranscripts();
     fetchBotSettings();
+    fetchAntiProtectionCb();
     fetchCaptchaLogs();
     fetchTestBots();
     fetchRoles();
     fetchAutomod();
     fetchTickets();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets]);
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -828,6 +848,28 @@ export default function OwnerPanel() {
   }
 
   // ── Bot status actions ─────────────────────────────────────────────────────
+  async function saveAntiProtection() {
+    if (!antiProtection) return;
+    setApSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-protection`, { method: "PATCH", body: JSON.stringify(antiProtection) });
+      const d = await r.json();
+      if (r.ok) { setAntiProtection(d as AntiProtection); toast({ title: "Protections sauvegardées ✓" }); }
+      else toast({ title: "Erreur", description: (d as { error?: string }).error, variant: "destructive" });
+    } finally { setApSaving(false); }
+  }
+
+  async function stripRolePerms() {
+    if (!stripRoleId) return;
+    setStrippingPerms(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/roles/${stripRoleId}/strip-permissions`, { method: "POST" });
+      const d = await r.json() as { ok?: boolean; roleName?: string; error?: string };
+      if (r.ok) { toast({ title: `Permissions supprimées ✓`, description: `Rôle "${d.roleName}" vidé de toutes ses permissions.` }); setStripRoleId(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setStrippingPerms(false); }
+  }
+
   const fetchBotStatus = useCallback(async () => {
     setBotStatusLoading(true);
     try {
@@ -2047,6 +2089,119 @@ export default function OwnerPanel() {
               </div>
             </>
           )}
+
+          {/* ── Protections Anti-Abus ───────────────────────────────────────── */}
+          {apLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : antiProtection ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🚨 Anti-Raider Silencieux</CardTitle>
+                  <CardDescription>Détecte automatiquement les vagues de joins et prend action en silence (sans log public).</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Anti-Raider activé</label>
+                    <Button size="sm" variant={antiProtection.antiRaiderEnabled ? "default" : "outline"}
+                      onClick={() => setAntiProtection({ ...antiProtection, antiRaiderEnabled: !antiProtection.antiRaiderEnabled })}
+                      className="gap-1.5 w-28">
+                      {antiProtection.antiRaiderEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Seuil (joins · {antiProtection.antiRaiderThreshold})</label>
+                      <Input type="number" min={2} max={50} value={antiProtection.antiRaiderThreshold}
+                        onChange={(e) => setAntiProtection({ ...antiProtection, antiRaiderThreshold: Number(e.target.value) })} className="font-mono" />
+                      <p className="text-xs text-muted-foreground mt-1">Nombre de joins déclenchant l'alerte</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Fenêtre (secondes · {antiProtection.antiRaiderWindow})</label>
+                      <Input type="number" min={3} max={120} value={antiProtection.antiRaiderWindow}
+                        onChange={(e) => setAntiProtection({ ...antiProtection, antiRaiderWindow: Number(e.target.value) })} className="font-mono" />
+                      <p className="text-xs text-muted-foreground mt-1">Délai dans lequel compter les joins</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Action</label>
+                      <Select value={antiProtection.antiRaiderAction} onValueChange={(v) => setAntiProtection({ ...antiProtection, antiRaiderAction: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="timeout">Timeout 1h (silencieux)</SelectItem>
+                          <SelectItem value="kick">Expulsion (silencieux)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🛡️ Protections Audit Log</CardTitle>
+                  <CardDescription>Détecte et sanctionne les abus d'administration via le journal d'audit Discord. Nécessite l'intent GuildModeration.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {([
+                    { key: "antiMoveEnabled" as const, label: "Anti-Move", icon: "🔀", desc: "Détecte les déplacements forcés de membres en vocal — timeout exécuteur 1h" },
+                    { key: "antiMuteEnabled" as const, label: "Anti-Mute", icon: "🔇", desc: "Détecte le mute serveur de membres — révoque le mute + timeout exécuteur 1h" },
+                    { key: "antiDisconnectEnabled" as const, label: "Anti-Disconnect", icon: "🔌", desc: "Détecte les déconnexions forcées du vocal — timeout exécuteur 1h" },
+                    { key: "antiBotEnabled" as const, label: "Anti-Bot", icon: "🤖", desc: "Expulse les bots ajoutés non autorisés — timeout de l'ajouteur 1h" },
+                  ] as { key: keyof AntiProtection; label: string; icon: string; desc: string }[]).map(({ key, label, icon, desc }) => (
+                    <div key={key} className="flex items-start gap-3 p-3 rounded-md bg-muted/40">
+                      <span className="text-lg mt-0.5">{icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">{label}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                      </div>
+                      <Button size="sm" variant={antiProtection[key] ? "default" : "outline"}
+                        onClick={() => setAntiProtection({ ...antiProtection, [key]: !antiProtection[key] })}
+                        className="gap-1.5 w-28 shrink-0">
+                        {antiProtection[key] ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                      </Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🔑 Retirer les Permissions d'un Rôle</CardTitle>
+                  <CardDescription>Vide entièrement les permissions d'un rôle (met toutes les permissions à 0). Action irréversible.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex gap-3">
+                    <Select value={stripRoleId} onValueChange={setStripRoleId}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Sélectionner un rôle…" /></SelectTrigger>
+                      <SelectContent>
+                        {roles.filter((r) => r.name !== "@everyone").map((r) => (
+                          <SelectItem key={r.id} value={r.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color || "#6b7280" }} />
+                              {r.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="destructive" disabled={!stripRoleId || strippingPerms} onClick={stripRolePerms} className="gap-2 shrink-0">
+                      {strippingPerms ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldOff className="h-4 w-4" />}
+                      Retirer les perms
+                    </Button>
+                  </div>
+                  {stripRoleId && (
+                    <p className="text-xs text-destructive font-medium">⚠️ Cette action retirera <strong>toutes</strong> les permissions du rôle sélectionné sur Discord. Elle ne peut pas être annulée depuis ici.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={saveAntiProtection} disabled={apSaving} className="gap-2 font-mono uppercase tracking-widest">
+                  {apSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <><Shield className="h-4 w-4" />Sauvegarder les protections</>}
+                </Button>
+              </div>
+            </>
+          ) : null}
         </TabsContent>
         {/* ── Captcha Logs ──────────────────────────────────────────────────── */}
         <TabsContent value="captchalogs" className="space-y-4">

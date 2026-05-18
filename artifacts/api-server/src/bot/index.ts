@@ -72,6 +72,8 @@ import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
 import { logBotStatusEvent } from "./bot-status-store.js";
+import { recordJoin } from "./anti-raider.js";
+import { registerAuditProtection } from "./anti-audit-protection.js";
 import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM, requestAdminDMApproval } from "./dm-notify.js";
 import { getAdminDMPending, removeAdminDMPending } from "./admin-dm-pending-store.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
@@ -127,6 +129,7 @@ export function startBot(): void {
     void sendClientErrorAlert(client, err, errCode).catch(() => null);
   });
   registerBotAlerts(client);
+  registerAuditProtection(client);
 
   client.once(Events.ClientReady, async (readyClient) => {
     setClient(readyClient);
@@ -421,6 +424,23 @@ export function startBot(): void {
         { name: "Durée", value: "10 minutes", inline: true },
         { name: "Raison", value: "Anti-Raid Niveau 2 actif" },
       ], { tag: client.user!.tag, id: client.user!.id }), { guildId, pingEveryone: true });
+    }
+
+    // ── Anti-Raid Silencieux (détection automatique par vague de joins) ─────
+    {
+      const arCfg = getConfig(guildId);
+      if (arCfg.antiRaiderEnabled) {
+        const raidDetected = recordJoin(guildId, arCfg.antiRaiderThreshold, arCfg.antiRaiderWindow);
+        if (raidDetected) {
+          logger.warn({ guild: member.guild.name, threshold: arCfg.antiRaiderThreshold, window: arCfg.antiRaiderWindow }, "Anti-Raid silencieux déclenché");
+          if (arCfg.antiRaiderAction === "kick") {
+            await member.kick("[Anti-Raid Silencieux] Vague de joins détectée — expulsion automatique").catch(() => null);
+            return;
+          } else {
+            await member.timeout(60 * 60 * 1_000, "[Anti-Raid Silencieux] Vague de joins détectée — quarantaine automatique").catch(() => null);
+          }
+        }
+      }
     }
 
     // Niveau 3 : quarantaine auto pour comptes < 7 jours

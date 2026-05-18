@@ -33,6 +33,14 @@ export interface GuildConfig {
   vpnCheckMinAgeDays: number;
   vpnCheckAction: "kick" | "ban" | "flag";
   vpnCheckRequireNoAvatar: boolean;
+  antiRaiderEnabled: boolean;
+  antiRaiderThreshold: number;
+  antiRaiderWindow: number;
+  antiRaiderAction: "kick" | "timeout";
+  antiMoveEnabled: boolean;
+  antiMuteEnabled: boolean;
+  antiDisconnectEnabled: boolean;
+  antiBotEnabled: boolean;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -71,6 +79,14 @@ function defaults(): GuildConfig {
     vpnCheckMinAgeDays: 30,
     vpnCheckAction: "kick",
     vpnCheckRequireNoAvatar: false,
+    antiRaiderEnabled: false,
+    antiRaiderThreshold: 5,
+    antiRaiderWindow: 10,
+    antiRaiderAction: "timeout",
+    antiMoveEnabled: false,
+    antiMuteEnabled: false,
+    antiDisconnectEnabled: false,
+    antiBotEnabled: false,
   };
 }
 
@@ -170,6 +186,12 @@ export function removeAntiInsultWord(guildId: string, word: string): boolean {
 
 export function setAntiWebhookEnabled(guildId: string, enabled: boolean): void { set(guildId, { antiWebhookEnabled: enabled }); }
 export function setSuspiciousCheckEnabled(guildId: string, enabled: boolean): void { set(guildId, { suspiciousCheckEnabled: enabled }); }
+
+export function setAntiRaiderConfig(guildId: string, patch: Partial<Pick<GuildConfig, "antiRaiderEnabled" | "antiRaiderThreshold" | "antiRaiderWindow" | "antiRaiderAction">>): void { set(guildId, patch); }
+export function setAntiMoveEnabled(guildId: string, v: boolean): void { set(guildId, { antiMoveEnabled: v }); }
+export function setAntiMuteEnabled(guildId: string, v: boolean): void { set(guildId, { antiMuteEnabled: v }); }
+export function setAntiDisconnectEnabled(guildId: string, v: boolean): void { set(guildId, { antiDisconnectEnabled: v }); }
+export function setAntiBotEnabled(guildId: string, v: boolean): void { set(guildId, { antiBotEnabled: v }); }
 
 export function addWhitelistedInvite(guildId: string, code: string): void {
   const cfg = getOrCreate(guildId);
