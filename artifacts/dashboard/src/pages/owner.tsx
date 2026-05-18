@@ -318,6 +318,8 @@ export default function OwnerPanel() {
   const [voicePresence, setVoicePresence] = useState<VoicePresence>({ connected: false });
   const [vpLoading, setVpLoading] = useState(false);
   const [vpSelectedChannel, setVpSelectedChannel] = useState("");
+  const [vpNickname, setVpNickname] = useState("");
+  const [vpNickSaving, setVpNickSaving] = useState(false);
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -2905,6 +2907,47 @@ export default function OwnerPanel() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+
+              {/* Pseudo du bot */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium block">Pseudo du bot sur ce serveur</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={vpNickname}
+                    onChange={(e) => setVpNickname(e.target.value)}
+                    placeholder="Laisser vide pour réinitialiser"
+                    maxLength={32}
+                    className="flex-1 font-mono"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={vpNickSaving}
+                    onClick={async () => {
+                      setVpNickSaving(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bot-nickname`, {
+                          method: "PATCH",
+                          body: JSON.stringify({ nickname: vpNickname }),
+                        });
+                        if (r.ok) {
+                          const d = await r.json();
+                          toast({ title: "Pseudo mis à jour", description: `Nouveau pseudo : ${d.nickname}` });
+                        } else {
+                          const d = await r.json();
+                          toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                        }
+                      } finally { setVpNickSaving(false); }
+                    }}
+                    className="gap-2 shrink-0"
+                  >
+                    {vpNickSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+                    Appliquer
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Vide = pseudo réinitialisé au nom d'origine du bot.</p>
+              </div>
+
+              <div className="border-t border-border" />
 
               {/* Statut actuel */}
               <div className={`rounded-lg border p-4 flex items-center gap-3 ${voicePresence.connected ? "border-green-500/40 bg-green-500/5" : "border-border bg-muted/30"}`}>

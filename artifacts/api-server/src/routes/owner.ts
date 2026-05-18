@@ -1724,8 +1724,23 @@ router.patch("/owner/guilds/:guildId/voice-presence", async (req, res) => {
   const guild = client.guilds.cache.get(guildId);
   if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
   try {
-    const updated = await updateVoicePresence(guild, { selfMute, selfDeaf });
+    const updated = updateVoicePresence(guild, { selfMute, selfDeaf });
     res.json(updated);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/guilds/:guildId/bot-nickname", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { nickname } = (req.body ?? {}) as { nickname?: string };
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const me = guild.members.me;
+    if (!me) { res.status(503).json({ error: "Membre bot introuvable" }); return; }
+    await me.setNickname(nickname?.trim() || null, "Modifié via Dashboard Owner");
+    res.json({ nickname: me.nickname ?? me.user.username });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
