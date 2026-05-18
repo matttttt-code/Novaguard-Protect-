@@ -7,7 +7,9 @@ import {
   AuditLogEvent,
   Guild,
   User,
+  GuildChannel,
   PermissionFlagsBits,
+  PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -336,28 +338,118 @@ export function registerGeneralLog(client: Client): void {
       .setTimestamp());
   });
 
-  // ── SALONS MODIFIÉS ──
+  // ── SALONS MODIFIÉS (propriétés + permissions) ──
   client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
     if (!("guildId" in newChannel) || !newChannel.guildId) return;
+
     const changes: string[] = [];
+    const permChanges: string[] = [];
+
+    // Propriétés de base
     if ("name" in oldChannel && "name" in newChannel && oldChannel.name !== newChannel.name)
       changes.push(`**Nom** : \`${oldChannel.name}\` → \`${newChannel.name}\``);
     if ("topic" in oldChannel && "topic" in newChannel && oldChannel.topic !== newChannel.topic)
-      changes.push(`**Description** : ${oldChannel.topic || "*(vide)*"} → ${newChannel.topic || "*(vide)*"}`);
+      changes.push(`**Sujet** : ${oldChannel.topic || "*(vide)*"} → ${newChannel.topic || "*(vide)*"}`);
+    if ("nsfw" in oldChannel && "nsfw" in newChannel && oldChannel.nsfw !== newChannel.nsfw)
+      changes.push(`**NSFW** : ${oldChannel.nsfw ? "Oui" : "Non"} → ${newChannel.nsfw ? "Oui" : "Non"}`);
+    if ("rateLimitPerUser" in oldChannel && "rateLimitPerUser" in newChannel && oldChannel.rateLimitPerUser !== newChannel.rateLimitPerUser)
+      changes.push(`**Mode lent** : ${oldChannel.rateLimitPerUser}s → ${newChannel.rateLimitPerUser}s`);
     if ("bitrate" in oldChannel && "bitrate" in newChannel && oldChannel.bitrate !== newChannel.bitrate)
-      changes.push(`**Bitrate** : ${oldChannel.bitrate}kbps → ${newChannel.bitrate}kbps`);
-    if (!changes.length) return;
+      changes.push(`**Bitrate** : ${(oldChannel.bitrate / 1000).toFixed(0)}kbps → ${(newChannel.bitrate / 1000).toFixed(0)}kbps`);
+    if ("userLimit" in oldChannel && "userLimit" in newChannel && oldChannel.userLimit !== newChannel.userLimit)
+      changes.push(`**Limite membres** : ${oldChannel.userLimit || "∞"} → ${newChannel.userLimit || "∞"}`);
+    if ("parentId" in oldChannel && "parentId" in newChannel && oldChannel.parentId !== newChannel.parentId) {
+      const oldCat = (oldChannel as GuildChannel).parent?.name ?? "*(aucune)*";
+      const newCat = (newChannel as GuildChannel).parent?.name ?? "*(aucune)*";
+      changes.push(`**Catégorie** : \`${oldCat}\` → \`${newCat}\``);
+    }
 
-    const executor = await getAuditExecutor(newChannel.guild, AuditLogEvent.ChannelUpdate, newChannel.id);
-    await sendGenLog(client, newChannel.guildId, new EmbedBuilder()
-      .setColor(0xf59e0b).setTitle("📝 Salon modifié")
-      .addFields(
-        { name: "Salon", value: `<#${newChannel.id}> (\`${newChannel.id}\`)`, inline: true },
-        userField(executor, "Modifié par"),
-        { name: "Modifications", value: changes.join("\n") },
-      )
-      .setFooter({ text: `ID salon : ${newChannel.id}${executor ? ` • ID auteur : ${executor.id}` : ""}` })
-      .setTimestamp());
+    // Diff des permissions de salon (overwrites)
+    const oldGC = oldChannel as GuildChannel;
+    const newGC = newChannel as GuildChannel;
+    if (oldGC.permissionOverwrites && newGC.permissionOverwrites) {
+      const oldOvs = oldGC.permissionOverwrites.cache;
+      const newOvs = newGC.permissionOverwrites.cache;
+      const allIds = new Set([...oldOvs.keys(), ...newOvs.keys()]);
+
+      for (const ovId of allIds) {
+        const oldOv = oldOvs.get(ovId);
+        const newOv = newOvs.get(ovId);
+
+        // Résoudre le nom de la cible (rôle ou membre)
+        const targetName =
+          newGC.guild.roles.cache.get(ovId)?.name ??
+          newGC.guild.members.cache.get(ovId)?.user.tag ??
+          `\`${ovId}\``;
+
+        if (!oldOv && newOv) {
+          // Overwrite créé
+          const allowed = newOv.allow.toArray().map((p) => `\`${PERM_FR[p] ?? p}\``).join(", ") || "*(aucune)*";
+          const denied  = newOv.deny.toArray().map((p) => `\`${PERM_FR[p] ?? p}\``).join(", ") || "*(aucune)*";
+          permChanges.push(
+            `➕ **${targetName}** — overwrite créé\n` +
+            `  ✅ Accordé : ${allowed}\n` +
+            `  🚫 Refusé  : ${denied}`,
+          );
+        } else if (oldOv && !newOv) {
+          // Overwrite supprimé
+          permChanges.push(`➖ **${targetName}** — overwrite supprimé`);
+        } else if (oldOv && newOv) {
+          // Overwrite modifié : diff allow / deny
+          const fmtPerm = (p: string) => `\`${PERM_FR[p] ?? p}\``;
+          const nowAllowed    = oldOv.allow.missing(newOv.allow);   // dans new.allow mais pas dans old.allow
+          const noLongerAllow = newOv.allow.missing(oldOv.allow);   // dans old.allow mais pas dans new.allow
+          const nowDenied     = oldOv.deny.missing(newOv.deny);     // dans new.deny mais pas dans old.deny
+          const noLongerDeny  = newOv.deny.missing(oldOv.deny);     // dans old.deny mais pas dans new.deny
+
+          if (nowAllowed.length || noLongerAllow.length || nowDenied.length || noLongerDeny.length) {
+            const lines: string[] = [`✏️ **${targetName}** — permissions modifiées`];
+            if (nowAllowed.length)    lines.push(`  ✅ Accordé   : ${nowAllowed.map(fmtPerm).join(", ")}`);
+            if (noLongerAllow.length) lines.push(`  ↩️ Retiré (accordé) : ${noLongerAllow.map(fmtPerm).join(", ")}`);
+            if (nowDenied.length)     lines.push(`  🚫 Refusé    : ${nowDenied.map(fmtPerm).join(", ")}`);
+            if (noLongerDeny.length)  lines.push(`  ↩️ Retiré (refusé)  : ${noLongerDeny.map(fmtPerm).join(", ")}`);
+            permChanges.push(lines.join("\n"));
+          }
+        }
+      }
+    }
+
+    if (!changes.length && !permChanges.length) return;
+
+    const executor = await getAuditExecutor(newGC.guild, AuditLogEvent.ChannelUpdate, newGC.id);
+
+    // Embed principal — modifications de propriétés
+    const embeds: EmbedBuilder[] = [];
+
+    if (changes.length) {
+      embeds.push(new EmbedBuilder()
+        .setColor(0xf59e0b).setTitle("📝 Salon modifié")
+        .addFields(
+          { name: "Salon", value: `<#${newGC.id}> (\`${newGC.id}\`)`, inline: true },
+          userField(executor, "Modifié par"),
+          { name: "Modifications", value: changes.join("\n").slice(0, 1024) },
+        )
+        .setFooter({ text: `ID salon : ${newGC.id}${executor ? ` • ID auteur : ${executor.id}` : ""}` })
+        .setTimestamp());
+    }
+
+    // Embeds pour les changements de permissions (un par overwrite modifié, max 4)
+    for (const permChunk of permChanges.slice(0, 4)) {
+      embeds.push(new EmbedBuilder()
+        .setColor(0x6366f1).setTitle("🔐 Permissions de salon modifiées")
+        .addFields(
+          { name: "Salon", value: `<#${newGC.id}> (\`${newGC.id}\`)`, inline: true },
+          userField(executor, "Modifié par"),
+          { name: "Détail", value: permChunk.slice(0, 1024) },
+        )
+        .setFooter({ text: `ID salon : ${newGC.id}${executor ? ` • ID auteur : ${executor.id}` : ""}` })
+        .setTimestamp());
+    }
+
+    // Envoyer par lots de 10
+    for (let i = 0; i < embeds.length; i += 10) {
+      await sendGenLogEmbeds(client, newGC.guildId!, embeds.slice(i, i + 10));
+    }
   });
 
   // ── RÔLES CRÉÉS ──
