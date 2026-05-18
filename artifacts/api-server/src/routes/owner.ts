@@ -12,7 +12,7 @@ import {
   PresenceStatusData,
   AuditLogEvent,
 } from "discord.js";
-import { getConfig, setConfig, getSuspectKeywords, addSuspectKeyword, removeSuspectKeyword } from "../bot/guild-config-store.js";
+import { getConfig, setConfig, getSuspectKeywords, addSuspectKeyword, removeSuspectKeyword, getBlServers, addBlServer, removeBlServer, getBlTags, addBlTag, removeBlTag } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { addToGlobalBlacklist, removeFromGlobalBlacklist, addToBlacklist, removeFromBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
@@ -1549,6 +1549,42 @@ router.delete("/owner/guilds/:guildId/suspect-keywords/:keyword", (req, res) => 
   const { guildId, keyword } = req.params as { guildId: string; keyword: string };
   removeSuspectKeyword(guildId, keyword);
   res.json({ keywords: getSuspectKeywords(guildId) });
+});
+
+// ── Blacklist Serveur ─────────────────────────────────────────────────────────
+router.get("/owner/guilds/:guildId/bl-servers", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ servers: getBlServers(guildId) });
+});
+router.post("/owner/guilds/:guildId/bl-servers", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { serverId } = (req.body ?? {}) as { serverId?: string };
+  if (!serverId?.trim()) { res.status(400).json({ error: "serverId requis" }); return; }
+  addBlServer(guildId, serverId.trim());
+  res.json({ servers: getBlServers(guildId) });
+});
+router.delete("/owner/guilds/:guildId/bl-servers/:serverId", (req, res) => {
+  const { guildId, serverId } = req.params as { guildId: string; serverId: string };
+  removeBlServer(guildId, serverId);
+  res.json({ servers: getBlServers(guildId) });
+});
+
+// ── Blacklist Tag ─────────────────────────────────────────────────────────────
+router.get("/owner/guilds/:guildId/bl-tags", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ tags: getBlTags(guildId) });
+});
+router.post("/owner/guilds/:guildId/bl-tags", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { tag } = (req.body ?? {}) as { tag?: string };
+  if (!tag?.trim()) { res.status(400).json({ error: "tag requis" }); return; }
+  addBlTag(guildId, tag.trim().toLowerCase());
+  res.json({ tags: getBlTags(guildId) });
+});
+router.delete("/owner/guilds/:guildId/bl-tags/:tag", (req, res) => {
+  const { guildId, tag } = req.params as { guildId: string; tag: string };
+  removeBlTag(guildId, tag);
+  res.json({ tags: getBlTags(guildId) });
 });
 
 // ── POST /api/owner/guilds/:guildId/roles/:roleId/strip-permissions ───────────

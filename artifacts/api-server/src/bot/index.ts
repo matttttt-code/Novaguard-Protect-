@@ -49,6 +49,8 @@ import {
   setSanctionDmEnabled,
   setSecurityLevel,
   getSuspectKeywords,
+  getBlServers,
+  getBlTags,
 } from "./guild-config-store.js";
 import { logCommandExec, logBotError } from "./event-log-store.js";
 import { getPendingLevel3, removePendingLevel3, markOwnerApproved } from "./security-pending-store.js";
@@ -633,6 +635,54 @@ export function startBot(): void {
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
     await sendWelcomeMessage(client, member, guildId, cfg);
+
+    // ── Blacklist Tag — ban automatique si tag/username/globalName en liste noire ──
+    {
+      const blTags = getBlTags(guildId);
+      if (blTags.length > 0) {
+        const uLower = member.user.username.toLowerCase();
+        const gLower = (member.user.globalName ?? "").toLowerCase();
+        const tLower = member.user.tag.toLowerCase();
+        const matchedTag = blTags.find((t) => t === uLower || t === gLower || t === tLower);
+        if (matchedTag) {
+          void saveSuspectAccount({
+            guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag,
+            accountAgeDays, hasNoAvatar, reasons: [`Tag en blacklist : \`${matchedTag}\``],
+            actionTaken: "banned", securityLevel: secLvl, vpnSuspicion: false, userLocale: null,
+          }).catch(() => null);
+          await member.ban({ reason: `[BL-TAG] Tag blacklisté : ${matchedTag}` }).catch(() => null);
+          await sendLog(client, logEmbed(0xef4444, "🔨 Auto-ban — Tag blacklisté", [
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Tag détecté", value: `\`${matchedTag}\``, inline: true },
+          ], { tag: "Automod", id: "0" }), { guildId, logType: "ban" });
+          return;
+        }
+      }
+    }
+
+    // ── Blacklist Serveur — ban si le membre est dans un serveur blacklisté ──
+    {
+      const blServers = getBlServers(guildId);
+      for (const blServId of blServers) {
+        const blGuild = client.guilds.cache.get(blServId);
+        if (!blGuild) continue;
+        const found = await blGuild.members.fetch(member.id).catch(() => null);
+        if (found) {
+          void saveSuspectAccount({
+            guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag,
+            accountAgeDays, hasNoAvatar,
+            reasons: [`Membre du serveur blacklisté : **${blGuild.name}** (\`${blServId}\`)`],
+            actionTaken: "banned", securityLevel: secLvl, vpnSuspicion: false, userLocale: null,
+          }).catch(() => null);
+          await member.ban({ reason: `[BL-SERV] Membre de ${blGuild.name} (${blServId})` }).catch(() => null);
+          await sendLog(client, logEmbed(0xef4444, "🔨 Auto-ban — Serveur blacklisté", [
+            { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+            { name: "Serveur détecté", value: `${blGuild.name} (\`${blServId}\`)`, inline: true },
+          ], { tag: "Automod", id: "0" }), { guildId, logType: "ban" });
+          return;
+        }
+      }
+    }
 
     // ── Détection par mots-clés suspects (nom d'utilisateur) ──
     {

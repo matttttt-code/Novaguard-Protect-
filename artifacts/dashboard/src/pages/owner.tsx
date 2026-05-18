@@ -123,7 +123,7 @@ const ALL_COMMANDS = [
 // ── Catégories de navigation ──────────────────────────────────────────────────
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
   general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence"] },
-  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","bl-serveur","bl-tag","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
   moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
   config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl"] },
@@ -298,6 +298,16 @@ export default function OwnerPanel() {
   const [suspectKeywords, setSuspectKeywords] = useState<string[]>([]);
   const [skLoading, setSkLoading] = useState(false);
   const [skNewWord, setSkNewWord] = useState("");
+
+  // ── BL Serveur state ────────────────────────────────────────────────────────
+  const [blServers, setBlServers] = useState<string[]>([]);
+  const [blServersLoading, setBlServersLoading] = useState(false);
+  const [blServerNew, setBlServerNew] = useState("");
+
+  // ── BL Tag state ─────────────────────────────────────────────────────────────
+  const [blTags, setBlTags] = useState<string[]>([]);
+  const [blTagsLoading, setBlTagsLoading] = useState(false);
+  const [blTagNew, setBlTagNew] = useState("");
 
   // ── Bot status state ────────────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
@@ -610,6 +620,22 @@ export default function OwnerPanel() {
     } finally { setSkLoading(false); }
   }, [guildId]);
 
+  const fetchBlServers = useCallback(async () => {
+    setBlServersLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers`);
+      if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); }
+    } finally { setBlServersLoading(false); }
+  }, [guildId]);
+
+  const fetchBlTags = useCallback(async () => {
+    setBlTagsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags`);
+      if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); }
+    } finally { setBlTagsLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -625,7 +651,9 @@ export default function OwnerPanel() {
     fetchAutomod();
     fetchTickets();
     fetchSuspectKeywords();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets, fetchSuspectKeywords]);
+    fetchBlServers();
+    fetchBlTags();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets, fetchSuspectKeywords, fetchBlServers, fetchBlTags]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -1572,6 +1600,8 @@ export default function OwnerPanel() {
           {/* Sécurité */}
           {activeCategory === "securite" && <>
             <TabsTrigger value="blacklist" className="gap-1.5 text-xs"><Ban className="h-3.5 w-3.5" />Blacklist</TabsTrigger>
+            <TabsTrigger value="bl-serveur" className="gap-1.5 text-xs" onClick={fetchBlServers}><Ban className="h-3.5 w-3.5" />BL Serveur</TabsTrigger>
+            <TabsTrigger value="bl-tag" className="gap-1.5 text-xs" onClick={fetchBlTags}><Ban className="h-3.5 w-3.5" />BL Tag</TabsTrigger>
             <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
             <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
             <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
@@ -2133,6 +2163,128 @@ export default function OwnerPanel() {
                       <p className="text-xs text-muted-foreground">Par {e.moderatorTag} · {new Date(e.createdAt).toLocaleDateString("fr-FR")}</p>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => removeFromBlacklist(e.userId, e.userTag)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0">
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── BL Serveur ───────────────────────────────────────────────────── */}
+        <TabsContent value="bl-serveur" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Blacklist Serveur
+              </CardTitle>
+              <CardDescription>
+                Quand un utilisateur rejoint, le bot vérifie s'il est membre d'un de ces serveurs. Si oui, il est automatiquement banni.
+                Le bot doit être présent dans le serveur cible.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={blServerNew}
+                  onChange={(e) => setBlServerNew(e.target.value.trim())}
+                  placeholder="ID du serveur à blacklister…"
+                  className="font-mono text-sm flex-1"
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                />
+                <Button
+                  disabled={blServersLoading || !blServerNew.trim()}
+                  className="gap-2 shrink-0"
+                  onClick={async () => {
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers`, {
+                      method: "POST", body: JSON.stringify({ serverId: blServerNew }),
+                    });
+                    if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); setBlServerNew(""); toast({ title: "Serveur ajouté à la blacklist ✓" }); }
+                    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                  }}
+                >
+                  <Ban className="h-4 w-4" /> Ajouter
+                </Button>
+                <Button variant="ghost" size="sm" onClick={fetchBlServers} disabled={blServersLoading} className="px-2">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blServersLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {blServers.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun serveur blacklisté.</p>
+                ) : blServers.map((sid) => (
+                  <div key={sid} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <span className="font-mono text-sm">{sid}</span>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0"
+                      onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers/${encodeURIComponent(sid)}`, { method: "DELETE" });
+                        if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); toast({ title: "Serveur retiré ✓" }); }
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── BL Tag ───────────────────────────────────────────────────────── */}
+        <TabsContent value="bl-tag" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Blacklist Tag
+              </CardTitle>
+              <CardDescription>
+                Quand un utilisateur rejoint, le bot compare son username, global name et tag à cette liste.
+                Si une correspondance exacte est trouvée, il est automatiquement banni.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={blTagNew}
+                  onChange={(e) => setBlTagNew(e.target.value)}
+                  placeholder="username, globalname ou user#1234…"
+                  className="text-sm flex-1"
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                />
+                <Button
+                  disabled={blTagsLoading || !blTagNew.trim()}
+                  className="gap-2 shrink-0"
+                  onClick={async () => {
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags`, {
+                      method: "POST", body: JSON.stringify({ tag: blTagNew }),
+                    });
+                    if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); setBlTagNew(""); toast({ title: "Tag ajouté à la blacklist ✓" }); }
+                    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                  }}
+                >
+                  <Ban className="h-4 w-4" /> Ajouter
+                </Button>
+                <Button variant="ghost" size="sm" onClick={fetchBlTags} disabled={blTagsLoading} className="px-2">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blTagsLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {blTags.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun tag blacklisté.</p>
+                ) : blTags.map((t) => (
+                  <div key={t} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <span className="font-mono text-sm">{t}</span>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0"
+                      onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags/${encodeURIComponent(t)}`, { method: "DELETE" });
+                        if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); toast({ title: "Tag retiré ✓" }); }
+                      }}
+                    >
                       <X className="h-3.5 w-3.5" />
                     </Button>
                   </div>

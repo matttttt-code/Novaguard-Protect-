@@ -45,6 +45,8 @@ export interface GuildConfig {
   antiEveryoneEnabled: boolean;
   antiEveryoneTimeoutSecs: number;
   suspectKeywords: string[];
+  blServers: string[];
+  blTags: string[];
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -95,6 +97,8 @@ function defaults(): GuildConfig {
     antiEveryoneEnabled: false,
     antiEveryoneTimeoutSecs: 300,
     suspectKeywords: [],
+    blServers: [],
+    blTags: [],
   };
 }
 
@@ -216,6 +220,34 @@ export function removeSuspectKeyword(guildId: string, word: string): boolean {
   const words = cfg.suspectKeywords.filter((w) => w !== word.toLowerCase());
   const removed = words.length < cfg.suspectKeywords.length;
   set(guildId, { suspectKeywords: words });
+  return removed;
+}
+
+export function getBlServers(guildId: string): string[] { return getConfig(guildId).blServers ?? []; }
+export function addBlServer(guildId: string, serverId: string): void {
+  const cfg = getOrCreate(guildId);
+  const list = [...(cfg.blServers ?? []), serverId].filter((v, i, a) => a.indexOf(v) === i);
+  set(guildId, { blServers: list });
+}
+export function removeBlServer(guildId: string, serverId: string): boolean {
+  const cfg = getOrCreate(guildId);
+  const list = (cfg.blServers ?? []).filter((s) => s !== serverId);
+  const removed = list.length < (cfg.blServers ?? []).length;
+  set(guildId, { blServers: list });
+  return removed;
+}
+
+export function getBlTags(guildId: string): string[] { return getConfig(guildId).blTags ?? []; }
+export function addBlTag(guildId: string, tag: string): void {
+  const cfg = getOrCreate(guildId);
+  const list = [...(cfg.blTags ?? []), tag.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i);
+  set(guildId, { blTags: list });
+}
+export function removeBlTag(guildId: string, tag: string): boolean {
+  const cfg = getOrCreate(guildId);
+  const list = (cfg.blTags ?? []).filter((t) => t !== tag.toLowerCase());
+  const removed = list.length < (cfg.blTags ?? []).length;
+  set(guildId, { blTags: list });
   return removed;
 }
 
