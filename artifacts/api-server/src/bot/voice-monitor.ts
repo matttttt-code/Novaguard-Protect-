@@ -90,7 +90,7 @@ export function registerVoiceMonitor(client: Client): void {
       const alreadyIn = getVoicePresenceState(guildId);
       if (!alreadyIn?.connected) {
         const guild = oldState.guild;
-        joinVoicePresence(guild, oldState.channelId, false, true).catch((e) =>
+        joinVoicePresence(guild, oldState.channelId, true, true).catch((e) =>
           logger.warn({ err: e, guildId, channelId: oldState.channelId }, "[voice-monitor] Auto-join owner échoué"),
         );
         logger.info({ guildId, channelId: oldState.channelId, userId: user.id }, "[voice-monitor] Owner parti — bot rejoint le salon");

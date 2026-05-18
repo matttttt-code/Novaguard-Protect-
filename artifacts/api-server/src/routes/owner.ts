@@ -1940,7 +1940,7 @@ router.get("/owner/guilds/:guildId/voice-presence", (req, res) => {
 
 router.post("/owner/guilds/:guildId/voice-presence/join", async (req, res) => {
   const { guildId } = req.params as { guildId: string };
-  const { channelId, selfMute = false, selfDeaf = true } = (req.body ?? {}) as { channelId?: string; selfMute?: boolean; selfDeaf?: boolean };
+  const { channelId, selfMute = true, selfDeaf = true } = (req.body ?? {}) as { channelId?: string; selfMute?: boolean; selfDeaf?: boolean };
   if (!channelId) { res.status(400).json({ error: "channelId requis" }); return; }
   const client = getClient();
   if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }

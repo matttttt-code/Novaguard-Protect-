@@ -3211,7 +3211,7 @@ export default function OwnerPanel() {
                       try {
                         const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/join`, {
                           method: "POST",
-                          body: JSON.stringify({ channelId: vpSelectedChannel, selfMute: false, selfDeaf: true }),
+                          body: JSON.stringify({ channelId: vpSelectedChannel, selfMute: true, selfDeaf: true }),
                         });
                         if (r.ok) { setVoicePresence(await r.json()); }
                         else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
