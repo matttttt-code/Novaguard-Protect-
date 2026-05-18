@@ -68,6 +68,9 @@ catalog:
 
 autoInstallPeers: false
 
+publicHoistPattern:
+  - '@snazzah/*'
+
 onlyBuiltDependencies:
   - '@swc/core'
   - esbuild

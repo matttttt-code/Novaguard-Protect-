@@ -16,7 +16,7 @@ import {
   Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
   Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
   Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
-  Wifi, WifiOff, Radio, Activity, Server,
+  Wifi, WifiOff, Radio, Activity, Server, Mic, MicOff, Headphones,
   BookOpen, Download, Copy, ScrollText, Link2Off,
   Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
   UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning, ShieldAlert,
@@ -122,7 +122,7 @@ const ALL_COMMANDS = [
 
 // ── Catégories de navigation ──────────────────────────────────────────────────
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
-  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests"] },
+  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence"] },
   securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
   moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
@@ -312,6 +312,12 @@ export default function OwnerPanel() {
   const [broadcastMsg, setBroadcastMsg] = useState("");
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
+
+  // ── Voice Presence state ───────────────────────────────────────────────────
+  interface VoicePresence { connected: boolean; channelId?: string; channelName?: string; selfMute?: boolean; selfDeaf?: boolean; }
+  const [voicePresence, setVoicePresence] = useState<VoicePresence>({ connected: false });
+  const [vpLoading, setVpLoading] = useState(false);
+  const [vpSelectedChannel, setVpSelectedChannel] = useState("");
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -580,6 +586,7 @@ export default function OwnerPanel() {
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
+  const voiceChannels = channels.filter((c) => c.type === 2);
   const categories = channels.filter((c) => c.type === 4);
   const channelById = Object.fromEntries(channels.map((c) => [c.id, c]));
 
@@ -1518,6 +1525,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
             <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
             <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
+            <TabsTrigger value="voicepresence" className="gap-1.5 text-xs" onClick={async () => { const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`); if (r.ok) setVoicePresence(await r.json()); }}><Headphones className="h-3.5 w-3.5" />Présence Vocale</TabsTrigger>
           </>}
           {/* Sécurité */}
           {activeCategory === "securite" && <>
@@ -2881,6 +2889,163 @@ export default function OwnerPanel() {
                   Rafraîchir
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Présence Vocale ─────────────────────────────────────────────────── */}
+        <TabsContent value="voicepresence" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Headphones className="h-4 w-4 text-indigo-400" /> Présence Vocale du Bot
+              </CardTitle>
+              <CardDescription>
+                Faites rejoindre le bot dans un salon vocal. Contrôlez le micro (self-mute) et le casque (self-deaf) depuis ce panel.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+
+              {/* Statut actuel */}
+              <div className={`rounded-lg border p-4 flex items-center gap-3 ${voicePresence.connected ? "border-green-500/40 bg-green-500/5" : "border-border bg-muted/30"}`}>
+                <div className={`h-3 w-3 rounded-full flex-shrink-0 ${voicePresence.connected ? "bg-green-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                <div className="flex-1 min-w-0">
+                  {voicePresence.connected ? (
+                    <p className="text-sm font-medium text-green-400">
+                      Connecté — <span className="font-mono">🔊 {voicePresence.channelName ?? voicePresence.channelId}</span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Bot hors des salons vocaux</p>
+                  )}
+                  {voicePresence.connected && (
+                    <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                      <span className={voicePresence.selfMute ? "text-red-400" : "text-green-400"}>
+                        {voicePresence.selfMute ? "🎙️ Micro coupé" : "🎙️ Micro actif"}
+                      </span>
+                      <span className={voicePresence.selfDeaf ? "text-red-400" : "text-green-400"}>
+                        {voicePresence.selfDeaf ? "🎧 Casque coupé" : "🎧 Casque actif"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Rejoindre */}
+              {!voicePresence.connected && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block">Salon vocal</label>
+                    <Select value={vpSelectedChannel || "__none__"} onValueChange={(v) => setVpSelectedChannel(v === "__none__" ? "" : v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choisir un salon vocal…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Choisir un salon…</SelectItem>
+                        {voiceChannels.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>🔊 {c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    disabled={vpLoading || !vpSelectedChannel}
+                    onClick={async () => {
+                      setVpLoading(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/join`, {
+                          method: "POST",
+                          body: JSON.stringify({ channelId: vpSelectedChannel, selfMute: false, selfDeaf: true }),
+                        });
+                        if (r.ok) { setVoicePresence(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setVpLoading(false); }
+                    }}
+                    className="gap-2 w-full"
+                  >
+                    {vpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Headphones className="h-4 w-4" />}
+                    Rejoindre le salon vocal
+                  </Button>
+                </div>
+              )}
+
+              {/* Contrôles quand connecté */}
+              {voicePresence.connected && (
+                <div className="space-y-4">
+                  {/* Toggles micro / casque */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Micro */}
+                    <div className={`rounded-lg border p-4 flex flex-col items-center gap-2 cursor-pointer transition-colors ${voicePresence.selfMute ? "border-red-500/50 bg-red-500/10" : "border-green-500/40 bg-green-500/5"}`}
+                      onClick={async () => {
+                        setVpLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ selfMute: !voicePresence.selfMute }),
+                          });
+                          if (r.ok) setVoicePresence(await r.json());
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        } finally { setVpLoading(false); }
+                      }}
+                    >
+                      {voicePresence.selfMute
+                        ? <MicOff className="h-8 w-8 text-red-400" />
+                        : <Mic className="h-8 w-8 text-green-400" />
+                      }
+                      <span className="text-xs font-medium text-center">
+                        {voicePresence.selfMute ? "Micro coupé" : "Micro actif"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Cliquer pour {voicePresence.selfMute ? "activer" : "couper"}</span>
+                    </div>
+                    {/* Casque */}
+                    <div className={`rounded-lg border p-4 flex flex-col items-center gap-2 cursor-pointer transition-colors ${voicePresence.selfDeaf ? "border-red-500/50 bg-red-500/10" : "border-green-500/40 bg-green-500/5"}`}
+                      onClick={async () => {
+                        setVpLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ selfDeaf: !voicePresence.selfDeaf }),
+                          });
+                          if (r.ok) setVoicePresence(await r.json());
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        } finally { setVpLoading(false); }
+                      }}
+                    >
+                      {voicePresence.selfDeaf
+                        ? <Headphones className="h-8 w-8 text-red-400" />
+                        : <Headphones className="h-8 w-8 text-green-400" />
+                      }
+                      <span className="text-xs font-medium text-center">
+                        {voicePresence.selfDeaf ? "Casque coupé" : "Casque actif"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Cliquer pour {voicePresence.selfDeaf ? "activer" : "couper"}</span>
+                    </div>
+                  </div>
+
+                  {vpLoading && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Mise à jour en cours…
+                    </div>
+                  )}
+
+                  {/* Quitter */}
+                  <Button
+                    variant="destructive"
+                    className="gap-2 w-full"
+                    disabled={vpLoading}
+                    onClick={async () => {
+                      setVpLoading(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/leave`, { method: "POST" });
+                        if (r.ok) { setVoicePresence({ connected: false }); setVpSelectedChannel(""); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setVpLoading(false); }
+                    }}
+                  >
+                    <WifiOff className="h-4 w-4" /> Quitter le salon vocal
+                  </Button>
+                </div>
+              )}
+
             </CardContent>
           </Card>
         </TabsContent>

@@ -1686,4 +1686,60 @@ router.post("/owner/guilds/:guildId/members/:memberId/timeout", async (req, res)
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Voice Presence ────────────────────────────────────────────────────────────
+import { joinVoicePresence, leaveVoicePresence, updateVoicePresence, getVoicePresenceState } from "../bot/voice-presence.js";
+
+router.get("/owner/guilds/:guildId/voice-presence", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const state = getVoicePresenceState(guildId);
+  if (!state) { res.json({ connected: false }); return; }
+  res.json(state);
+});
+
+router.post("/owner/guilds/:guildId/voice-presence/join", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, selfMute = false, selfDeaf = true } = (req.body ?? {}) as { channelId?: string; selfMute?: boolean; selfDeaf?: boolean };
+  if (!channelId) { res.status(400).json({ error: "channelId requis" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    await joinVoicePresence(guild, channelId, selfMute, selfDeaf);
+    res.json(getVoicePresenceState(guildId) ?? { connected: true, channelId, selfMute, selfDeaf });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/voice-presence/leave", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  leaveVoicePresence(guildId);
+  res.json({ connected: false });
+});
+
+router.patch("/owner/guilds/:guildId/voice-presence", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { selfMute, selfDeaf } = (req.body ?? {}) as { selfMute?: boolean; selfDeaf?: boolean };
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const updated = await updateVoicePresence(guild, { selfMute, selfDeaf });
+    res.json(updated);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/owner/guilds/:guildId/voice-channels", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  const channels = guild.channels.cache
+    .filter((c) => c.type === ChannelType.GuildVoice)
+    .map((c) => ({ id: c.id, name: c.name }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  res.json(channels);
+});
+
 export default router;
