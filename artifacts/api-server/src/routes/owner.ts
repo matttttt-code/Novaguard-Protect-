@@ -17,15 +17,20 @@ import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { addToGlobalBlacklist, removeFromGlobalBlacklist, addToBlacklist, removeFromBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 import { notifyActionDM } from "../bot/dm-notify.js";
+import { addActionLog, getActionLog } from "../bot/owner-action-log.js";
+import { getAllNotesForGuild, getNotes, deleteNote, clearNotes } from "../bot/notes-store.js";
+import { getAllWarningsForGuild } from "../bot/warnings-store.js";
+import { getInviteBlacklist, removeInviteBlacklist } from "../bot/invite-blacklist-store.js";
 
 const router = Router();
 
 router.use(authMiddleware);
 router.use(ownerMiddleware);
 
-// ── DM notification pour toutes les actions mutantes du panneau owner ─────────
+// ── DM notification + journal des actions ─────────────────────────────────────
 router.use((req, _res, next) => {
   if (!["GET", "HEAD", "OPTIONS"].includes(req.method)) {
+    addActionLog({ timestamp: new Date().toISOString(), method: req.method, path: req.path, body: req.body ?? {} });
     const client = getClient();
     if (client?.isReady()) {
       notifyActionDM(client, req.method, req.path, req.body).catch(() => null);
@@ -1005,6 +1010,88 @@ router.post("/owner/bot/broadcast", async (req, res) => {
     }
   }
   res.json({ results });
+});
+
+// ── GET /api/owner/guilds — liste tous les serveurs ──────────────────────────
+router.get("/owner/guilds", (_req, res) => {
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  const guilds = [...client.guilds.cache.values()].map((g) => ({
+    id: g.id,
+    name: g.name,
+    memberCount: g.memberCount,
+    iconURL: g.iconURL() ?? null,
+  }));
+  res.json(guilds);
+});
+
+// ── POST /api/owner/guilds/:guildId/clone-config ──────────────────────────────
+router.post("/owner/guilds/:guildId/clone-config", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { targetGuildId } = req.body as { targetGuildId?: string };
+  if (!targetGuildId) { res.status(400).json({ error: "targetGuildId requis" }); return; }
+  if (targetGuildId === guildId) { res.status(400).json({ error: "Source et cible identiques" }); return; }
+  try {
+    const cfg = getConfig(guildId);
+    setConfig(targetGuildId, cfg);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/sanctions/export ───────────────────────────
+router.get("/owner/guilds/:guildId/sanctions/export", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  try {
+    const rows = getAllWarningsForGuild(guildId);
+    const lines: string[] = ["userId,caseId,reason,moderator,timestamp"];
+    for (const { userId, warnings } of rows) {
+      for (const w of warnings) {
+        const safe = (s: string) => `"${String(s).replace(/"/g, '""')}"`;
+        lines.push([safe(userId), w.caseId, safe(w.reason), safe(w.moderator), w.timestamp.toISOString()].join(","));
+      }
+    }
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="sanctions-${guildId}.csv"`);
+    res.send(lines.join("\n"));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/notes ─────────────────────────────────────
+router.get("/owner/guilds/:guildId/notes", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getAllNotesForGuild(guildId));
+});
+
+// ── DELETE /api/owner/guilds/:guildId/notes/:userId/:noteId ──────────────────
+router.delete("/owner/guilds/:guildId/notes/:userId/:noteId", (req, res) => {
+  const { guildId, userId, noteId } = req.params as Record<string, string>;
+  const deleted = deleteNote(guildId, userId, Number(noteId));
+  res.json({ ok: deleted });
+});
+
+// ── DELETE /api/owner/guilds/:guildId/notes/:userId ──────────────────────────
+router.delete("/owner/guilds/:guildId/notes/:userId", (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const count = clearNotes(guildId, userId);
+  res.json({ ok: true, count });
+});
+
+// ── GET /api/owner/action-log ────────────────────────────────────────────────
+router.get("/owner/action-log", (_req, res) => {
+  res.json(getActionLog());
+});
+
+// ── GET /api/owner/guilds/:guildId/invite-blacklist ───────────────────────────
+router.get("/owner/guilds/:guildId/invite-blacklist", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getInviteBlacklist(guildId));
+});
+
+// ── DELETE /api/owner/guilds/:guildId/invite-blacklist/:userId ────────────────
+router.delete("/owner/guilds/:guildId/invite-blacklist/:userId", (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const ok = removeInviteBlacklist(guildId, userId);
+  res.json({ ok });
 });
 
 // ── Error Test (alertes DM) ───────────────────────────────────────────────────

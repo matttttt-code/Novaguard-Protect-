@@ -17,6 +17,7 @@ import {
   Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
   Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
   Wifi, WifiOff, Radio, Activity, Server,
+  BookOpen, Download, Copy, ScrollText, Link2Off,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -66,6 +67,11 @@ type BotSettings = {
   captchaTimeoutMins: number; captchaMaxAttempts: number; captchaMode: string;
   welcomeEnabled: boolean; welcomeChannelId: string | null; welcomeMessage: string | null;
 };
+type NoteEntry = { id: number; content: string; moderator: string; moderatorId: string; timestamp: string };
+type NotesByUser = { userId: string; notes: NoteEntry[] };
+type InviteBlEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; timestamp: string };
+type ActionLogEntry = { timestamp: string; method: string; path: string; body: Record<string, unknown> };
+type GuildInfo = { id: string; name: string; memberCount: number; iconURL: string | null };
 
 const CHANNEL_TYPE_ICON: Record<number, React.ReactNode> = {
   0: <Hash className="h-3.5 w-3.5" />, 2: <Volume2 className="h-3.5 w-3.5" />,
@@ -256,6 +262,26 @@ export default function OwnerPanel() {
   const [ticketsLoading, setTicketsLoading] = useState(false);
   const [closingTicket, setClosingTicket] = useState("");
   const [closeTicketReason, setCloseTicketReason] = useState("");
+
+  // ── Notes state ────────────────────────────────────────────────────────────
+  const [notesByUser, setNotesByUser] = useState<NotesByUser[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteSearch, setNoteSearch] = useState("");
+
+  // ── Clone config state ─────────────────────────────────────────────────────
+  const [allGuilds, setAllGuilds] = useState<GuildInfo[]>([]);
+  const [cloneTarget, setCloneTarget] = useState("");
+  const [cloning, setCloning] = useState(false);
+  const [cloneResult, setCloneResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // ── Invite blacklist state ─────────────────────────────────────────────────
+  const [inviteBl, setInviteBl] = useState<InviteBlEntry[]>([]);
+  const [inviteBlLoading, setInviteBlLoading] = useState(false);
+  const [iblSearch, setIblSearch] = useState("");
+
+  // ── Action log state ───────────────────────────────────────────────────────
+  const [actionLog, setActionLog] = useState<ActionLogEntry[]>([]);
+  const [actionLogLoading, setActionLogLoading] = useState(false);
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -753,6 +779,94 @@ export default function OwnerPanel() {
     } finally { setClosingTicket(""); }
   }
 
+  // ── Notes actions ─────────────────────────────────────────────────────────
+  const fetchNotes = useCallback(async () => {
+    setNotesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/notes`);
+      if (r.ok) setNotesByUser(await r.json());
+    } finally { setNotesLoading(false); }
+  }, [guildId]);
+
+  async function deleteNoteEntry(userId: string, noteId: number) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/notes/${userId}/${noteId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Note supprimée ✓" }); await fetchNotes(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function clearUserNotes(userId: string) {
+    if (!confirm("Supprimer toutes les notes de cet utilisateur ?")) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/notes/${userId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: `${d.count} note(s) effacée(s) ✓` }); await fetchNotes(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function downloadSanctionsCsv() {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/sanctions/export`);
+    if (!r.ok) { toast({ title: "Erreur lors de l'export", variant: "destructive" }); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sanctions-${guildId}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Clone config actions ───────────────────────────────────────────────────
+  const fetchAllGuilds = useCallback(async () => {
+    const r = await apiFetch("/api/owner/guilds");
+    if (r.ok) setAllGuilds(await r.json());
+  }, []);
+
+  async function doCloneConfig() {
+    if (!cloneTarget) return;
+    setCloning(true);
+    setCloneResult(null);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/clone-config`, {
+        method: "POST",
+        body: JSON.stringify({ targetGuildId: cloneTarget }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        const name = allGuilds.find((g) => g.id === cloneTarget)?.name ?? cloneTarget;
+        setCloneResult({ ok: true, msg: `Configuration clonée vers "${name}" avec succès ✓` });
+        toast({ title: "Configuration clonée ✓" });
+      } else {
+        setCloneResult({ ok: false, msg: d.error ?? "Erreur inconnue" });
+        toast({ title: "Erreur", description: d.error, variant: "destructive" });
+      }
+    } finally { setCloning(false); }
+  }
+
+  // ── Invite blacklist actions ───────────────────────────────────────────────
+  const fetchInviteBl = useCallback(async () => {
+    setInviteBlLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/invite-blacklist`);
+      if (r.ok) setInviteBl(await r.json());
+    } finally { setInviteBlLoading(false); }
+  }, [guildId]);
+
+  async function removeInviteBlEntry(userId: string) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/invite-blacklist/${userId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Entrée retirée ✓" }); await fetchInviteBl(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  // ── Action log ─────────────────────────────────────────────────────────────
+  const fetchActionLog = useCallback(async () => {
+    setActionLogLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/action-log");
+      if (r.ok) setActionLog(await r.json());
+    } finally { setActionLogLoading(false); }
+  }, []);
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -865,6 +979,10 @@ export default function OwnerPanel() {
           <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
           <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
           <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={fetchBotStatus}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
+          <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
+          <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
+          <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
+          <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -2258,6 +2376,195 @@ export default function OwnerPanel() {
             </CardContent>
           </Card>
 
+        </TabsContent>
+
+        {/* ── Notes ─────────────────────────────────────────────────────────── */}
+        <TabsContent value="notes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📝 Notes Membres</CardTitle>
+              <CardDescription>Notes admin privées sur les membres de ce serveur. Chargement à l'ouverture de l'onglet.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={noteSearch} onChange={(e) => setNoteSearch(e.target.value)} placeholder="Filtrer par userId…" className="font-mono text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchNotes} disabled={notesLoading} className="gap-1.5 shrink-0">
+                  {notesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              {notesLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : notesByUser.filter((u) => !noteSearch || u.userId.includes(noteSearch)).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune note enregistrée sur ce serveur.</p>
+              ) : (
+                <div className="space-y-4 max-h-[40rem] overflow-y-auto pr-1">
+                  {notesByUser
+                    .filter((u) => !noteSearch || u.userId.includes(noteSearch))
+                    .map((u) => (
+                      <div key={u.userId} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-sm font-semibold">{u.userId}</span>
+                          <Button size="sm" variant="destructive" onClick={() => clearUserNotes(u.userId)} className="gap-1 text-xs h-7">
+                            <Trash2 className="h-3 w-3" /> Tout effacer
+                          </Button>
+                        </div>
+                        <div className="space-y-1.5">
+                          {u.notes.map((n) => (
+                            <div key={n.id} className="flex items-start gap-2 bg-muted/50 rounded px-3 py-2 text-sm">
+                              <span className="text-muted-foreground text-xs font-mono mt-0.5 shrink-0">#{n.id}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="break-words">{n.content}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{n.moderator} · {new Date(n.timestamp).toLocaleString("fr-FR")}</p>
+                              </div>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0" onClick={() => deleteNoteEntry(u.userId, n.id)}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📊 Export Sanctions (CSV)</CardTitle>
+              <CardDescription>Télécharge toutes les warns enregistrées par le bot sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={downloadSanctionsCsv} variant="outline" className="gap-2">
+                <Download className="h-4 w-4" /> Télécharger le CSV
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Clone Config ──────────────────────────────────────────────────── */}
+        <TabsContent value="cloneconfig" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Cloner la Configuration</CardTitle>
+              <CardDescription>Copie la configuration complète du serveur actuel (antilink, antispam, logs, captcha, bienvenue, sécurité…) vers un autre serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-3 bg-muted/50 rounded-lg text-sm space-y-1">
+                <p className="font-medium">Source : <span className="font-mono text-primary">{guildName || guildId}</span></p>
+                <p className="text-xs text-muted-foreground">Toutes les options de configuration du bot seront copiées vers le serveur cible. Les canaux logs / rôles / IDs devront être reconfigurés manuellement.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Serveur cible</label>
+                {allGuilds.filter((g) => g.id !== guildId).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aucun autre serveur disponible.</p>
+                ) : (
+                  <Select value={cloneTarget} onValueChange={setCloneTarget}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choisir le serveur cible…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allGuilds.filter((g) => g.id !== guildId).map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name} <span className="text-muted-foreground text-xs ml-1">({g.memberCount} membres)</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              {cloneResult && (
+                <Alert variant={cloneResult.ok ? "default" : "destructive"}>
+                  <AlertDescription>{cloneResult.msg}</AlertDescription>
+                </Alert>
+              )}
+              <Button onClick={doCloneConfig} disabled={cloning || !cloneTarget} variant="destructive" className="gap-2">
+                {cloning ? <><Loader2 className="h-4 w-4 animate-spin" />Clonage en cours…</> : <><Copy className="h-4 w-4" />Cloner la configuration</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invite Blacklist ──────────────────────────────────────────────── */}
+        <TabsContent value="invitebl" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔗 Invitations Blacklistées ({inviteBl.length})</CardTitle>
+              <CardDescription>Membres dont les invitations Discord sont bloquées sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={iblSearch} onChange={(e) => setIblSearch(e.target.value)} placeholder="Rechercher par tag ou ID…" className="text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchInviteBl} disabled={inviteBlLoading} className="gap-1.5 shrink-0">
+                  {inviteBlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              {inviteBlLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : inviteBl.filter((e) => !iblSearch || e.userTag.toLowerCase().includes(iblSearch.toLowerCase()) || e.userId.includes(iblSearch)).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune entrée dans la blacklist d'invitations.</p>
+              ) : (
+                <div className="space-y-2 max-h-[36rem] overflow-y-auto pr-1">
+                  {inviteBl
+                    .filter((e) => !iblSearch || e.userTag.toLowerCase().includes(iblSearch.toLowerCase()) || e.userId.includes(iblSearch))
+                    .map((e) => (
+                      <div key={e.userId} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-mono text-sm font-semibold">{e.userTag}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{e.userId}</p>
+                          <p className="text-xs mt-0.5">{e.reason} <span className="text-muted-foreground">· par {e.moderatorTag}</span></p>
+                          <p className="text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleString("fr-FR")}</p>
+                        </div>
+                        <Button size="sm" variant="destructive" onClick={() => removeInviteBlEntry(e.userId)} className="gap-1 text-xs shrink-0 h-8">
+                          <Trash2 className="h-3 w-3" /> Retirer
+                        </Button>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Action Log ────────────────────────────────────────────────────── */}
+        <TabsContent value="actionlog" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Journal des Actions Owner</CardTitle>
+              <CardDescription>Historique des 300 dernières actions mutantes effectuées depuis le panel (toutes sessions, en mémoire).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button variant="outline" size="sm" onClick={fetchActionLog} disabled={actionLogLoading} className="gap-1.5">
+                {actionLogLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Actualiser
+              </Button>
+              {actionLogLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : actionLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune action enregistrée (redémarrage du bot efface le journal).</p>
+              ) : (
+                <div className="space-y-1 max-h-[36rem] overflow-y-auto">
+                  {actionLog.map((entry, i) => (
+                    <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-muted/40 text-xs font-mono">
+                      <span className="text-muted-foreground shrink-0 w-36">{new Date(entry.timestamp).toLocaleString("fr-FR")}</span>
+                      <Badge
+                        variant={entry.method === "DELETE" ? "destructive" : entry.method === "POST" ? "default" : "secondary"}
+                        className="text-xs shrink-0 w-16 justify-center"
+                      >
+                        {entry.method}
+                      </Badge>
+                      <span className="text-foreground break-all flex-1">{entry.path}</span>
+                      {Object.keys(entry.body ?? {}).length > 0 && (
+                        <span className="text-muted-foreground truncate max-w-[180px] shrink-0" title={JSON.stringify(entry.body)}>
+                          {JSON.stringify(entry.body)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
       </Tabs>

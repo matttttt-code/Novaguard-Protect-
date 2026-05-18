@@ -63,6 +63,14 @@ export function deleteNote(guildId: string, userId: string, noteId: number): boo
   return true;
 }
 
+export function getAllNotesForGuild(guildId: string): { userId: string; notes: Note[] }[] {
+  const guildData = data[guildId];
+  if (!guildData) return [];
+  return Object.entries(guildData)
+    .filter(([, notes]) => notes.length > 0)
+    .map(([userId, notes]) => ({ userId, notes }));
+}
+
 export function clearNotes(guildId: string, userId: string): number {
   const notes = data[guildId]?.[userId] ?? [];
   const count = notes.length;

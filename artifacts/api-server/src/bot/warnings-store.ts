@@ -116,6 +116,16 @@ export function clearWarnings(guildId: string, userId: string): number {
   return count;
 }
 
+export function getAllWarningsForGuild(guildId: string): { userId: string; warnings: Warning[] }[] {
+  const guildWarnings = store.get(guildId);
+  if (!guildWarnings) return [];
+  const result: { userId: string; warnings: Warning[] }[] = [];
+  guildWarnings.forEach((warns, userId) => {
+    if (warns.length > 0) result.push({ userId, warnings: warns });
+  });
+  return result;
+}
+
 export function removeWarningByCase(
   guildId: string,
   userId: string,
