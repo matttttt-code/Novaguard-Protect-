@@ -895,12 +895,24 @@ router.post("/owner/guilds/:guildId/tickets/:channelId/close", async (req, res) 
     const closedById = payload?.userId ?? "0";
     const closingReason = reason?.trim() || "Fermé via Dashboard Owner";
     const ticket = getTicketByChannel(channelId);
-    if (ticket) {
+    try {
       const { content, count } = await buildTranscriptContent(channel);
+      const ticketData = ticket ?? {
+        channelId,
+        ticketNumber: 0,
+        userId: "0",
+        username: "Inconnu",
+        guildId,
+        createdAt: new Date(),
+        claimedBy: null,
+        claimedById: null,
+      };
       await saveTranscriptToDB({
-        ticket, guildName: guild.name, channelName: channel.name,
+        ticket: ticketData, guildName: guild.name, channelName: channel.name,
         content, messageCount: count, closedBy, closedById, reason: closingReason,
-      }).catch(() => null);
+      });
+    } catch (transcriptErr: any) {
+      req.log?.warn({ err: transcriptErr }, "[ticket-close] Erreur sauvegarde transcript");
     }
     const embed = new EmbedBuilder()
       .setColor(0xef4444).setTitle("🔒 Ticket fermé (Dashboard)")
@@ -1684,6 +1696,27 @@ router.post("/owner/guilds/:guildId/members/:memberId/timeout", async (req, res)
     await member.timeout(ms, reason?.trim() || "Timeout via Dashboard Owner");
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Server Blacklist ──────────────────────────────────────────────────────────
+import { addBlacklistedServer, removeBlacklistedServer, getBlacklistedServers } from "../bot/server-blacklist-store.js";
+
+router.get("/owner/server-blacklist", (_req, res) => {
+  res.json(getBlacklistedServers());
+});
+
+router.post("/owner/server-blacklist", (req, res) => {
+  const { guildId, label } = (req.body ?? {}) as { guildId?: string; label?: string };
+  if (!guildId?.trim()) { res.status(400).json({ error: "guildId requis" }); return; }
+  const entry = addBlacklistedServer(guildId.trim(), label?.trim() ?? "");
+  res.json(entry);
+});
+
+router.delete("/owner/server-blacklist/:guildId", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const removed = removeBlacklistedServer(guildId);
+  if (!removed) { res.status(404).json({ error: "Serveur non trouvé dans la blacklist" }); return; }
+  res.json({ ok: true });
 });
 
 // ── Voice Presence ────────────────────────────────────────────────────────────

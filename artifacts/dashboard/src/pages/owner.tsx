@@ -126,7 +126,7 @@ const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[
   securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
   moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
-  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json"] },
+  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl"] },
   logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog"] },
 };
 function tabCategory(tab: string): string {
@@ -312,6 +312,14 @@ export default function OwnerPanel() {
   const [broadcastMsg, setBroadcastMsg] = useState("");
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
+
+  // ── Server Blacklist state ─────────────────────────────────────────────────
+  interface ServerBlEntry { guildId: string; label: string; addedAt: string; }
+  const [serverBl, setServerBl] = useState<ServerBlEntry[]>([]);
+  const [serverBlLoading, setServerBlLoading] = useState(false);
+  const [serverBlNewId, setServerBlNewId] = useState("");
+  const [serverBlNewLabel, setServerBlNewLabel] = useState("");
+  const [serverBlSaving, setServerBlSaving] = useState(false);
 
   // ── Voice Presence state ───────────────────────────────────────────────────
   interface VoicePresence { connected: boolean; channelId?: string; channelName?: string; selfMute?: boolean; selfDeaf?: boolean; }
@@ -988,7 +996,6 @@ export default function OwnerPanel() {
 
   // ── Ticket actions ─────────────────────────────────────────────────────────
   async function doCloseTicket(channelId: string) {
-    if (!closeTicketReason.trim()) { toast({ title: "Raison requise", variant: "destructive" }); return; }
     setClosingTicket(channelId);
     try {
       const r = await apiFetch(`/api/owner/guilds/${guildId}/tickets/${channelId}/close`, {
@@ -1566,6 +1573,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
             <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
             <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
+            <TabsTrigger value="server-bl" className="gap-1.5 text-xs" onClick={async () => { setServerBlLoading(true); const r = await apiFetch("/api/owner/server-blacklist"); if (r.ok) setServerBl(await r.json()); setServerBlLoading(false); }}><Ban className="h-3.5 w-3.5" />Serveurs BL</TabsTrigger>
           </>}
           {/* Logs */}
           {activeCategory === "logs" && <>
@@ -2853,7 +2861,16 @@ export default function OwnerPanel() {
               <CardTitle className="text-base font-mono uppercase">🎫 Tickets Actifs</CardTitle>
               <CardDescription>Liste tous les tickets ouverts. Ferme un ticket et génère son transcript.</CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Raison de fermeture <span className="text-muted-foreground">(optionnel)</span></label>
+                <Input
+                  value={closeTicketReason}
+                  onChange={(e) => setCloseTicketReason(e.target.value)}
+                  placeholder="Laissez vide pour utiliser la raison par défaut"
+                  className="text-sm"
+                />
+              </div>
               {ticketsLoading ? (
                 <div className="flex justify-center items-center py-12">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -2876,10 +2893,11 @@ export default function OwnerPanel() {
                       <Button
                         size="sm"
                         variant="destructive"
+                        disabled={closingTicket === t.channelId}
                         onClick={() => doCloseTicket(t.channelId)}
                         className="gap-1.5 text-xs flex-shrink-0"
                       >
-                        <Trash2 className="h-3.5 w-3.5" /> Clore
+                        {closingTicket === t.channelId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Clore
                       </Button>
                     </div>
                   ))}
@@ -4083,6 +4101,94 @@ export default function OwnerPanel() {
                   {configImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Importer
                 </Button>
               </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Serveurs Blacklistés ───────────────────────────────────────────── */}
+        <TabsContent value="server-bl" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Serveurs Blacklistés
+              </CardTitle>
+              <CardDescription>
+                Ajoutez des IDs de serveurs suspects. La commande <span className="font-mono text-primary">/verif</span> ou <span className="font-mono text-primary">&verif @user</span> vérifie si un utilisateur est présent dans ces serveurs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Ajouter */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Ajouter un serveur</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">ID du serveur</label>
+                    <Input value={serverBlNewId} onChange={(e) => setServerBlNewId(e.target.value.trim())} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Nom / label (optionnel)</label>
+                    <Input value={serverBlNewLabel} onChange={(e) => setServerBlNewLabel(e.target.value)} placeholder="Serveur de raid…" className="text-sm" />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      className="gap-2 w-full"
+                      disabled={serverBlSaving || !serverBlNewId.trim()}
+                      onClick={async () => {
+                        setServerBlSaving(true);
+                        try {
+                          const r = await apiFetch("/api/owner/server-blacklist", {
+                            method: "POST",
+                            body: JSON.stringify({ guildId: serverBlNewId, label: serverBlNewLabel }),
+                          });
+                          if (r.ok) {
+                            const entry = await r.json();
+                            setServerBl((prev) => [entry, ...prev.filter((e) => e.guildId !== entry.guildId)]);
+                            setServerBlNewId(""); setServerBlNewLabel("");
+                            toast({ title: "Serveur ajouté à la blacklist ✓" });
+                          } else {
+                            const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                          }
+                        } finally { setServerBlSaving(false); }
+                      }}
+                    >
+                      {serverBlSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Liste */}
+              {serverBlLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : serverBl.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8 text-sm">Aucun serveur blacklisté.</div>
+              ) : (
+                <div className="space-y-2">
+                  {serverBl.map((entry) => (
+                    <div key={entry.guildId} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                      <Ban className="h-4 w-4 text-red-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{entry.label !== entry.guildId ? entry.label : <span className="text-muted-foreground">Sans nom</span>}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{entry.guildId} · ajouté le {new Date(entry.addedAt).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 flex-shrink-0"
+                        onClick={async () => {
+                          const r = await apiFetch(`/api/owner/server-blacklist/${entry.guildId}`, { method: "DELETE" });
+                          if (r.ok) { setServerBl((prev) => prev.filter((e) => e.guildId !== entry.guildId)); toast({ title: "Serveur retiré ✓" }); }
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                💡 Le bot doit être présent dans le serveur blacklisté pour détecter si un utilisateur y est membre.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>

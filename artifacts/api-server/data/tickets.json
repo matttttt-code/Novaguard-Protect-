@@ -1,6 +1,17 @@
 {
-  "tickets": [],
+  "tickets": [
+    {
+      "channelId": "1506008995846946826",
+      "ticketNumber": 7,
+      "userId": "1209963350218248203",
+      "username": "mattlec_",
+      "guildId": "1504463605163364573",
+      "createdAt": "2026-05-18T19:02:04.998Z",
+      "claimedBy": null,
+      "claimedById": null
+    }
+  ],
   "counters": {
-    "1504463605163364573": 4
+    "1504463605163364573": 7
   }
 }
