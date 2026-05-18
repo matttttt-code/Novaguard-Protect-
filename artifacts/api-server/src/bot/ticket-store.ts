@@ -92,6 +92,10 @@ export function isTicketChannel(channelId: string): boolean {
   return byChannel.has(channelId);
 }
 
+export function getTicketsByGuild(guildId: string): TicketData[] {
+  return [...byChannel.values()].filter((t) => t.guildId === guildId);
+}
+
 export function resetTickets(guildId: string): number {
   let count = 0;
   byChannel.forEach((data, channelId) => {

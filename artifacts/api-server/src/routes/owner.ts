@@ -7,8 +7,10 @@ import {
   TextChannel,
   GuildMember,
   WebhookClient,
+  EmbedBuilder,
 } from "discord.js";
-import { getConfig } from "../bot/guild-config-store.js";
+import { getConfig, setConfig } from "../bot/guild-config-store.js";
+import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 
 const router = Router();
@@ -485,6 +487,318 @@ router.delete("/owner/guilds/:guildId/testbot/:nom", async (req, res) => {
     const wh = webhooks.find((w) => w.name === `[TestBot] ${nom}` || w.name.replace("[TestBot] ", "") === nom);
     if (!wh) { res.status(404).json({ error: "Bot de test introuvable" }); return; }
     await wh.delete("Suppression via Dashboard Owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Send Embed ────────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/send-embed", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, title, description, color, imageURL, footer } = req.body as {
+    channelId?: string; title?: string; description?: string;
+    color?: string; imageURL?: string; footer?: string;
+  };
+  if (!channelId || (!title?.trim() && !description?.trim())) {
+    res.status(400).json({ error: "channelId + titre ou description requis" }); return;
+  }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel || !(channel instanceof TextChannel)) {
+      res.status(400).json({ error: "Salon textuel introuvable" }); return;
+    }
+    const embed = new EmbedBuilder();
+    if (title?.trim()) embed.setTitle(title.trim().slice(0, 256));
+    if (description?.trim()) embed.setDescription(description.trim().slice(0, 4096));
+    if (color) { try { embed.setColor(color as any); } catch { /* ignore */ } }
+    if (imageURL?.trim()) { try { embed.setImage(imageURL.trim()); } catch { /* ignore */ } }
+    if (footer?.trim()) embed.setFooter({ text: footer.trim().slice(0, 2048) });
+    embed.setTimestamp();
+    const msg = await channel.send({ embeds: [embed] });
+    res.json({ ok: true, messageId: msg.id });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Schedule Message ──────────────────────────────────────────────────────────
+const scheduledMsgs = new Map<string, ReturnType<typeof setTimeout>>();
+router.post("/owner/guilds/:guildId/schedule-message", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, content, delayMinutes } = req.body as {
+    channelId?: string; content?: string; delayMinutes?: number;
+  };
+  if (!channelId || !content?.trim() || !delayMinutes || Number(delayMinutes) < 1) {
+    res.status(400).json({ error: "channelId, content et delayMinutes (≥1) requis" }); return;
+  }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel || !(channel instanceof TextChannel)) {
+      res.status(400).json({ error: "Salon textuel introuvable" }); return;
+    }
+    const delay = Math.min(Number(delayMinutes), 1440) * 60 * 1000;
+    const key = `${guildId}-${channelId}-${Date.now()}`;
+    const timer = setTimeout(async () => {
+      scheduledMsgs.delete(key);
+      await (channel as TextChannel).send(content.trim()).catch(() => null);
+    }, delay);
+    scheduledMsgs.set(key, timer);
+    const sendAt = new Date(Date.now() + delay).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+    res.json({ ok: true, scheduledAt: sendAt });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Edit Bot Message ──────────────────────────────────────────────────────────
+router.patch("/owner/guilds/:guildId/channels/:channelId/messages/:messageId", async (req, res) => {
+  const { guildId, channelId, messageId } = req.params as { guildId: string; channelId: string; messageId: string };
+  const { content } = req.body as { content?: string };
+  if (!content?.trim()) { res.status(400).json({ error: "content requis" }); return; }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel || !(channel instanceof TextChannel)) {
+      res.status(400).json({ error: "Salon introuvable" }); return;
+    }
+    const message = await channel.messages.fetch(messageId);
+    if (message.author.id !== client!.user!.id) {
+      res.status(403).json({ error: "Seuls les messages du bot peuvent être modifiés" }); return;
+    }
+    await message.edit(content.trim());
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Unban ─────────────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/members/unban", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { userId, reason } = req.body as { userId?: string; reason?: string };
+  if (!userId?.trim()) { res.status(400).json({ error: "userId requis" }); return; }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    await guild.members.unban(userId.trim(), reason?.trim() || "Débanni via Dashboard Owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Add / Remove Role ─────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/members/:memberId/role", async (req, res) => {
+  const { guildId, memberId } = req.params as { guildId: string; memberId: string };
+  const { roleId, action } = req.body as { roleId?: string; action?: "add" | "remove" };
+  if (!roleId || !action) { res.status(400).json({ error: "roleId et action requis" }); return; }
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const member = await guild.members.fetch(memberId);
+    const role = guild.roles.cache.get(roleId);
+    if (!role) { res.status(404).json({ error: "Rôle introuvable" }); return; }
+    const botMember = guild.members.me;
+    if (botMember && role.position >= botMember.roles.highest.position) {
+      res.status(403).json({ error: "Position du rôle trop haute pour le bot" }); return;
+    }
+    if (action === "add") {
+      await member.roles.add(role, "Rôle ajouté via Dashboard Owner");
+    } else {
+      await member.roles.remove(role, "Rôle retiré via Dashboard Owner");
+    }
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Lock Channel ──────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/channels/:channelId/lock", async (req, res) => {
+  const { guildId, channelId } = req.params as { guildId: string; channelId: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId) as TextChannel | null;
+    if (!channel || !("permissionOverwrites" in channel)) { res.status(400).json({ error: "Salon introuvable" }); return; }
+    await channel.permissionOverwrites.edit(guildId, { SendMessages: false });
+    if (!channel.name.startsWith("🔒")) await channel.setName("🔒" + channel.name).catch(() => null);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Unlock Channel ────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/channels/:channelId/unlock", async (req, res) => {
+  const { guildId, channelId } = req.params as { guildId: string; channelId: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId) as TextChannel | null;
+    if (!channel || !("permissionOverwrites" in channel)) { res.status(400).json({ error: "Salon introuvable" }); return; }
+    await channel.permissionOverwrites.edit(guildId, { SendMessages: null });
+    if (channel.name.startsWith("🔒")) await channel.setName(channel.name.slice(2)).catch(() => null);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Purge Channel ─────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/channels/:channelId/purge", async (req, res) => {
+  const { guildId, channelId } = req.params as { guildId: string; channelId: string };
+  const { limit, userId } = req.body as { limit?: number; userId?: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId);
+    if (!channel || !(channel instanceof TextChannel)) { res.status(400).json({ error: "Salon textuel introuvable" }); return; }
+    const fetchLimit = Math.min(Math.max(Number(limit ?? 50), 1), 100);
+    const fetched = await channel.messages.fetch({ limit: fetchLimit });
+    const toDelete = userId?.trim() ? fetched.filter((m) => m.author.id === userId.trim()) : fetched;
+    if (toDelete.size === 0) { res.json({ ok: true, deleted: 0 }); return; }
+    const result = await channel.bulkDelete(toDelete, true);
+    res.json({ ok: true, deleted: result.size });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Slowmode ──────────────────────────────────────────────────────────────────
+router.patch("/owner/guilds/:guildId/channels/:channelId/slowmode", async (req, res) => {
+  const { guildId, channelId } = req.params as { guildId: string; channelId: string };
+  const { seconds } = req.body as { seconds?: number };
+  const s = Math.min(Math.max(Number(seconds ?? 0), 0), 21600);
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId) as TextChannel | null;
+    if (!channel || !("setRateLimitPerUser" in channel)) { res.status(400).json({ error: "Salon introuvable ou incompatible" }); return; }
+    await (channel as TextChannel).setRateLimitPerUser(s, "Slowmode via Dashboard Owner");
+    res.json({ ok: true, seconds: s });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Automod Config ────────────────────────────────────────────────────────────
+router.get("/owner/guilds/:guildId/automod", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  try {
+    const cfg = getConfig(guildId);
+    const al = getAntilinkConfig(guildId);
+    res.json({
+      antiInsultEnabled: cfg.antiInsultEnabled,
+      antiInsultWords: cfg.antiInsultWords,
+      antiWebhookEnabled: cfg.antiWebhookEnabled,
+      securityLevel: cfg.securityLevel,
+      antilinkEnabled: al.enabled,
+      antilinkAction: al.action,
+      antilinkTimeoutMinutes: al.timeoutMinutes,
+      antilinkAllowedDomains: al.allowedDomains,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/guilds/:guildId/automod", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const {
+    antiInsultEnabled, antiInsultWords, antiWebhookEnabled, securityLevel,
+    antilinkEnabled, antilinkAction, antilinkTimeoutMinutes, antilinkAllowedDomains,
+  } = (req.body ?? {}) as {
+    antiInsultEnabled?: boolean; antiInsultWords?: string[]; antiWebhookEnabled?: boolean;
+    securityLevel?: 1 | 2 | 3; antilinkEnabled?: boolean;
+    antilinkAction?: "delete" | "warn" | "timeout"; antilinkTimeoutMinutes?: number;
+    antilinkAllowedDomains?: string[];
+  };
+  try {
+    const gPatch: Record<string, unknown> = {};
+    if (antiInsultEnabled !== undefined) gPatch["antiInsultEnabled"] = antiInsultEnabled;
+    if (antiInsultWords !== undefined) gPatch["antiInsultWords"] = antiInsultWords;
+    if (antiWebhookEnabled !== undefined) gPatch["antiWebhookEnabled"] = antiWebhookEnabled;
+    if (securityLevel !== undefined) gPatch["securityLevel"] = securityLevel;
+    if (Object.keys(gPatch).length > 0) setConfig(guildId, gPatch as any);
+
+    const alPatch: Record<string, unknown> = {};
+    if (antilinkEnabled !== undefined) alPatch["enabled"] = antilinkEnabled;
+    if (antilinkAction !== undefined) alPatch["action"] = antilinkAction;
+    if (antilinkTimeoutMinutes !== undefined) alPatch["timeoutMinutes"] = antilinkTimeoutMinutes;
+    if (antilinkAllowedDomains !== undefined) alPatch["allowedDomains"] = antilinkAllowedDomains;
+    if (Object.keys(alPatch).length > 0) setAntilinkConfig(guildId, alPatch as any);
+
+    const cfg = getConfig(guildId);
+    const al = getAntilinkConfig(guildId);
+    res.json({
+      antiInsultEnabled: cfg.antiInsultEnabled,
+      antiInsultWords: cfg.antiInsultWords,
+      antiWebhookEnabled: cfg.antiWebhookEnabled,
+      securityLevel: cfg.securityLevel,
+      antilinkEnabled: al.enabled,
+      antilinkAction: al.action,
+      antilinkTimeoutMinutes: al.timeoutMinutes,
+      antilinkAllowedDomains: al.allowedDomains,
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Active Tickets ────────────────────────────────────────────────────────────
+import { getTicketsByGuild, getTicketByChannel, closeTicket as closeTicketInStore } from "../bot/ticket-store.js";
+import { buildTranscriptContent, saveTranscriptToDB } from "../bot/transcript-db.js";
+import { sendLog, logEmbed } from "../bot/log.js";
+
+router.get("/owner/guilds/:guildId/tickets", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  try {
+    const tickets = getTicketsByGuild(guildId);
+    res.json(tickets.map((t) => ({
+      channelId: t.channelId,
+      ticketNumber: t.ticketNumber,
+      userId: t.userId,
+      username: t.username,
+      claimedBy: t.claimedBy,
+      createdAt: t.createdAt.toISOString(),
+    })));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/guilds/:guildId/tickets/:channelId/close", async (req, res) => {
+  const { guildId, channelId } = req.params as { guildId: string; channelId: string };
+  const { reason } = (req.body ?? {}) as { reason?: string };
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel || !(channel instanceof TextChannel)) {
+      res.status(404).json({ error: "Salon ticket introuvable" }); return;
+    }
+    const payload = (req as any).jwtPayload as { userTag?: string; userId?: string } | undefined;
+    const closedBy = payload?.userTag ?? "Dashboard Owner";
+    const closedById = payload?.userId ?? "0";
+    const closingReason = reason?.trim() || "Fermé via Dashboard Owner";
+    const ticket = getTicketByChannel(channelId);
+    if (ticket) {
+      const { content, count } = await buildTranscriptContent(channel);
+      await saveTranscriptToDB({
+        ticket, guildName: guild.name, channelName: channel.name,
+        content, messageCount: count, closedBy, closedById, reason: closingReason,
+      }).catch(() => null);
+    }
+    const embed = new EmbedBuilder()
+      .setColor(0xef4444).setTitle("🔒 Ticket fermé (Dashboard)")
+      .addFields(
+        { name: "Fermé par", value: closedBy, inline: true },
+        { name: "Raison", value: closingReason, inline: true },
+        ...(ticket ? [{ name: "Ticket", value: `#${ticket.ticketNumber}`, inline: true }] : []),
+      )
+      .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." })
+      .setTimestamp();
+    await channel.send({ embeds: [embed] });
+    await sendLog(client, logEmbed(0xef4444, "🔒 Ticket fermé (Dashboard)", [
+      { name: "Salon", value: channel.name, inline: true },
+      { name: "Raison", value: closingReason, inline: true },
+    ], { tag: closedBy, id: closedById }), { guildId });
+    setTimeout(async () => {
+      closeTicketInStore(channelId);
+      await channel.delete("Ticket fermé via dashboard").catch(() => null);
+    }, 5000);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

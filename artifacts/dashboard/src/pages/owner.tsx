@@ -15,6 +15,7 @@ import {
   ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw,
   Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
   Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
+  Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -38,6 +39,18 @@ type TranscriptFull = TranscriptMeta & { content: string };
 type CaptchaLogEntry = {
   id: number; guildId: string; guildName: string; userId: string; userTag: string;
   event: string; details: string; createdAt: string;
+};
+
+type Role = { id: string; name: string; color: string; position: number };
+type AutomodCfg = {
+  antiInsultEnabled: boolean; antiInsultWords: string[]; antiWebhookEnabled: boolean;
+  securityLevel: 1 | 2 | 3; antilinkEnabled: boolean;
+  antilinkAction: "delete" | "warn" | "timeout"; antilinkTimeoutMinutes: number;
+  antilinkAllowedDomains: string[];
+};
+type ActiveTicket = {
+  channelId: string; ticketNumber: number; userId: string; username: string;
+  claimedBy: string | null; createdAt: string;
 };
 
 type BotSettings = {
@@ -166,6 +179,65 @@ export default function OwnerPanel() {
   const [tbSending, setTbSending] = useState(false);
   const [errTestLoading, setErrTestLoading] = useState(false);
 
+  // ── Embed builder state ────────────────────────────────────────────────────
+  const [embedChannelId, setEmbedChannelId] = useState("");
+  const [embedTitle, setEmbedTitle] = useState("");
+  const [embedDesc, setEmbedDesc] = useState("");
+  const [embedColor, setEmbedColor] = useState("#5865f2");
+  const [embedImage, setEmbedImage] = useState("");
+  const [embedFooter, setEmbedFooter] = useState("");
+  const [sendingEmbed, setSendingEmbed] = useState(false);
+
+  // ── Schedule message state ─────────────────────────────────────────────────
+  const [schedChannelId, setSchedChannelId] = useState("");
+  const [schedContent, setSchedContent] = useState("");
+  const [schedDelay, setSchedDelay] = useState("10");
+  const [scheduling, setScheduling] = useState(false);
+
+  // ── Edit message state ─────────────────────────────────────────────────────
+  const [editChannelId, setEditChannelId] = useState("");
+  const [editMsgId, setEditMsgId] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  // ── Unban state ────────────────────────────────────────────────────────────
+  const [unbanId, setUnbanId] = useState("");
+  const [unbanReason, setUnbanReason] = useState("");
+  const [unbanning, setUnbanning] = useState(false);
+
+  // ── Role management state ──────────────────────────────────────────────────
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [roleMemberId, setRoleMemberId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [roleAction, setRoleAction] = useState<"add" | "remove">("add");
+  const [roleAssignLoading, setRoleAssignLoading] = useState(false);
+  const [roleFilterId, setRoleFilterId] = useState("");
+
+  // ── Channel moderation state ───────────────────────────────────────────────
+  const [lockChannelId, setLockChannelId] = useState("");
+  const [locking, setLocking] = useState(false);
+  const [purgeChannelId, setPurgeChannelId] = useState("");
+  const [purgeLimit, setPurgeLimit] = useState("50");
+  const [purgeUserId, setPurgeUserId] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [slowChannelId, setSlowChannelId] = useState("");
+  const [slowSeconds, setSlowSeconds] = useState("5");
+  const [slowing, setSlowing] = useState(false);
+
+  // ── Automod state ──────────────────────────────────────────────────────────
+  const [automodCfg, setAutomodCfg] = useState<AutomodCfg | null>(null);
+  const [amLoading, setAmLoading] = useState(false);
+  const [amSaving, setAmSaving] = useState(false);
+  const [amNewWord, setAmNewWord] = useState("");
+  const [amNewDomain, setAmNewDomain] = useState("");
+
+  // ── Tickets state ──────────────────────────────────────────────────────────
+  const [tickets, setTickets] = useState<ActiveTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [closingTicket, setClosingTicket] = useState("");
+  const [closeTicketReason, setCloseTicketReason] = useState("");
+
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
@@ -239,6 +311,30 @@ export default function OwnerPanel() {
     } finally { setTbLoading(false); }
   }, [guildId]);
 
+  const fetchRoles = useCallback(async () => {
+    setRolesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/roles`);
+      if (r.ok) setRoles(await r.json());
+    } finally { setRolesLoading(false); }
+  }, [guildId]);
+
+  const fetchAutomod = useCallback(async () => {
+    setAmLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/automod`);
+      if (r.ok) setAutomodCfg(await r.json());
+    } finally { setAmLoading(false); }
+  }, [guildId]);
+
+  const fetchTickets = useCallback(async () => {
+    setTicketsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tickets`);
+      if (r.ok) setTickets(await r.json());
+    } finally { setTicketsLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -249,7 +345,10 @@ export default function OwnerPanel() {
     fetchBotSettings();
     fetchCaptchaLogs();
     fetchTestBots();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs, fetchTestBots]);
+    fetchRoles();
+    fetchAutomod();
+    fetchTickets();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -421,6 +520,174 @@ export default function OwnerPanel() {
     } finally { setErrTestLoading(false); }
   }
 
+  // ── Messages advanced actions ──────────────────────────────────────────────
+  async function sendEmbed() {
+    if (!embedChannelId || (!embedTitle.trim() && !embedDesc.trim())) return;
+    setSendingEmbed(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/send-embed`, {
+        method: "POST",
+        body: JSON.stringify({ channelId: embedChannelId, title: embedTitle.trim() || undefined, description: embedDesc.trim() || undefined, color: embedColor, imageURL: embedImage.trim() || undefined, footer: embedFooter.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Embed envoyé ✓", description: `ID: ${d.messageId}` }); setEmbedTitle(""); setEmbedDesc(""); setEmbedImage(""); setEmbedFooter(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSendingEmbed(false); }
+  }
+
+  async function scheduleMessage() {
+    if (!schedChannelId || !schedContent.trim() || Number(schedDelay) < 1) return;
+    setScheduling(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/schedule-message`, {
+        method: "POST",
+        body: JSON.stringify({ channelId: schedChannelId, content: schedContent.trim(), delayMinutes: Number(schedDelay) }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message planifié ✓", description: `Envoi prévu à ${d.scheduledAt}` }); setSchedContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setScheduling(false); }
+  }
+
+  async function editMessage() {
+    if (!editChannelId || !editMsgId.trim() || !editContent.trim()) return;
+    setEditing(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${editChannelId}/messages/${editMsgId.trim()}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content: editContent.trim() }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message modifié ✓" }); setEditMsgId(""); setEditContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setEditing(false); }
+  }
+
+  // ── Member actions ─────────────────────────────────────────────────────────
+  async function unbanUser() {
+    if (!unbanId.trim()) return;
+    setUnbanning(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/unban`, {
+        method: "POST",
+        body: JSON.stringify({ userId: unbanId.trim(), reason: unbanReason.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Utilisateur débanni ✓" }); setUnbanId(""); setUnbanReason(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setUnbanning(false); }
+  }
+
+  async function assignRole() {
+    if (!roleMemberId.trim() || !roleId) return;
+    setRoleAssignLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/${roleMemberId.trim()}/role`, {
+        method: "POST",
+        body: JSON.stringify({ roleId, action: roleAction }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: roleAction === "add" ? "Rôle ajouté ✓" : "Rôle retiré ✓" });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setRoleAssignLoading(false); }
+  }
+
+  // ── Channel actions ────────────────────────────────────────────────────────
+  async function lockUnlockChannel(action: "lock" | "unlock") {
+    if (!lockChannelId) return;
+    setLocking(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${lockChannelId}/${action}`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) { toast({ title: action === "lock" ? "Salon verrouillé 🔒" : "Salon déverrouillé 🔓" }); await fetchChannels(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setLocking(false); }
+  }
+
+  async function purgeChannel() {
+    if (!purgeChannelId) return;
+    const limit = Math.max(1, Math.min(100, Number(purgeLimit) || 50));
+    if (!confirm(`Supprimer jusqu'à ${limit} messages${purgeUserId.trim() ? " de cet utilisateur" : ""} ?`)) return;
+    setPurging(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${purgeChannelId}/purge`, {
+        method: "POST",
+        body: JSON.stringify({ limit, userId: purgeUserId.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: "Purge effectuée ✓", description: `${d.deleted} message(s) supprimé(s)` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setPurging(false); }
+  }
+
+  async function setSlowmode() {
+    if (!slowChannelId) return;
+    const s = Math.max(0, Math.min(21600, Number(slowSeconds) || 0));
+    setSlowing(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${slowChannelId}/slowmode`, {
+        method: "PATCH",
+        body: JSON.stringify({ seconds: s }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: s === 0 ? "Slowmode désactivé ✓" : `Slowmode ${s}s appliqué ✓` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSlowing(false); }
+  }
+
+  // ── Automod actions ────────────────────────────────────────────────────────
+  async function patchAutomod(patch: Partial<AutomodCfg>) {
+    if (!automodCfg) return;
+    setAmSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/automod`, { method: "PATCH", body: JSON.stringify(patch) });
+      const d = await r.json();
+      if (r.ok) { setAutomodCfg(d); toast({ title: "Automod mis à jour ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAmSaving(false); }
+  }
+
+  async function addAmWord() {
+    if (!amNewWord.trim() || !automodCfg) return;
+    const w = amNewWord.trim().toLowerCase();
+    if (automodCfg.antiInsultWords.includes(w)) { toast({ title: "Mot déjà présent", variant: "destructive" }); return; }
+    await patchAutomod({ antiInsultWords: [...automodCfg.antiInsultWords, w] });
+    setAmNewWord("");
+  }
+
+  async function removeAmWord(word: string) {
+    if (!automodCfg) return;
+    await patchAutomod({ antiInsultWords: automodCfg.antiInsultWords.filter((w) => w !== word) });
+  }
+
+  async function addAmDomain() {
+    if (!amNewDomain.trim() || !automodCfg) return;
+    const d = amNewDomain.trim().toLowerCase();
+    if (automodCfg.antilinkAllowedDomains.includes(d)) { toast({ title: "Domaine déjà présent", variant: "destructive" }); return; }
+    await patchAutomod({ antilinkAllowedDomains: [...automodCfg.antilinkAllowedDomains, d] });
+    setAmNewDomain("");
+  }
+
+  async function removeAmDomain(domain: string) {
+    if (!automodCfg) return;
+    await patchAutomod({ antilinkAllowedDomains: automodCfg.antilinkAllowedDomains.filter((d) => d !== domain) });
+  }
+
+  // ── Ticket actions ─────────────────────────────────────────────────────────
+  async function doCloseTicket(channelId: string) {
+    if (!closeTicketReason.trim()) { toast({ title: "Raison requise", variant: "destructive" }); return; }
+    setClosingTicket(channelId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tickets/${channelId}/close`, {
+        method: "POST",
+        body: JSON.stringify({ reason: closeTicketReason.trim() }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Ticket fermé ✓" }); setCloseTicketReason(""); await fetchTickets(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setClosingTicket(""); }
+  }
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -530,6 +797,8 @@ export default function OwnerPanel() {
           <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
           <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
           <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
+          <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
+          <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -565,6 +834,119 @@ export default function OwnerPanel() {
               </div>
               <Button onClick={sendMessage} disabled={sendingMsg || !selectedChannelId || !messageContent.trim()} className="gap-2">
                 {sendingMsg ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Embed builder */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎨 Envoyer un Embed</CardTitle>
+              <CardDescription>Construit et envoie un message embed avec titre, description et couleur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                <Select value={embedChannelId} onValueChange={setEmbedChannelId}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                  <SelectContent>
+                    {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Titre</label>
+                  <Input value={embedTitle} onChange={(e) => setEmbedTitle(e.target.value)} placeholder="Titre de l'embed..." maxLength={256} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Couleur</label>
+                  <div className="flex gap-2 items-center">
+                    <input type="color" value={embedColor} onChange={(e) => setEmbedColor(e.target.value)} className="h-9 w-14 rounded border border-border cursor-pointer bg-transparent" />
+                    <Input value={embedColor} onChange={(e) => setEmbedColor(e.target.value)} placeholder="#5865f2" className="font-mono flex-1" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Description</label>
+                <Textarea value={embedDesc} onChange={(e) => setEmbedDesc(e.target.value)} placeholder="Contenu de l'embed (markdown Discord)..." rows={3} className="font-mono text-sm resize-none" maxLength={4096} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Image (URL, facultatif)</label>
+                  <Input value={embedImage} onChange={(e) => setEmbedImage(e.target.value)} placeholder="https://..." />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Footer (facultatif)</label>
+                  <Input value={embedFooter} onChange={(e) => setEmbedFooter(e.target.value)} placeholder="Texte de bas de page..." maxLength={2048} />
+                </div>
+              </div>
+              <Button onClick={sendEmbed} disabled={sendingEmbed || !embedChannelId || (!embedTitle.trim() && !embedDesc.trim())} className="gap-2">
+                {sendingEmbed ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer l'embed</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Schedule message */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⏰ Programmer un Message</CardTitle>
+              <CardDescription>Envoie un message dans X minutes dans le salon choisi.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={schedChannelId} onValueChange={setSchedChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Délai (minutes)</label>
+                  <Input type="number" min="1" max="1440" value={schedDelay} onChange={(e) => setSchedDelay(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Contenu</label>
+                <Textarea value={schedContent} onChange={(e) => setSchedContent(e.target.value)} placeholder="Message à envoyer dans X minutes..." rows={3} className="font-mono text-sm resize-none" />
+              </div>
+              <Button onClick={scheduleMessage} disabled={scheduling || !schedChannelId || !schedContent.trim() || Number(schedDelay) < 1} className="gap-2">
+                {scheduling ? <><Loader2 className="h-4 w-4 animate-spin" />Planification…</> : <><Clock className="h-4 w-4" />Planifier</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Edit message */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">✏️ Modifier un Message du Bot</CardTitle>
+              <CardDescription>Modifie le contenu d'un message envoyé par le bot via son ID.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={editChannelId} onValueChange={setEditChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID du message</label>
+                  <Input value={editMsgId} onChange={(e) => setEditMsgId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Nouveau contenu</label>
+                <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} placeholder="Nouveau texte du message..." rows={3} className="font-mono text-sm resize-none" />
+              </div>
+              <Button onClick={editMessage} disabled={editing || !editChannelId || !editMsgId.trim() || !editContent.trim()} className="gap-2">
+                {editing ? <><Loader2 className="h-4 w-4 animate-spin" />Modification…</> : <><Pencil className="h-4 w-4" />Modifier</>}
               </Button>
             </CardContent>
           </Card>
@@ -641,6 +1023,93 @@ export default function OwnerPanel() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Lock / Unlock */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔒 Verrouiller / Déverrouiller</CardTitle>
+              <CardDescription>Empêche ou restaure l'envoi de messages (@everyone) en un clic.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Salon cible</label>
+                <Select value={lockChannelId} onValueChange={setLockChannelId}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon texte..." /></SelectTrigger>
+                  <SelectContent>
+                    {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => lockUnlockChannel("lock")} disabled={locking || !lockChannelId} variant="destructive" className="gap-2">
+                  {locking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />} Verrouiller
+                </Button>
+                <Button onClick={() => lockUnlockChannel("unlock")} disabled={locking || !lockChannelId} variant="outline" className="gap-2">
+                  {locking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlock className="h-4 w-4" />} Déverrouiller
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Purge */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🗑️ Purge de Messages</CardTitle>
+              <CardDescription>Supprime les X derniers messages d'un salon (max 100, ≤14 jours).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-1">
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={purgeChannelId} onValueChange={setPurgeChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nombre (1-100)</label>
+                  <Input type="number" min="1" max="100" value={purgeLimit} onChange={(e) => setPurgeLimit(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID utilisateur (optionnel)</label>
+                  <Input value={purgeUserId} onChange={(e) => setPurgeUserId(e.target.value)} placeholder="ID ou vide pour tous" className="font-mono" />
+                </div>
+              </div>
+              <Button onClick={purgeChannel} disabled={purging || !purgeChannelId} variant="destructive" className="gap-2">
+                {purging ? <><Loader2 className="h-4 w-4 animate-spin" />Purge…</> : <><Trash2 className="h-4 w-4" />Purger</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Slowmode */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🐢 Slowmode Rapide</CardTitle>
+              <CardDescription>Définit le délai entre messages dans un salon (0 = désactivé, max 21600s).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={slowChannelId} onValueChange={setSlowChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Délai en secondes</label>
+                  <Input type="number" min="0" max="21600" value={slowSeconds} onChange={(e) => setSlowSeconds(e.target.value)} placeholder="0 pour désactiver" />
+                </div>
+              </div>
+              <Button onClick={setSlowmode} disabled={slowing || !slowChannelId} className="gap-2">
+                {slowing ? <><Loader2 className="h-4 w-4 animate-spin" />Application…</> : <>🐢 Appliquer</>}
+              </Button>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Members ───────────────────────────────────────────────────────── */}
@@ -679,6 +1148,78 @@ export default function OwnerPanel() {
                 {members.filter((m) => !m.bot).length === 0 && (
                   <div className="text-center text-muted-foreground py-8 text-sm">Aucun membre trouvé.</div>
                 )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Unban */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔓 Débannir un Membre</CardTitle>
+              <CardDescription>Retire un bannissement via l'ID utilisateur Discord.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID Utilisateur</label>
+                  <Input value={unbanId} onChange={(e) => setUnbanId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Raison (optionnel)</label>
+                  <Input value={unbanReason} onChange={(e) => setUnbanReason(e.target.value)} placeholder="Raison du débannissement..." />
+                </div>
+              </div>
+              <Button onClick={unbanUser} disabled={unbanning || !unbanId.trim()} className="gap-2">
+                {unbanning ? <><Loader2 className="h-4 w-4 animate-spin" />Débannissement…</> : <>🔓 Débannir</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Role assignment */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🏷️ Gérer les Rôles</CardTitle>
+              <CardDescription>Ajoute ou retire un rôle sur un membre présent dans le serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Membre</label>
+                  <Select value={roleMemberId} onValueChange={setRoleMemberId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un membre..." /></SelectTrigger>
+                    <SelectContent>
+                      {members.filter((m) => !m.bot).map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.displayName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Rôle</label>
+                  <Select value={roleId} onValueChange={setRoleId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un rôle..." /></SelectTrigger>
+                    <SelectContent>
+                      {roles.map((r) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          <span className="flex items-center gap-2">
+                            {r.color && r.color !== "#000000" && (
+                              <span className="h-2.5 w-2.5 rounded-full inline-block" style={{ backgroundColor: r.color }} />
+                            )}
+                            {r.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => { setRoleAction("add"); setTimeout(assignRole, 0); }} disabled={rolesLoading || !roleMemberId || !roleId} className="gap-2">
+                  {rolesLoading && roleAction === "add" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tag className="h-4 w-4" />} Ajouter le rôle
+                </Button>
+                <Button onClick={() => { setRoleAction("remove"); setTimeout(assignRole, 0); }} disabled={rolesLoading || !roleMemberId || !roleId} variant="outline" className="gap-2">
+                  {rolesLoading && roleAction === "remove" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tag className="h-4 w-4" />} Retirer le rôle
+                </Button>
               </div>
             </CardContent>
           </Card>
@@ -1233,6 +1774,214 @@ export default function OwnerPanel() {
                 <p className="font-medium text-foreground">Messages simulés :</p>
                 <p>1. 🟢 Démarrage complet · 2. ❌ Erreur de commande · 3. ⚠️ Ping élevé · 4. 💥 Promesse rejetée</p>
                 <p>5. 🔴 Arrêt · 6-9. 🔑 Captcha admin (déclenché / réussi / échoué / expiré) · 10. 📨 DM sécurité groupé</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Automod ────────────────────────────────────────────────────────── */}
+        <TabsContent value="automod" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🤖 Modules Automod</CardTitle>
+              <CardDescription>Active ou désactive les modules de modération automatique du serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {automodCfg ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Anti-insultes */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🤬 Anti-Insultes</p>
+                        <p className="text-xs text-muted-foreground">Filtre les mots offensants définis ci-dessous.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antiInsultEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antiInsultEnabled: !automodCfg.antiInsultEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antiInsultEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Anti-webhooks */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🪝 Anti-Webhooks</p>
+                        <p className="text-xs text-muted-foreground">Supprime les messages envoyés par des webhooks.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antiWebhookEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antiWebhookEnabled: !automodCfg.antiWebhookEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antiWebhookEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Anti-liens */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🔗 Anti-Liens</p>
+                        <p className="text-xs text-muted-foreground">Bloque les liens selon la liste de domaines autorisés.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antilinkEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antilinkEnabled: !automodCfg.antilinkEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antilinkEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Niveau de sécurité */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🛡️ Niveau de Sécurité</p>
+                        <p className="text-xs text-muted-foreground">Actuel : <strong>{automodCfg.securityLevel}</strong></p>
+                      </div>
+                      <Select
+                        value={String(automodCfg.securityLevel)}
+                        onValueChange={(v) => patchAutomod({ securityLevel: Number(v) as 1 | 2 | 3 })}
+                      >
+                        <SelectTrigger className="w-28 text-xs h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 — Bas</SelectItem>
+                          <SelectItem value="2">2 — Moyen</SelectItem>
+                          <SelectItem value="3">3 — Élevé</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Action antilink */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">⚡ Action Anti-Liens</p>
+                        <p className="text-xs text-muted-foreground">Actuel : <strong>{automodCfg.antilinkAction}</strong></p>
+                      </div>
+                      <Select
+                        value={automodCfg.antilinkAction}
+                        onValueChange={(v) => patchAutomod({ antilinkAction: v as AutomodCfg["antilinkAction"] })}
+                      >
+                        <SelectTrigger className="w-36 text-xs h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="delete">Supprimer</SelectItem>
+                          <SelectItem value="warn">Avertir</SelectItem>
+                          <SelectItem value="timeout">Timeout</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Insult words editor */}
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <p className="text-sm font-medium">📋 Mots Interdits</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {automodCfg.antiInsultWords.map((w) => (
+                        <Badge key={w} variant="secondary" className="gap-1 pr-1">
+                          {w}
+                          <button onClick={() => removeAmWord(w)} className="ml-0.5 hover:text-destructive transition-colors">×</button>
+                        </Badge>
+                      ))}
+                      {automodCfg.antiInsultWords.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Aucun mot défini.</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={amNewWord}
+                        onChange={(e) => setAmNewWord(e.target.value)}
+                        placeholder="Ajouter un mot interdit..."
+                        className="flex-1 text-sm"
+                        onKeyDown={(e) => { if (e.key === "Enter") addAmWord(); }}
+                      />
+                      <Button onClick={addAmWord} disabled={!amNewWord.trim()} size="sm" className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" /> Ajouter
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Allowed domains editor */}
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <p className="text-sm font-medium">✅ Domaines Autorisés (Anti-Liens)</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {automodCfg.antilinkAllowedDomains.map((d) => (
+                        <Badge key={d} variant="outline" className="gap-1 pr-1">
+                          {d}
+                          <button onClick={() => removeAmDomain(d)} className="ml-0.5 hover:text-destructive transition-colors">×</button>
+                        </Badge>
+                      ))}
+                      {automodCfg.antilinkAllowedDomains.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Aucun domaine autorisé.</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={amNewDomain}
+                        onChange={(e) => setAmNewDomain(e.target.value)}
+                        placeholder="discord.com, exemple.fr..."
+                        className="flex-1 text-sm font-mono"
+                        onKeyDown={(e) => { if (e.key === "Enter") addAmDomain(); }}
+                      />
+                      <Button onClick={addAmDomain} disabled={!amNewDomain.trim()} size="sm" className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" /> Ajouter
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-center items-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tickets ────────────────────────────────────────────────────────── */}
+        <TabsContent value="tickets" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎫 Tickets Actifs</CardTitle>
+              <CardDescription>Liste tous les tickets ouverts. Ferme un ticket et génère son transcript.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {ticketsLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : tickets.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12 text-sm">Aucun ticket ouvert pour ce serveur.</div>
+              ) : (
+                <div className="space-y-2">
+                  {tickets.map((t) => (
+                    <div key={t.channelId} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 transition-colors">
+                      <Ticket className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">Ticket #{t.ticketNumber}</p>
+                        <p className="text-xs text-muted-foreground truncate font-mono">
+                          {t.username}
+                          {t.claimedBy && <> · Pris en charge : {t.claimedBy}</>}
+                          {t.createdAt && <> · {new Date(t.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => doCloseTicket(t.channelId)}
+                        className="gap-1.5 text-xs flex-shrink-0"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Clore
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <Button variant="outline" size="sm" onClick={fetchTickets} className="gap-2">
+                  <Loader2 className={`h-3.5 w-3.5 ${ticketsLoading ? "animate-spin" : "opacity-0"}`} />
+                  Rafraîchir
+                </Button>
               </div>
             </CardContent>
           </Card>
