@@ -14,7 +14,7 @@ import {
 } from "discord.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
-import { addToGlobalBlacklist, removeFromGlobalBlacklist } from "../bot/blacklist-store.js";
+import { addToGlobalBlacklist, removeFromGlobalBlacklist, addToBlacklist, removeFromBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 import { notifyActionDM } from "../bot/dm-notify.js";
 
@@ -336,8 +336,15 @@ router.delete("/owner/blacklist/:userId", async (req, res) => {
   const { userId } = req.params as { userId: string };
   try {
     await removeFromGlobalBlacklistDB(userId);
-    // Sync in-memory store
+    // Sync store global
     removeFromGlobalBlacklist(userId);
+    // Sync store guild-level pour que blacklistinfo soit à jour sur tous les serveurs
+    const client = getClient();
+    if (client) {
+      for (const [guildId] of client.guilds.cache) {
+        removeFromBlacklist(guildId, userId);
+      }
+    }
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

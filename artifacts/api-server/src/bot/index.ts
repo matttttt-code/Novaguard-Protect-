@@ -31,11 +31,12 @@ import {
   isGloballyBlacklisted,
   addToBlacklist,
   addToGlobalBlacklist,
+  removeFromGlobalBlacklist,
   getPendingUnban,
   removePendingUnban,
   removeFromBlacklist,
 } from "./blacklist-store.js";
-import { getAllGlobalBlacklistedDB } from "./global-blacklist-db.js";
+import { getAllGlobalBlacklistedDB, removeFromGlobalBlacklistDB } from "./global-blacklist-db.js";
 import { sendLog, logEmbed } from "./log.js";
 import {
   isRaidMode, isJoinLocked, getConfig, isRaidMode2,
@@ -1709,6 +1710,11 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     try {
       await guild.members.unban(userId, `Déban validé par ${interaction.user.tag}`);
       removeFromBlacklist(guild.id, userId);
+      // Sync store global + DB pour cohérence avec blacklistinfo et le dashboard
+      removeFromGlobalBlacklist(userId);
+      removeFromGlobalBlacklistDB(userId).catch((err) =>
+        logger.error({ err }, "Impossible de retirer de la blacklist DB lors du déban")
+      );
       removePendingUnban(userId);
       const embed = new EmbedBuilder().setColor(0x22c55e).setTitle("✅ Déban validé")
         .addFields(
