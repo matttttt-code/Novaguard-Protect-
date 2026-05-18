@@ -1586,7 +1586,7 @@ router.get("/owner/user-commands", async (req, res) => {
 });
 
 // ── Suspect Accounts ──────────────────────────────────────────────────────────
-import { getSuspectAccounts, deleteSuspectAccount, markSuspectVerified } from "../bot/suspect-accounts-db.js";
+import { getSuspectAccounts, deleteSuspectAccount, markSuspectVerified, updateSuspectTags } from "../bot/suspect-accounts-db.js";
 
 router.get("/owner/suspect-accounts", async (req, res) => {
   try {
@@ -1608,6 +1608,14 @@ router.patch("/owner/suspect-accounts/:id/verify", async (req, res) => {
   try {
     const verified = (req.body as { verified?: boolean }).verified ?? true;
     await markSuspectVerified(Number(req.params["id"]), verified);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/suspect-accounts/:id/tags", async (req, res) => {
+  try {
+    const tags = (req.body as { tags?: string[] }).tags ?? [];
+    await updateSuspectTags(Number(req.params["id"]), tags.map(t => t.trim()).filter(Boolean));
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

@@ -15,6 +15,7 @@ export const suspectAccountsTable = pgTable("suspect_accounts", {
   vpnSuspicion: boolean("vpn_suspicion").notNull().default(false),
   userLocale: text("user_locale"),
   verified: boolean("verified").notNull().default(false),
+  tags: text("tags").notNull().default(""),
 });
 
 export type SuspectAccount = typeof suspectAccountsTable.$inferSelect;

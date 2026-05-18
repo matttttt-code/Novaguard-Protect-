@@ -92,7 +92,7 @@ type GlobalMemberResult = { guildId: string; guildName: string; userTag: string;
 type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
 type BotStatusEvent = { id: string; type: string; timestamp: number; detail: string; ping?: number; errCode?: string };
 type UserCmd = { id: number; type: string; guildId: string | null; guildName: string | null; userId: string; userTag: string; data: Record<string, unknown>; createdAt: string };
-type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string; vpnSuspicion: boolean; userLocale: string | null; verified: boolean };
+type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string; vpnSuspicion: boolean; userLocale: string | null; verified: boolean; tags: string[] };
 type MemberProfile = {
   userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
   joinedAt: string | null; roles: { id: string; name: string; color: string }[];
@@ -118,6 +118,20 @@ const ALL_COMMANDS = [
   "notify","errortest","testinviteembed","tempban","massban","note","purge",
   "antilink","antighostping","autokick","scamlink","badname","antialt","verify-dashboard",
 ].sort();
+
+// ── Catégories de navigation ──────────────────────────────────────────────────
+const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
+  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
+  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
+  support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
+  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json"] },
+  logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog"] },
+};
+function tabCategory(tab: string): string {
+  for (const [key, { tabs }] of Object.entries(CATEGORY_TABS)) if (tabs.includes(tab)) return key;
+  return "general";
+}
 
 export default function OwnerPanel() {
   const { guildId } = useParams<{ guildId: string }>();
@@ -368,6 +382,12 @@ export default function OwnerPanel() {
   const [saFilterVerified, setSaFilterVerified] = useState<"all" | "verified" | "unverified">("all");
   const [saTimeoutDuration, setSaTimeoutDuration] = useState<number>(86_400_000);
   const [saBulkLoading, setSaBulkLoading] = useState(false);
+  const [saTagInputs, setSaTagInputs] = useState<Record<number, string>>({});
+  const [saFilterTag, setSaFilterTag] = useState<string>("");
+
+  // ── Navigation par catégorie ──────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("messages");
+  const [activeCategory, setActiveCategory] = useState<string>("general");
 
   // ── Masse-action ──────────────────────────────────────────────────────────
   const [massRoleId, setMassRoleId] = useState("");
@@ -1189,16 +1209,37 @@ export default function OwnerPanel() {
   }
 
   function exportSuspectsCsv(accounts: SuspectAcc[]) {
-    const headers = ["id","guildId","guildName","userId","userTag","accountAgeDays","hasNoAvatar","reasons","actionTaken","securityLevel","vpnSuspicion","userLocale","verified","detectedAt"];
+    const headers = ["id","guildId","guildName","userId","userTag","accountAgeDays","hasNoAvatar","reasons","actionTaken","securityLevel","vpnSuspicion","userLocale","verified","tags","detectedAt"];
     const rows = accounts.map(sa => [
       sa.id, sa.guildId, sa.guildName, sa.userId, sa.userTag, sa.accountAgeDays,
       sa.hasNoAvatar, sa.reasons.join("; "), sa.actionTaken, sa.securityLevel,
-      sa.vpnSuspicion, sa.userLocale ?? "", sa.verified, sa.detectedAt,
+      sa.vpnSuspicion, sa.userLocale ?? "", sa.verified, sa.tags.join("; "), sa.detectedAt,
     ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
     const csv = [headers.join(","), ...rows].join("\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
     const a = document.createElement("a"); a.href = url; a.download = "suspects.csv"; a.click();
     URL.revokeObjectURL(url);
+  }
+
+  async function updateTagsForSuspect(sa: SuspectAcc, newTags: string[]) {
+    const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}/tags`, {
+      method: "PATCH", body: JSON.stringify({ tags: newTags }),
+    });
+    if (r.ok) setSuspectAccounts(prev => prev.map(x => x.id === sa.id ? { ...x, tags: newTags } : x));
+    else toast({ title: "Erreur mise à jour tags", variant: "destructive" });
+  }
+
+  function addTagToSuspect(sa: SuspectAcc) {
+    const raw = saTagInputs[sa.id]?.trim();
+    if (!raw) return;
+    const newTags = [...new Set([...sa.tags, raw])];
+    setSaTagInputs(prev => ({ ...prev, [sa.id]: "" }));
+    void updateTagsForSuspect(sa, newTags);
+  }
+
+  function removeTagFromSuspect(sa: SuspectAcc, tag: string) {
+    const newTags = sa.tags.filter(t => t !== tag);
+    void updateTagsForSuspect(sa, newTags);
   }
 
   const fetchInvites = useCallback(async () => {
@@ -1413,43 +1454,87 @@ export default function OwnerPanel() {
         )}
       </header>
 
-      <Tabs defaultValue="messages" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setActiveCategory(tabCategory(v)); }} className="space-y-4">
+        {/* ── Barre de catégories ───────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-1 border-b pb-2">
+          {Object.entries(CATEGORY_TABS).map(([key, { label, icon }]) => (
+            <button key={key}
+              onClick={() => {
+                setActiveCategory(key);
+                const tabs = CATEGORY_TABS[key]!.tabs;
+                if (!tabs.includes(activeTab)) setActiveTab(tabs[0]!);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                activeCategory === key
+                  ? key === "securite"
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}>
+              <span>{icon}</span>
+              {label}
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 font-mono ml-0.5">
+                {CATEGORY_TABS[key]!.tabs.length}
+              </Badge>
+            </button>
+          ))}
+        </div>
+
+        {/* ── Onglets filtrés par catégorie ─────────────────────────────────── */}
         <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1 rounded-lg">
-          <TabsTrigger value="messages" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5" />Messages</TabsTrigger>
-          <TabsTrigger value="channels" className="gap-1.5 text-xs"><Hash className="h-3.5 w-3.5" />Salons</TabsTrigger>
-          <TabsTrigger value="members" className="gap-1.5 text-xs"><UserX className="h-3.5 w-3.5" />Membres</TabsTrigger>
-          <TabsTrigger value="server" className="gap-1.5 text-xs"><Settings className="h-3.5 w-3.5" />Serveur</TabsTrigger>
-          <TabsTrigger value="blacklist" className="gap-1.5 text-xs"><Ban className="h-3.5 w-3.5" />Blacklist</TabsTrigger>
-          <TabsTrigger value="disabled" className="gap-1.5 text-xs"><PowerOff className="h-3.5 w-3.5" />Commandes</TabsTrigger>
-          <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
-          <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
-          <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
-          <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
-          <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
-          <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
-          <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
-          <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
-          <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
-          <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
-          <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
-          <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
-          <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
-          <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
-          <TabsTrigger value="warns" className="gap-1.5 text-xs" onClick={() => setWarnsData(null)}><AlertCircle className="h-3.5 w-3.5" />Warns</TabsTrigger>
-          <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
-          <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
-          <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
-          <TabsTrigger value="usercommands" className="gap-1.5 text-xs" onClick={fetchUserCmds}><MessageSquareWarning className="h-3.5 w-3.5" />Cmd. Users</TabsTrigger>
-          <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
-          <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
-          <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
-          <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
-          <TabsTrigger value="log-channels" className="gap-1.5 text-xs" onClick={fetchLogChannels}><Hash className="h-3.5 w-3.5" />Logs Config</TabsTrigger>
-          <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
-          <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
-          <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
-          <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
-          <TabsTrigger value="bot-reply-logs" className="gap-1.5 text-xs" onClick={fetchBotReplyLogs}><MessageSquareWarning className="h-3.5 w-3.5" />Logs Bot</TabsTrigger>
+          {/* Général */}
+          {activeCategory === "general" && <>
+            <TabsTrigger value="messages" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5" />Messages</TabsTrigger>
+            <TabsTrigger value="channels" className="gap-1.5 text-xs"><Hash className="h-3.5 w-3.5" />Salons</TabsTrigger>
+            <TabsTrigger value="members" className="gap-1.5 text-xs"><UserX className="h-3.5 w-3.5" />Membres</TabsTrigger>
+            <TabsTrigger value="server" className="gap-1.5 text-xs"><Settings className="h-3.5 w-3.5" />Serveur</TabsTrigger>
+            <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
+            <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
+            <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
+          </>}
+          {/* Sécurité */}
+          {activeCategory === "securite" && <>
+            <TabsTrigger value="blacklist" className="gap-1.5 text-xs"><Ban className="h-3.5 w-3.5" />Blacklist</TabsTrigger>
+            <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
+            <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
+            <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
+            <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
+            <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
+            <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
+            <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
+            <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
+            <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
+            <TabsTrigger value="warns" className="gap-1.5 text-xs" onClick={() => setWarnsData(null)}><AlertCircle className="h-3.5 w-3.5" />Warns</TabsTrigger>
+            <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
+          </>}
+          {/* Modération */}
+          {activeCategory === "moderation" && <>
+            <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
+            <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
+            <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
+            <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
+          </>}
+          {/* Support */}
+          {activeCategory === "support" && <>
+            <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
+            <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
+            <TabsTrigger value="usercommands" className="gap-1.5 text-xs" onClick={fetchUserCmds}><MessageSquareWarning className="h-3.5 w-3.5" />Cmd. Users</TabsTrigger>
+          </>}
+          {/* Config */}
+          {activeCategory === "config" && <>
+            <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
+            <TabsTrigger value="disabled" className="gap-1.5 text-xs"><PowerOff className="h-3.5 w-3.5" />Commandes</TabsTrigger>
+            <TabsTrigger value="log-channels" className="gap-1.5 text-xs" onClick={fetchLogChannels}><Hash className="h-3.5 w-3.5" />Logs Config</TabsTrigger>
+            <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
+            <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
+            <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
+            <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
+          </>}
+          {/* Logs */}
+          {activeCategory === "logs" && <>
+            <TabsTrigger value="bot-reply-logs" className="gap-1.5 text-xs" onClick={fetchBotReplyLogs}><MessageSquareWarning className="h-3.5 w-3.5" />Logs Bot</TabsTrigger>
+            <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
+          </>}
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -4082,6 +4167,13 @@ export default function OwnerPanel() {
                   <input type="checkbox" checked={saFilterVpn} onChange={e => setSaFilterVpn(e.target.checked)} className="rounded" />
                   VPN uniquement
                 </label>
+                <input
+                  type="text"
+                  placeholder="Filtrer par tag…"
+                  className="text-xs rounded border bg-background px-2 py-1 h-7 w-36"
+                  value={saFilterTag}
+                  onChange={e => setSaFilterTag(e.target.value)}
+                />
               </div>
 
               {/* Durée timeout global */}
@@ -4109,7 +4201,8 @@ export default function OwnerPanel() {
                   (saFilterGuild === "all" || sa.guildId === saFilterGuild) &&
                   (saFilterAction === "all" || sa.actionTaken === saFilterAction) &&
                   (saFilterVerified === "all" || (saFilterVerified === "verified" ? sa.verified : !sa.verified)) &&
-                  (!saFilterVpn || sa.vpnSuspicion)
+                  (!saFilterVpn || sa.vpnSuspicion) &&
+                  (!saFilterTag.trim() || sa.tags.some(t => t.toLowerCase().includes(saFilterTag.trim().toLowerCase())))
                 );
                 if (filtered.length === 0) return (
                   <p className="text-sm text-center text-muted-foreground py-8">
@@ -4215,6 +4308,32 @@ export default function OwnerPanel() {
                                   className="flex items-center h-6 px-2 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted gap-1">
                                   🔗 Profil
                                 </a>
+                              </div>
+
+                              {/* ── Tags ── */}
+                              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                <Tag className="h-3 w-3 text-muted-foreground shrink-0" />
+                                {sa.tags.map(tag => (
+                                  <span key={tag} className="inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-300/60 rounded px-1.5 py-0 text-[9px] font-medium">
+                                    {tag}
+                                    <button className="ml-0.5 hover:text-red-500" onClick={() => removeTagFromSuspect(sa, tag)}>×</button>
+                                  </span>
+                                ))}
+                                <div className="flex items-center gap-0.5">
+                                  <input
+                                    type="text"
+                                    placeholder="Ajouter tag…"
+                                    className="h-5 text-[10px] rounded border bg-background px-1.5 w-24"
+                                    value={saTagInputs[sa.id] ?? ""}
+                                    onChange={e => setSaTagInputs(prev => ({ ...prev, [sa.id]: e.target.value }))}
+                                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTagToSuspect(sa); } }}
+                                  />
+                                  <button
+                                    className="h-5 px-1.5 text-[10px] rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                                    onClick={() => addTagToSuspect(sa)}>
+                                    +
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ))}

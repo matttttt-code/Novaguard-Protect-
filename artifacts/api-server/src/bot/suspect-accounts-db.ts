@@ -29,6 +29,7 @@ export async function saveSuspectAccount(opts: SaveSuspectAccountOpts): Promise<
     vpnSuspicion: opts.vpnSuspicion ?? false,
     userLocale: opts.userLocale ?? null,
     verified: false,
+    tags: "",
   });
 }
 
@@ -47,7 +48,11 @@ export async function getSuspectAccounts(opts: {
     .orderBy(desc(suspectAccountsTable.detectedAt))
     .limit(limit);
 
-  return rows.map((r) => ({ ...r, reasons: r.reasons.split("|").filter(Boolean) }));
+  return rows.map((r) => ({
+    ...r,
+    reasons: r.reasons.split("|").filter(Boolean),
+    tags: r.tags.split("|").filter(Boolean),
+  }));
 }
 
 export async function deleteSuspectAccount(id: number): Promise<void> {
@@ -56,4 +61,8 @@ export async function deleteSuspectAccount(id: number): Promise<void> {
 
 export async function markSuspectVerified(id: number, verified: boolean): Promise<void> {
   await db.update(suspectAccountsTable).set({ verified }).where(eq(suspectAccountsTable.id, id));
+}
+
+export async function updateSuspectTags(id: number, tags: string[]): Promise<void> {
+  await db.update(suspectAccountsTable).set({ tags: tags.join("|") }).where(eq(suspectAccountsTable.id, id));
 }
