@@ -74,6 +74,7 @@ import { getSupportRequest, removeSupportRequest } from "./pending-support-store
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 import { getAlertPing } from "./alert-ping.js";
+import { addCaptchaLog } from "./captcha-log-db.js";
 
 function isValidId(s: string): boolean {
   return /^\d{17,20}$/.test(s.trim());
@@ -448,6 +449,7 @@ export function startBot(): void {
               const gMember = await member.guild.members.fetch(member.id).catch(() => null);
               if (gMember) {
                 await gMember.kick("Captcha non résolu dans les 5 minutes").catch(() => null);
+                void addCaptchaLog({ guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag, event: "timeout_kick", details: "Captcha non résolu — expulsé (salon)" });
                 // Edit challenge message to show timeout
                 await sent.edit({
                   embeds: [new EmbedBuilder()
@@ -460,6 +462,8 @@ export function startBot(): void {
             }, 5 * 60 * 1000);
 
             captchaTimeouts.set(member.id, timeoutId);
+
+            void addCaptchaLog({ guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag, event: "triggered_channel", details: "Captcha envoyé dans le salon" });
 
             await sendLog(client, new EmbedBuilder()
               .setColor(0xf97316).setTitle("🤖 Captcha envoyé (salon)")
@@ -487,6 +491,7 @@ export function startBot(): void {
       } catch {
         dmSent = false;
         logger.warn({ user: member.user.tag }, "Captcha : DMs fermés — accès accordé sans captcha");
+        void addCaptchaLog({ guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag, event: "dm_closed", details: "DMs fermés — accès accordé sans captcha" });
         if (cfg.captchaUnverifiedRoleId) await member.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
         if (cfg.captchaVerifiedRoleId) await member.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
       }
@@ -501,10 +506,12 @@ export function startBot(): void {
           const gMember = await member.guild.members.fetch(member.id).catch(() => null);
           if (gMember) {
             await gMember.kick("Captcha non résolu dans les 5 minutes").catch(() => null);
+            void addCaptchaLog({ guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag, event: "timeout_kick", details: "Captcha non résolu — expulsé (DM)" });
             try { await member.user.send(`⏰ Tu as été expulsé de **${member.guild.name}** — captcha non résolu à temps. Rejoins à nouveau pour réessayer.`); } catch { /* DMs */ }
           }
         }, 5 * 60 * 1000);
         captchaTimeouts.set(member.id, timeoutId);
+        void addCaptchaLog({ guildId, guildName: member.guild.name, userId: member.id, userTag: member.user.tag, event: "triggered_dm", details: "Captcha envoyé en DM" });
         return;
       }
     }
@@ -634,6 +641,8 @@ async function resolveCaptchaSuccess(
   if (cfg.captchaUnverifiedRoleId) await gMember.roles.remove(cfg.captchaUnverifiedRoleId).catch(() => null);
   if (cfg.captchaVerifiedRoleId) await gMember.roles.add(cfg.captchaVerifiedRoleId).catch(() => null);
 
+  void addCaptchaLog({ guildId, guildName: guild.name, userId, userTag: gMember.user.tag, event: "success", details: "Captcha résolu avec succès" });
+
   // Edit the challenge message in the captcha channel
   if (challengeMessageId && captchaChannelId) {
     try {
@@ -751,6 +760,7 @@ async function handleCaptchaChannelMessage(
         const guild = client.guilds.cache.get(failGuildId);
         const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
         await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+        void addCaptchaLog({ guildId: failGuildId, guildName: guild?.name ?? "", userId: message.author.id, userTag: message.author.tag, event: "fail_kick", details: "Trop de mauvaises réponses — expulsé (salon)" });
       }
 
       await sendLog(client, new EmbedBuilder()
@@ -777,6 +787,7 @@ async function handleCaptchaChannelMessage(
         } catch { /* ignore */ }
       }
     } else {
+      void addCaptchaLog({ guildId: challenge.guildId, guildName: client.guilds.cache.get(challenge.guildId)?.name ?? "", userId: message.author.id, userTag: message.author.tag, event: "fail_attempt", details: `Code incorrect — ${remaining} tentative(s) restante(s) (salon)` });
       // Send temporary error in captcha channel
       const cfg = getConfig(challenge.guildId);
       if (cfg.captchaChannelId) {
@@ -924,6 +935,7 @@ async function handleCaptchaDM(
       const guild = client.guilds.cache.get(challenge.guildId);
       const gMember = await guild?.members.fetch(message.author.id).catch(() => null);
       await gMember?.kick("Captcha échoué — trop de mauvaises réponses").catch(() => null);
+      void addCaptchaLog({ guildId: challenge.guildId, guildName: guild?.name ?? "", userId: message.author.id, userTag: message.author.tag, event: "fail_kick", details: "Trop de mauvaises réponses — expulsé (DM)" });
       await message.reply("❌ Trop de mauvaises réponses. Tu as été **expulsé** du serveur. Rejoins à nouveau pour réessayer.");
     } else {
       await message.reply(

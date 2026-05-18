@@ -35,6 +35,11 @@ type BlacklistEntry = { userId: string; userTag: string; reason: string; moderat
 type DisabledCommand = { id: number; guildId: string; commandName: string; disabledBy: string; createdAt: string };
 type TranscriptMeta = { id: number; guildId: string; guildName: string; channelName: string; ticketNumber: number; userId: string; userTag: string; closedBy: string; reason: string; messageCount: number; createdAt: string; closedAt: string };
 type TranscriptFull = TranscriptMeta & { content: string };
+type CaptchaLogEntry = {
+  id: number; guildId: string; guildName: string; userId: string; userTag: string;
+  event: string; details: string; createdAt: string;
+};
+
 type BotSettings = {
   guildId: string; captchaEnabled: boolean; captchaChannelId: string | null;
   captchaRoleId: string | null; captchaVerifiedRoleId: string | null;
@@ -143,6 +148,11 @@ export default function OwnerPanel() {
   const [bsLoading, setBsLoading] = useState(false);
   const [bsSaving, setBsSaving] = useState(false);
 
+  // ── Captcha logs state ────────────────────────────────────────────────────
+  const [captchaLogs, setCaptchaLogs] = useState<CaptchaLogEntry[]>([]);
+  const [clLoading, setClLoading] = useState(false);
+  const [clFilter, setClFilter] = useState("");
+
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
     const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
@@ -199,6 +209,14 @@ export default function OwnerPanel() {
     } finally { setBsLoading(false); }
   }, [guildId]);
 
+  const fetchCaptchaLogs = useCallback(async () => {
+    setClLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/captcha-logs?limit=300`);
+      if (r.ok) setCaptchaLogs(await r.json());
+    } finally { setClLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -207,7 +225,8 @@ export default function OwnerPanel() {
     fetchDisabledCmds();
     fetchTranscripts();
     fetchBotSettings();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings]);
+    fetchCaptchaLogs();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchCaptchaLogs]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -443,6 +462,7 @@ export default function OwnerPanel() {
           <TabsTrigger value="disabled" className="gap-1.5 text-xs"><PowerOff className="h-3.5 w-3.5" />Commandes</TabsTrigger>
           <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
           <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
+          <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -922,6 +942,97 @@ export default function OwnerPanel() {
             </>
           )}
         </TabsContent>
+        {/* ── Captcha Logs ──────────────────────────────────────────────────── */}
+        <TabsContent value="captchalogs" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">🛡️ Logs Captcha ({captchaLogs.length})</CardTitle>
+                  <CardDescription>Historique des événements captcha — déclenchements, succès, échecs, expulsions.</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={fetchCaptchaLogs} disabled={clLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${clLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    if (!confirm("Effacer tous les logs captcha de ce serveur ?")) return;
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/captcha-logs`, { method: "DELETE" });
+                    if (r.ok) { setCaptchaLogs([]); toast({ title: "Logs effacés ✓" }); }
+                  }} className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
+                    <Trash2 className="h-3.5 w-3.5" /> Effacer
+                  </Button>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                <Input placeholder="Rechercher utilisateur, ID…" value={clFilter} onChange={(e) => setClFilter(e.target.value)} className="max-w-xs text-sm" />
+                <Select value={clFilter.startsWith("event:") ? clFilter.slice(6) : "all"} onValueChange={(v) => setClFilter(v === "all" ? "" : `event:${v}`)}>
+                  <SelectTrigger className="w-44 text-xs"><SelectValue placeholder="Filtrer par événement" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les événements</SelectItem>
+                    <SelectItem value="triggered_channel">Déclenché (salon)</SelectItem>
+                    <SelectItem value="triggered_dm">Déclenché (DM)</SelectItem>
+                    <SelectItem value="success">Réussi ✅</SelectItem>
+                    <SelectItem value="fail_attempt">Mauvaise réponse ❌</SelectItem>
+                    <SelectItem value="fail_kick">Expulsé (trop de mauvaises)</SelectItem>
+                    <SelectItem value="timeout_kick">Expulsé (timeout)</SelectItem>
+                    <SelectItem value="dm_closed">DMs fermés</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {clLoading && <div className="text-center py-6"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+              {!clLoading && captchaLogs.length === 0 && (
+                <p className="text-center text-muted-foreground py-8 text-sm">Aucun log captcha. Ils apparaîtront automatiquement dès qu'un membre déclenche le captcha.</p>
+              )}
+              {!clLoading && captchaLogs.length > 0 && (() => {
+                const filtered = captchaLogs.filter((e) => {
+                  if (!clFilter) return true;
+                  if (clFilter.startsWith("event:")) return e.event === clFilter.slice(6);
+                  const q = clFilter.toLowerCase();
+                  return e.userTag.toLowerCase().includes(q) || e.userId.includes(q) || e.details.toLowerCase().includes(q);
+                });
+                const EVENT_META: Record<string, { label: string; color: string; icon: string }> = {
+                  triggered_channel: { label: "Déclenché (salon)", color: "text-blue-400", icon: "🤖" },
+                  triggered_dm:      { label: "Déclenché (DM)",    color: "text-blue-400", icon: "📨" },
+                  success:           { label: "Réussi",            color: "text-green-400", icon: "✅" },
+                  fail_attempt:      { label: "Mauvaise réponse",  color: "text-yellow-400", icon: "⚠️" },
+                  fail_kick:         { label: "Expulsé (échecs)",  color: "text-red-400", icon: "❌" },
+                  timeout_kick:      { label: "Expulsé (timeout)", color: "text-red-400", icon: "⏰" },
+                  dm_closed:         { label: "DMs fermés",        color: "text-orange-400", icon: "🔒" },
+                };
+                return (
+                  <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+                    {filtered.length === 0 && <p className="text-center text-muted-foreground py-4 text-sm">Aucun résultat.</p>}
+                    {filtered.map((e) => {
+                      const meta = EVENT_META[e.event] ?? { label: e.event, color: "text-muted-foreground", icon: "❓" };
+                      return (
+                        <div key={e.id} className="flex items-start gap-3 p-2.5 rounded-md hover:bg-muted/30 border border-transparent hover:border-border transition-colors">
+                          <span className="text-base shrink-0 mt-0.5">{meta.icon}</span>
+                          <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-4">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-xs font-semibold font-mono ${meta.color}`}>{meta.label}</span>
+                                <span className="text-sm font-medium truncate">{e.userTag}</span>
+                                <Badge variant="outline" className="font-mono text-xs hidden md:flex">{e.userId}</Badge>
+                              </div>
+                              {e.details && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.details}</p>}
+                            </div>
+                            <time className="text-xs text-muted-foreground shrink-0 mt-0.5 whitespace-nowrap">
+                              {new Date(e.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </time>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
       </Tabs>
     </div>
   );

@@ -354,6 +354,27 @@ router.delete("/owner/guilds/:guildId/disabled-commands", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Captcha Logs ──────────────────────────────────────────────────────────────
+import { getCaptchaLogs, deleteCaptchaLogs } from "../bot/captcha-log-db.js";
+
+router.get("/owner/guilds/:guildId/captcha-logs", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
+  const event = req.query["event"] as string | undefined;
+  try {
+    const rows = await getCaptchaLogs({ guildId, limit, event: event || undefined });
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.delete("/owner/guilds/:guildId/captcha-logs", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  try {
+    await deleteCaptchaLogs(guildId);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Guild Settings (captcha, welcome, etc.) ──────────────────────────────────
 import { getGuildSettings, upsertGuildSettings } from "../bot/guild-settings-db.js";
 
