@@ -86,7 +86,7 @@ type TempBanEntry = { guildId: string; userId: string; userTag: string; moderato
 type TimeoutEntry = { userId: string; userTag: string; displayName: string; avatarURL: string; until: string | null };
 type Invite = { code: string; url: string; uses: number | null; maxUses: number | null; creatorTag: string | null; channelName: string | null; temporary: boolean; expiresAt: string | null; createdAt: string | null };
 type AuditEntry = { id: string; action: number; actionType: string; executorTag: string | null; executorId: string | null; targetId: string | null; reason: string | null; createdAt: string };
-type LogChannels = { logChannelId: string | null; banLogChannelId: string | null; generalLogChannelId: string | null; inviteLogChannelId: string | null };
+type LogChannels = { logChannelId: string | null; banLogChannelId: string | null; generalLogChannelId: string | null; inviteLogChannelId: string | null; messageLogChannelId: string | null };
 type CustomCmd = { name: string; response: string; createdBy: string; createdAt: string };
 type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
 type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
@@ -384,7 +384,7 @@ export default function OwnerPanel() {
 
   // ── Log Channels ──────────────────────────────────────────────────────────
   const [logChannels, setLogChannels] = useState<LogChannels | null>(null);
-  const [logChannelsDraft, setLogChannelsDraft] = useState<LogChannels>({ logChannelId: null, banLogChannelId: null, generalLogChannelId: null, inviteLogChannelId: null });
+  const [logChannelsDraft, setLogChannelsDraft] = useState<LogChannels>({ logChannelId: null, banLogChannelId: null, generalLogChannelId: null, inviteLogChannelId: null, messageLogChannelId: null });
   const [logChannelsLoading, setLogChannelsLoading] = useState(false);
   const [logChannelsSaving, setLogChannelsSaving] = useState(false);
 
@@ -3624,8 +3624,9 @@ export default function OwnerPanel() {
                   {([
                     { key: "logChannelId" as const, label: "Salon de Logs Général", icon: "📝" },
                     { key: "banLogChannelId" as const, label: "Salon de Logs Bans", icon: "🔨" },
-                    { key: "generalLogChannelId" as const, label: "Salon de Logs Serveur", icon: "📊" },
+                    { key: "generalLogChannelId" as const, label: "Salon de Logs Serveur (vocal, salons, rôles…)", icon: "📊" },
                     { key: "inviteLogChannelId" as const, label: "Salon de Logs Invitations", icon: "🔗" },
+                    { key: "messageLogChannelId" as const, label: "Salon de Logs Messages (éditions & suppressions)", icon: "✏️" },
                   ] as const).map(({ key, label, icon }) => (
                     <div key={key} className="space-y-1">
                       <label className="text-sm font-medium">{icon} {label}</label>

@@ -82,6 +82,31 @@ async function sendGenLogEmbeds(client: Client, guildId: string, embeds: EmbedBu
   }
 }
 
+async function sendMsgLog(client: Client, guildId: string, embed: EmbedBuilder): Promise<void> {
+  const cfg = getConfig(guildId);
+  const channelId = cfg.messageLogChannelId ?? cfg.generalLogChannelId;
+  if (!channelId) return;
+  try {
+    const ch = await client.channels.fetch(channelId);
+    if (ch?.isTextBased()) await (ch as TextChannel).send({ embeds: [embed] });
+  } catch (err) {
+    logger.error({ err }, "Erreur envoi log messages");
+  }
+}
+
+async function sendMsgLogEmbeds(client: Client, guildId: string, embeds: EmbedBuilder[]): Promise<void> {
+  if (embeds.length === 0) return;
+  const cfg = getConfig(guildId);
+  const channelId = cfg.messageLogChannelId ?? cfg.generalLogChannelId;
+  if (!channelId) return;
+  try {
+    const ch = await client.channels.fetch(channelId);
+    if (ch?.isTextBased()) await (ch as TextChannel).send({ embeds: embeds.slice(0, 10) });
+  } catch (err) {
+    logger.error({ err }, "Erreur envoi log messages (multi-embeds)");
+  }
+}
+
 function userField(user: User | PartialUser | null | undefined, label = "Exécuteur"): { name: string; value: string; inline: true } {
   return {
     name: label,
@@ -191,7 +216,7 @@ export function registerGeneralLog(client: Client): void {
       embeds.push(new EmbedBuilder().setURL(newMsg.url).setImage(img.url).setColor(0xf59e0b));
     }
 
-    await sendGenLogEmbeds(client, newMsg.guildId, embeds);
+    await sendMsgLogEmbeds(client, newMsg.guildId, embeds);
   });
 
   // ── MESSAGES SUPPRIMÉS ──
@@ -251,7 +276,7 @@ export function registerGeneralLog(client: Client): void {
       embeds.push(new EmbedBuilder().setURL(`https://discord.com/channels/${msg.guildId}/${msg.channelId}`).setImage(img.url).setColor(0xef4444));
     }
 
-    await sendGenLogEmbeds(client, msg.guildId, embeds);
+    await sendMsgLogEmbeds(client, msg.guildId, embeds);
   });
 
   // ── SUPPRESSION MASSIVE ──
@@ -283,7 +308,7 @@ export function registerGeneralLog(client: Client): void {
     }
 
     embed.setTimestamp();
-    await sendGenLog(client, channel.guildId, embed);
+    await sendMsgLog(client, channel.guildId, embed);
   });
 
   // ── SALONS CRÉÉS ──

@@ -23,6 +23,7 @@ export interface GuildConfig {
   captchaVerifiedRoleId: string | null;
   sanctionDmEnabled: boolean;
   inviteLogChannelId: string | null;
+  messageLogChannelId: string | null;
   securityLevel: 1 | 2 | 3;
   antiInsultEnabled: boolean;
   antiInsultWords: string[];
@@ -69,6 +70,7 @@ function defaults(): GuildConfig {
     captchaVerifiedRoleId: null,
     sanctionDmEnabled: true,
     inviteLogChannelId: null,
+    messageLogChannelId: null,
     securityLevel: 1,
     antiInsultEnabled: false,
     antiInsultWords: [],
@@ -163,6 +165,7 @@ export function setCaptchaUnverifiedRole(guildId: string, roleId: string | null)
 export function setCaptchaVerifiedRole(guildId: string, roleId: string | null): void { set(guildId, { captchaVerifiedRoleId: roleId }); }
 export function setSanctionDmEnabled(guildId: string, enabled: boolean): void { set(guildId, { sanctionDmEnabled: enabled }); }
 export function setInviteLogChannel(guildId: string, channelId: string | null): void { set(guildId, { inviteLogChannelId: channelId }); }
+export function setMessageLogChannel(guildId: string, channelId: string | null): void { set(guildId, { messageLogChannelId: channelId }); }
 
 export function setSecurityLevel(guildId: string, level: 1 | 2 | 3): void { set(guildId, { securityLevel: level }); }
 export function getSecurityLevel(guildId: string): 1 | 2 | 3 { return configs.get(guildId)?.securityLevel ?? 1; }

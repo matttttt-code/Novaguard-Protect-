@@ -1250,13 +1250,14 @@ router.get("/owner/guilds/:guildId/log-channels", (req, res) => {
     banLogChannelId: cfg.banLogChannelId ?? null,
     generalLogChannelId: cfg.generalLogChannelId ?? null,
     inviteLogChannelId: cfg.inviteLogChannelId ?? null,
+    messageLogChannelId: cfg.messageLogChannelId ?? null,
   });
 });
 
 // ── PATCH /api/owner/guilds/:guildId/log-channels ─────────────────────────────
 router.patch("/owner/guilds/:guildId/log-channels", (req, res) => {
   const { guildId } = req.params as { guildId: string };
-  const { logChannelId, banLogChannelId, generalLogChannelId, inviteLogChannelId } = req.body as Record<string, string | null>;
+  const { logChannelId, banLogChannelId, generalLogChannelId, inviteLogChannelId, messageLogChannelId } = req.body as Record<string, string | null>;
   const cfg = getConfig(guildId);
   setConfig(guildId, {
     ...cfg,
@@ -1264,6 +1265,7 @@ router.patch("/owner/guilds/:guildId/log-channels", (req, res) => {
     banLogChannelId: banLogChannelId !== undefined ? banLogChannelId : cfg.banLogChannelId,
     generalLogChannelId: generalLogChannelId !== undefined ? generalLogChannelId : cfg.generalLogChannelId,
     inviteLogChannelId: inviteLogChannelId !== undefined ? inviteLogChannelId : cfg.inviteLogChannelId,
+    messageLogChannelId: messageLogChannelId !== undefined ? messageLogChannelId : cfg.messageLogChannelId,
   });
   res.json(getConfig(guildId));
 });
