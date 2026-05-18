@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("kick")
@@ -28,9 +29,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous expulser.", ephemeral: true });
-  if (member.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas m'expulser moi-même.", ephemeral: true });
+  if (!member) return replyErr(interaction, "❌ Membre introuvable.");
+  if (member.id === interaction.user.id) return replyErr(interaction, "❌ Vous ne pouvez pas vous expulser.");
+  if (member.id === interaction.client.user?.id) return replyErr(interaction, "❌ Je ne peux pas m'expulser moi-même.");
 
   const moderator = interaction.member as GuildMember | null;
   if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
@@ -40,9 +41,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre.");
   }
-  if (!member.kickable) return interaction.reply({ content: "❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
+  if (!member.kickable) return replyErr(interaction, "❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien).");
 
   await sendSanctionDM(member.user, "kick", reason, interaction.guild!, undefined, dmOption ?? undefined);
   await member.kick(reason);
@@ -69,20 +70,20 @@ export const prefixName = "kick";
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-    await message.reply("❌ Permission insuffisante (KickMembers requise)."); return;
+    await msgErr(message, "kick", "❌ Permission insuffisante (KickMembers requise)."); return;
   }
 
   const userId = args[0]?.replace(/[<@!>]/g, "");
-  if (!userId) { await message.reply("Usage : `&kick @membre [raison]`"); return; }
+  if (!userId) { await msgErr(message, "kick", "Usage : `&kick @membre [raison]`"); return; }
 
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
-  catch { await message.reply("❌ Membre introuvable."); return; }
+  catch { await msgErr(message, "kick", "❌ Membre introuvable."); return; }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
 
-  if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous expulser."); return; }
-  if (member.id === message.client.user?.id) { await message.reply("❌ Je ne peux pas m'expulser moi-même."); return; }
+  if (member.id === message.author.id) { await msgErr(message, "kick", "❌ Vous ne pouvez pas vous expulser."); return; }
+  if (member.id === message.client.user?.id) { await msgErr(message, "kick", "❌ Je ne peux pas m'expulser moi-même."); return; }
   if (member.roles.highest.position >= message.member!.roles.highest.position) {
     await sendBlockedActionDM(message.client, {
       command: "&kick", guildName: message.guild!.name, guildId: message.guild!.id,
@@ -90,9 +91,9 @@ export async function executeMessage(message: Message, args: string[]) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    await message.reply("❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre."); return;
+    await msgErr(message, "kick", "❌ Vous ne pouvez pas expulser un membre dont le rôle est supérieur ou égal au vôtre."); return;
   }
-  if (!member.kickable) { await message.reply("❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien)."); return; }
+  if (!member.kickable) { await msgErr(message, "kick", "❌ Je ne peux pas expulser ce membre (son rôle est supérieur ou égal au mien)."); return; }
 
   await sendSanctionDM(member.user, "kick", reason, message.guild);
   await member.kick(reason);

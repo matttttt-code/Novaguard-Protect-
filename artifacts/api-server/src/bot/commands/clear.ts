@@ -7,6 +7,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("clear")
@@ -62,12 +63,12 @@ export const prefixAliases = ["purge", "clean"];
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-    await message.reply("❌ Permission insuffisante (ManageMessages requise)."); return;
+    await msgErr(message, "clear", "❌ Permission insuffisante (ManageMessages requise)."); return;
   }
 
   const amount = parseInt(args[0] ?? "10", 10);
   if (isNaN(amount) || amount < 1 || amount > 100) {
-    await message.reply("❌ Nombre invalide (1-100). Usage : `&clear [nombre]`"); return;
+    await msgErr(message, "clear", "❌ Nombre invalide (1-100). Usage : `&clear [nombre]`"); return;
   }
 
   const channel = message.channel as TextChannel;

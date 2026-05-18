@@ -19,7 +19,7 @@ import {
   Wifi, WifiOff, Radio, Activity, Server,
   BookOpen, Download, Copy, ScrollText, Link2Off,
   Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
-  UserCheck, ChevronRight, ExternalLink, Unlink,
+  UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -85,6 +85,7 @@ type AuditEntry = { id: string; action: number; actionType: string; executorTag:
 type LogChannels = { logChannelId: string | null; banLogChannelId: string | null; generalLogChannelId: string | null; inviteLogChannelId: string | null };
 type CustomCmd = { name: string; response: string; createdBy: string; createdAt: string };
 type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
+type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
 type MemberProfile = {
   userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
   joinedAt: string | null; roles: { id: string; name: string; color: string }[];
@@ -382,6 +383,11 @@ export default function OwnerPanel() {
   const [searchId, setSearchId] = useState("");
   const [searchResults, setSearchResults] = useState<GlobalMemberResult[] | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+
+  // ── Logs Bot (bot_reply) ───────────────────────────────────────────────────
+  const [botReplyLogs, setBotReplyLogs] = useState<BotReplyLog[]>([]);
+  const [botReplyLoading, setBotReplyLoading] = useState(false);
+  const [botReplyFilter, setBotReplyFilter] = useState<"all" | "error" | "warn" | "info">("all");
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -1125,6 +1131,14 @@ export default function OwnerPanel() {
     } finally { setSearchLoading(false); }
   };
 
+  const fetchBotReplyLogs = useCallback(async () => {
+    setBotReplyLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bot-reply-logs?limit=200`);
+      if (r.ok) setBotReplyLogs(await r.json() as BotReplyLog[]);
+    } finally { setBotReplyLoading(false); }
+  }, [guildId]);
+
   const fetchVoiceLog = useCallback(async () => {
     setVoiceLogLoading(true);
     try {
@@ -1271,6 +1285,7 @@ export default function OwnerPanel() {
           <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
           <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
           <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
+          <TabsTrigger value="bot-reply-logs" className="gap-1.5 text-xs" onClick={fetchBotReplyLogs}><MessageSquareWarning className="h-3.5 w-3.5" />Logs Bot</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -3503,6 +3518,72 @@ export default function OwnerPanel() {
                     ))}
                   </div>
                 )
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Logs Bot (bot_reply) ──────────────────────────────────────────── */}
+        <TabsContent value="bot-reply-logs" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">💬 Réponses du Bot ({botReplyLogs.length})</CardTitle>
+                  <CardDescription>Messages d'erreur ou d'information envoyés aux utilisateurs lors de l'exécution des commandes.</CardDescription>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={botReplyFilter}
+                    onChange={(e) => setBotReplyFilter(e.target.value as typeof botReplyFilter)}
+                    className="border border-border rounded px-2 py-1 text-xs bg-background"
+                  >
+                    <option value="all">Tous</option>
+                    <option value="error">Erreurs</option>
+                    <option value="warn">Avertissements</option>
+                    <option value="info">Info</option>
+                  </select>
+                  <Button variant="outline" size="sm" onClick={fetchBotReplyLogs} disabled={botReplyLoading} className="gap-1.5 shrink-0">
+                    {botReplyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Actualiser
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {botReplyLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : botReplyLogs.filter((l) => botReplyFilter === "all" || l.level === botReplyFilter).length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Aucun log de réponse pour ce filtre.</p>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                  {botReplyLogs
+                    .filter((l) => botReplyFilter === "all" || l.level === botReplyFilter)
+                    .map((l) => {
+                      const lvl = l.level ?? (l.errCode as typeof l.level) ?? "info";
+                      const text = l.replyText ?? l.errMessage ?? "";
+                      const badgeClass = lvl === "error"
+                        ? "bg-red-500/15 text-red-600 border-red-300"
+                        : lvl === "warn"
+                          ? "bg-yellow-500/15 text-yellow-600 border-yellow-300"
+                          : "bg-blue-500/15 text-blue-600 border-blue-300";
+                      const icon = lvl === "error" ? "🔴" : lvl === "warn" ? "🟡" : "🔵";
+                      return (
+                        <div key={l.id} className="flex items-start gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+                          <span className="shrink-0 mt-0.5 text-sm">{icon}</span>
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${badgeClass}`}>{lvl}</Badge>
+                              {l.command && <span className="font-mono text-xs text-muted-foreground">/{l.command}</span>}
+                              {l.userTag && <span className="text-xs text-muted-foreground truncate">par {l.userTag}</span>}
+                              <span className="text-xs text-muted-foreground ml-auto shrink-0">{new Date(l.timestamp).toLocaleString("fr-FR")}</span>
+                            </div>
+                            <p className="text-sm break-words">{text}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
               )}
             </CardContent>
           </Card>

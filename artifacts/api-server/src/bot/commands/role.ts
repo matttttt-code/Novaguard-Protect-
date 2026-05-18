@@ -8,6 +8,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("role")
@@ -29,16 +30,16 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const role = interaction.options.getRole("rôle") as Role | null;
 
-  if (!member) return interaction.reply({ content: "Membre introuvable.", ephemeral: true });
-  if (!role) return interaction.reply({ content: "Rôle introuvable.", ephemeral: true });
+  if (!member) return replyErr(interaction, "❌ Membre introuvable.");
+  if (!role) return replyErr(interaction, "❌ Rôle introuvable.");
 
   const botMember = interaction.guild?.members.me;
   if (botMember && role.position >= botMember.roles.highest.position) {
-    return interaction.reply({ content: "Je ne peux pas gérer ce rôle (position trop haute).", ephemeral: true });
+    return replyErr(interaction, "❌ Je ne peux pas gérer ce rôle (position trop haute).");
   }
 
   if (sub === "ajouter") {
-    if (member.roles.cache.has(role.id)) return interaction.reply({ content: `${member.user.tag} a déjà ce rôle.`, ephemeral: true });
+    if (member.roles.cache.has(role.id)) return replyErr(interaction, `❌ ${member.user.tag} a déjà ce rôle.`);
     await member.roles.add(role, `Ajout par ${interaction.user.tag}`);
 
     const embed = new EmbedBuilder().setColor(role.color || 0x22c55e).setTitle("✅ Rôle ajouté")
@@ -55,7 +56,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
     ], { tag: interaction.user.tag, id: interaction.user.id }));
   }
 
-  if (!member.roles.cache.has(role.id)) return interaction.reply({ content: `${member.user.tag} n'a pas ce rôle.`, ephemeral: true });
+  if (!member.roles.cache.has(role.id)) return replyErr(interaction, `❌ ${member.user.tag} n'a pas ce rôle.`);
   await member.roles.remove(role, `Retrait par ${interaction.user.tag}`);
 
   const embed = new EmbedBuilder().setColor(0xf97316).setTitle("➖ Rôle retiré")
@@ -78,32 +79,32 @@ export const prefixAliases = ["rôle", "roles"];
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ManageRoles)) {
-    await message.reply("❌ Permission insuffisante (ManageRoles requise)."); return;
+    await msgErr(message, "role", "❌ Permission insuffisante (ManageRoles requise)."); return;
   }
 
   const sub = args[0]?.toLowerCase();
   if (sub !== "ajouter" && sub !== "retirer") {
-    await message.reply("Usage : `&role ajouter @membre @rôle` ou `&role retirer @membre @rôle`"); return;
+    await msgErr(message, "role", "Usage : `&role ajouter @membre @rôle` ou `&role retirer @membre @rôle`"); return;
   }
 
   const userId = args[1]?.replace(/[<@!>]/g, "");
   const roleId = args[2]?.replace(/[<@&>]/g, "");
-  if (!userId || !roleId) { await message.reply("❌ Membre et rôle requis."); return; }
+  if (!userId || !roleId) { await msgErr(message, "role", "❌ Membre et rôle requis."); return; }
 
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
-  catch { await message.reply("❌ Membre introuvable."); return; }
+  catch { await msgErr(message, "role", "❌ Membre introuvable."); return; }
 
   const role = message.guild.roles.cache.get(roleId);
-  if (!role) { await message.reply("❌ Rôle introuvable."); return; }
+  if (!role) { await msgErr(message, "role", "❌ Rôle introuvable."); return; }
 
   const botMember = message.guild.members.me;
   if (botMember && role.position >= botMember.roles.highest.position) {
-    await message.reply("❌ Je ne peux pas gérer ce rôle (position trop haute)."); return;
+    await msgErr(message, "role", "❌ Je ne peux pas gérer ce rôle (position trop haute)."); return;
   }
 
   if (sub === "ajouter") {
-    if (member.roles.cache.has(role.id)) { await message.reply(`❌ ${member.user.tag} a déjà ce rôle.`); return; }
+    if (member.roles.cache.has(role.id)) { await msgErr(message, "role", `❌ ${member.user.tag} a déjà ce rôle.`); return; }
     await member.roles.add(role, `Ajout par ${message.author.tag}`);
 
     const embed = new EmbedBuilder().setColor(role.color || 0x22c55e).setTitle("✅ Rôle ajouté")
@@ -120,7 +121,7 @@ export async function executeMessage(message: Message, args: string[]) {
       { name: "Via", value: "Commande préfixe", inline: true },
     ], { tag: message.author.tag, id: message.author.id }));
   } else {
-    if (!member.roles.cache.has(role.id)) { await message.reply(`❌ ${member.user.tag} n'a pas ce rôle.`); return; }
+    if (!member.roles.cache.has(role.id)) { await msgErr(message, "role", `❌ ${member.user.tag} n'a pas ce rôle.`); return; }
     await member.roles.remove(role, `Retrait par ${message.author.tag}`);
 
     const embed = new EmbedBuilder().setColor(0xf97316).setTitle("➖ Rôle retiré")

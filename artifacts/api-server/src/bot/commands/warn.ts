@@ -9,6 +9,7 @@ import {
 import { addWarning, getWarnings } from "../warnings-store.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 import { checkAutoAction } from "./autokick.js";
 
 export const data = new SlashCommandBuilder()
@@ -30,10 +31,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison", true);
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
-  if (!interaction.guildId) return interaction.reply({ content: "❌ Commande serveur uniquement.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous avertir vous-même.", ephemeral: true });
-  if (member.user.bot) return interaction.reply({ content: "❌ Impossible d'avertir un bot.", ephemeral: true });
+  if (!member) return replyErr(interaction, "❌ Membre introuvable.");
+  if (!interaction.guildId) return replyErr(interaction, "❌ Commande serveur uniquement.");
+  if (member.id === interaction.user.id) return replyErr(interaction, "❌ Vous ne pouvez pas vous avertir vous-même.");
+  if (member.user.bot) return replyErr(interaction, "❌ Impossible d'avertir un bot.");
 
   const moderator = interaction.member as GuildMember | null;
   if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
@@ -43,7 +44,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre.");
   }
 
   const caseId = addWarning(interaction.guildId, member.id, {
@@ -89,18 +90,18 @@ export const prefixName = "warn";
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-    await message.reply("❌ Permission insuffisante."); return;
+    await msgErr(message, "warn", "❌ Permission insuffisante."); return;
   }
 
   const userId = args[0]?.replace(/[<@!>]/g, "");
-  if (!userId) { await message.reply("Usage : `&warn @membre raison`"); return; }
+  if (!userId) { await msgErr(message, "warn", "Usage : `&warn @membre raison`"); return; }
 
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
-  catch { await message.reply("❌ Membre introuvable."); return; }
+  catch { await msgErr(message, "warn", "❌ Membre introuvable."); return; }
 
-  if (member.id === message.author.id) { await message.reply("❌ Vous ne pouvez pas vous avertir vous-même."); return; }
-  if (member.user.bot) { await message.reply("❌ Impossible d'avertir un bot."); return; }
+  if (member.id === message.author.id) { await msgErr(message, "warn", "❌ Vous ne pouvez pas vous avertir vous-même."); return; }
+  if (member.user.bot) { await msgErr(message, "warn", "❌ Impossible d'avertir un bot."); return; }
   if (member.roles.highest.position >= message.member!.roles.highest.position) {
     await sendBlockedActionDM(message.client, {
       command: "&warn", guildName: message.guild!.name, guildId: message.guild!.id,
@@ -108,11 +109,11 @@ export async function executeMessage(message: Message, args: string[]) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    await message.reply("❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre."); return;
+    await msgErr(message, "warn", "❌ Vous ne pouvez pas avertir un membre dont le rôle est supérieur ou égal au vôtre."); return;
   }
 
   const reason = args.slice(1).join(" ");
-  if (!reason) { await message.reply("❌ Une raison est obligatoire."); return; }
+  if (!reason) { await msgErr(message, "warn", "❌ Une raison est obligatoire."); return; }
 
   const caseId = addWarning(message.guild.id, member.id, {
     reason,

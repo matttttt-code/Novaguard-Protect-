@@ -64,3 +64,18 @@ export async function getBotErrorsDB(limit = 100): Promise<EventLog[]> {
     .limit(limit);
   return rows.map(rowToLog);
 }
+
+export async function getBotRepliesDB(guildId: string, limit = 200): Promise<EventLog[]> {
+  const { and } = await import("drizzle-orm");
+  const rows = await db
+    .select()
+    .from(eventLogsTable)
+    .where(and(eq(eventLogsTable.guildId, guildId), eq(eventLogsTable.type, "bot_reply")))
+    .orderBy(desc(eventLogsTable.tsMs))
+    .limit(limit);
+  return rows.map((row) => ({
+    ...rowToLog(row),
+    level: (row.errCode ?? "info") as import("./event-log-store.js").BotReplyLevel,
+    replyText: row.errMessage ?? undefined,
+  }));
+}

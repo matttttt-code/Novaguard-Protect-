@@ -10,6 +10,7 @@ import {
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
 import { addTempBan } from "../tempban-store.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 function parseDuration(str: string): number | null {
   const match = str.match(/^(\d+)(s|m|h|j|d)$/i);
@@ -44,7 +45,7 @@ export const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  if (!interaction.guild) return interaction.reply({ content: "Commande serveur uniquement.", ephemeral: true });
+  if (!interaction.guild) return replyErr(interaction, "Commande serveur uniquement.");
 
   const user = interaction.options.getUser("membre", true);
   const member = interaction.options.getMember("membre") as GuildMember | null;
@@ -53,10 +54,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const dmOption = interaction.options.getBoolean("dm");
 
   const durationMs = parseDuration(durationStr);
-  if (!durationMs) return interaction.reply({ content: "❌ Durée invalide. Exemples : `1j`, `12h`, `30m`, `60s`.", ephemeral: true });
+  if (!durationMs) return replyErr(interaction, "❌ Durée invalide. Exemples : `1j`, `12h`, `30m`, `60s`.");
 
-  if (user.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous bannir vous-même.", ephemeral: true });
-  if (user.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me bannir moi-même.", ephemeral: true });
+  if (user.id === interaction.user.id) return replyErr(interaction, "❌ Vous ne pouvez pas vous bannir vous-même.");
+  if (user.id === interaction.client.user?.id) return replyErr(interaction, "❌ Je ne peux pas me bannir moi-même.");
 
   const moderator = interaction.member as GuildMember | null;
   if (member && moderator && member.roles.highest.position >= moderator.roles.highest.position) {
@@ -66,9 +67,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.");
   }
-  if (member && !member.bannable) return interaction.reply({ content: "❌ Je ne peux pas bannir ce membre.", ephemeral: true });
+  if (member && !member.bannable) return replyErr(interaction, "❌ Je ne peux pas bannir ce membre.");
 
   await interaction.deferReply();
 
@@ -112,17 +113,17 @@ export const prefixName = "tempban";
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-    await message.reply("❌ Permission insuffisante (BanMembers requise)."); return;
+    await msgErr(message, "tempban", "❌ Permission insuffisante (BanMembers requise)."); return;
   }
 
   const rawId = args[0]?.replace(/[<@!>]/g, "");
   const durationStr = args[1];
   if (!rawId || !/^\d+$/.test(rawId) || !durationStr) {
-    await message.reply("Usage : `&tempban @membre <durée> [raison]` — ex. `&tempban @user 1j spam`"); return;
+    await msgErr(message, "tempban", "Usage : `&tempban @membre <durée> [raison]` — ex. `&tempban @user 1j spam`"); return;
   }
 
   const durationMs = parseDuration(durationStr);
-  if (!durationMs) { await message.reply("❌ Durée invalide. Exemples : `1j`, `12h`, `30m`"); return; }
+  if (!durationMs) { await msgErr(message, "tempban", "❌ Durée invalide. Exemples : `1j`, `12h`, `30m`"); return; }
 
   const reason = args.slice(2).join(" ") || "Aucune raison fournie";
 
@@ -130,19 +131,19 @@ export async function executeMessage(message: Message, args: string[]) {
   try {
     const member = await message.guild.members.fetch(rawId);
     if (member.roles.highest.position >= message.member!.roles.highest.position) {
-      await message.reply("❌ Rôle supérieur ou égal au vôtre."); return;
+      await msgErr(message, "tempban", "❌ Rôle supérieur ou égal au vôtre."); return;
     }
-    if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre."); return; }
+    if (!member.bannable) { await msgErr(message, "tempban", "❌ Je ne peux pas bannir ce membre."); return; }
     user = member.user;
     await sendSanctionDM(user, "ban", reason, message.guild, `Durée : **${formatDuration(durationMs)}** — Déban automatique.`);
   } catch {
     try { user = await message.client.users.fetch(rawId); }
-    catch { await message.reply("❌ Utilisateur introuvable."); return; }
+    catch { await msgErr(message, "tempban", "❌ Utilisateur introuvable."); return; }
   }
 
   try {
     await message.guild.members.ban(rawId, { reason: `[TEMPBAN ${formatDuration(durationMs)}] ${reason}` });
-  } catch { await message.reply("❌ Impossible de bannir."); return; }
+  } catch { await msgErr(message, "tempban", "❌ Impossible de bannir."); return; }
 
   addTempBan({ guildId: message.guild.id, userId: rawId, userTag: user.tag, moderatorTag: message.author.tag, reason, expiresAt: Date.now() + durationMs });
 

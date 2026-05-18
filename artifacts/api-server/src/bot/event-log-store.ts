@@ -6,9 +6,10 @@
  *  - bot_error      : erreur non gérée dans un handler de commande/bouton/modal
  */
 
-import { insertEventLogDB, getGuildLogsDB, getBotErrorsDB } from "./event-log-db.js";
+import { insertEventLogDB, getGuildLogsDB, getBotErrorsDB, getBotRepliesDB } from "./event-log-db.js";
 
-export type LogType = "config_change" | "command_exec" | "bot_error";
+export type LogType = "config_change" | "command_exec" | "bot_error" | "bot_reply";
+export type BotReplyLevel = "error" | "warn" | "info";
 
 export interface EventLog {
   id: string;
@@ -28,6 +29,9 @@ export interface EventLog {
   // bot_error
   errCode?: string;
   errMessage?: string;
+  // bot_reply (level stored in errCode, text in errMessage)
+  level?: BotReplyLevel;
+  replyText?: string;
 }
 
 const MAX_PER_GUILD = 200;
@@ -130,5 +134,39 @@ export async function getAllBotErrors(limit = 100): Promise<EventLog[]> {
     return await getBotErrorsDB(Math.min(limit, 100));
   } catch {
     return botErrors.slice(0, limit);
+  }
+}
+
+export function logBotReply(
+  guildId: string | null,
+  command: string,
+  level: BotReplyLevel,
+  replyText: string,
+  userId?: string,
+  userTag?: string,
+): void {
+  const entry: EventLog = {
+    id: nextId(),
+    type: "bot_reply",
+    guildId,
+    timestamp: Date.now(),
+    command,
+    level,
+    replyText,
+    userId,
+    userTag,
+    // errCode = level, errMessage = replyText for DB persistence
+    errCode: level,
+    errMessage: replyText,
+  };
+  if (guildId) pushToGuild(guildId, entry);
+  insertEventLogDB(entry);
+}
+
+export async function getBotRepliesForGuild(guildId: string, limit = 100): Promise<EventLog[]> {
+  try {
+    return await getBotRepliesDB(guildId, Math.min(limit, 200));
+  } catch {
+    return (guildLogs.get(guildId) ?? []).filter((e) => e.type === "bot_reply").slice(0, limit);
   }
 }

@@ -7,6 +7,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
+import { msgErr } from "../reply-logger.js";
 
 async function lockChannel(channel: TextChannel, guildId: string): Promise<void> {
   await channel.permissionOverwrites.edit(guildId, { SendMessages: false });
@@ -51,7 +52,7 @@ export const prefixAliases = ["fermer"];
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    await message.reply("❌ Permission insuffisante (ManageChannels requise)."); return;
+    await msgErr(message, "lock", "❌ Permission insuffisante (ManageChannels requise)."); return;
   }
 
   let channel = message.channel as TextChannel;

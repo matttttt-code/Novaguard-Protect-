@@ -24,6 +24,7 @@ import { getInviteBlacklist, removeInviteBlacklist } from "../bot/invite-blackli
 import { getQuarantineList, removeQuarantine, QuarantineEntry } from "../bot/quarantine-store.js";
 import { resetStaffWindow } from "../bot/staff-ratelimit.js";
 import { getVoiceLog, clearVoiceLog } from "../bot/voice-monitor.js";
+import { getBotRepliesForGuild } from "../bot/event-log-store.js";
 import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan } from "../bot/tempban-store.js";
 import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
 import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
@@ -1462,6 +1463,18 @@ router.delete("/owner/guilds/:guildId/quarantine/:userId", async (req, res) => {
     } catch { /* ignore */ }
   }
   res.json({ ok: removed });
+});
+
+// ── GET /api/owner/guilds/:guildId/bot-reply-logs ────────────────────────────
+router.get("/owner/guilds/:guildId/bot-reply-logs", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? "100", 10) || 100, 200);
+  try {
+    const logs = await getBotRepliesForGuild(guildId, limit);
+    res.json(logs);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── GET /api/owner/guilds/:guildId/voice-log ──────────────────────────────────

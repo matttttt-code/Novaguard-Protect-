@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendBlockedActionDM } from "../dm-notify.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("untimeout")
@@ -22,8 +23,8 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const member = interaction.options.getMember("membre") as GuildMember | null;
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
 
-  if (!member) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
-  if (!member.communicationDisabledUntil) return interaction.reply({ content: "❌ Ce membre n'est pas en timeout.", ephemeral: true });
+  if (!member) return replyErr(interaction, "❌ Membre introuvable.");
+  if (!member.communicationDisabledUntil) return replyErr(interaction, "❌ Ce membre n'est pas en timeout.");
 
   const moderator = interaction.member as GuildMember | null;
   if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
@@ -33,7 +34,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre.");
   }
 
   await member.timeout(null, reason);
@@ -59,17 +60,17 @@ export const prefixAliases = ["unmute"];
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-    await message.reply("❌ Permission insuffisante (ModerateMembers requise)."); return;
+    await msgErr(message, "untimeout", "❌ Permission insuffisante (ModerateMembers requise)."); return;
   }
 
   const userId = args[0]?.replace(/[<@!>]/g, "");
-  if (!userId) { await message.reply("Usage : `&untimeout @membre [raison]`"); return; }
+  if (!userId) { await msgErr(message, "untimeout", "Usage : `&untimeout @membre [raison]`"); return; }
 
   let member: GuildMember;
   try { member = await message.guild.members.fetch(userId); }
-  catch { await message.reply("❌ Membre introuvable."); return; }
+  catch { await msgErr(message, "untimeout", "❌ Membre introuvable."); return; }
 
-  if (!member.communicationDisabledUntil) { await message.reply("❌ Ce membre n'est pas en timeout."); return; }
+  if (!member.communicationDisabledUntil) { await msgErr(message, "untimeout", "❌ Ce membre n'est pas en timeout."); return; }
   if (member.roles.highest.position >= message.member!.roles.highest.position) {
     await sendBlockedActionDM(message.client, {
       command: "&untimeout", guildName: message.guild!.name, guildId: message.guild!.id,
@@ -77,7 +78,7 @@ export async function executeMessage(message: Message, args: string[]) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    await message.reply("❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre."); return;
+    await msgErr(message, "untimeout", "❌ Vous ne pouvez pas retirer le timeout d'un membre dont le rôle est supérieur ou égal au vôtre."); return;
   }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";

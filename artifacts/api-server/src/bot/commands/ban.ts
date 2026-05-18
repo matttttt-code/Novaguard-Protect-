@@ -9,6 +9,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("ban")
@@ -30,7 +31,7 @@ export const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers);
 
 export async function execute(interaction: ChatInputCommandInteraction) {
-  if (!interaction.guild) return interaction.reply({ content: "Commande serveur uniquement.", ephemeral: true });
+  if (!interaction.guild) return replyErr(interaction, "Commande serveur uniquement.");
 
   const user = interaction.options.getUser("membre", true);
   const member = interaction.options.getMember("membre") as GuildMember | null;
@@ -39,10 +40,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const dmOption = interaction.options.getBoolean("dm");
 
   if (user.id === interaction.user.id) {
-    return interaction.reply({ content: "❌ Vous ne pouvez pas vous bannir.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas vous bannir.");
   }
   if (user.id === interaction.client.user?.id) {
-    return interaction.reply({ content: "❌ Je ne peux pas me bannir moi-même.", ephemeral: true });
+    return replyErr(interaction, "❌ Je ne peux pas me bannir moi-même.");
   }
 
   const moderator = interaction.member as GuildMember | null;
@@ -53,10 +54,10 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre.");
   }
   if (member && !member.bannable) {
-    return interaction.reply({ content: "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
+    return replyErr(interaction, "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).");
   }
 
   await interaction.deferReply();
@@ -68,7 +69,7 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   try {
     await interaction.guild.members.ban(user.id, { reason, deleteMessageSeconds });
   } catch {
-    return interaction.editReply({ content: "❌ Impossible de bannir cet utilisateur." });
+    return interaction.editReply({ content: "❌ Impossible de bannir cet utilisateur." }); // editReply après defer, pas loggable via replyErr
   }
 
   const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔨 Membre banni")
@@ -97,18 +98,18 @@ export const prefixName = "ban";
 export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
   if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-    await message.reply("❌ Permission insuffisante (BanMembers requise)."); return;
+    await msgErr(message, "ban", "❌ Permission insuffisante (BanMembers requise)."); return;
   }
 
   const rawId = args[0]?.replace(/[<@!>]/g, "");
   if (!rawId || !/^\d+$/.test(rawId)) {
-    await message.reply("Usage : `&ban @membre [raison]` ou `&ban <userId> [raison]`"); return;
+    await msgErr(message, "ban", "Usage : `&ban @membre [raison]` ou `&ban <userId> [raison]`"); return;
   }
   if (rawId === message.author.id) {
-    await message.reply("❌ Vous ne pouvez pas vous bannir."); return;
+    await msgErr(message, "ban", "❌ Vous ne pouvez pas vous bannir."); return;
   }
   if (rawId === message.client.user?.id) {
-    await message.reply("❌ Je ne peux pas me bannir moi-même."); return;
+    await msgErr(message, "ban", "❌ Je ne peux pas me bannir moi-même."); return;
   }
 
   const reason = args.slice(1).join(" ") || "Aucune raison fournie";
@@ -126,23 +127,23 @@ export async function executeMessage(message: Message, args: string[]) {
         targetTag: member.user.tag, targetId: member.id,
         blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
       });
-      await message.reply("❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre."); return;
+      await msgErr(message, "ban", "❌ Vous ne pouvez pas bannir un membre dont le rôle est supérieur ou égal au vôtre."); return;
     }
-    if (!member.bannable) { await message.reply("❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien)."); return; }
+    if (!member.bannable) { await msgErr(message, "ban", "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien)."); return; }
     user = member.user;
     await sendSanctionDM(user, "ban", reason, message.guild);
   } catch {
     try {
       user = await message.client.users.fetch(rawId);
     } catch {
-      await message.reply("❌ Utilisateur introuvable. Vérifie l'ID."); return;
+      await msgErr(message, "ban", "❌ Utilisateur introuvable. Vérifie l'ID."); return;
     }
   }
 
   try {
     await message.guild.members.ban(rawId, { reason });
   } catch {
-    await message.reply("❌ Impossible de bannir cet utilisateur."); return;
+    await msgErr(message, "ban", "❌ Impossible de bannir cet utilisateur."); return;
   }
 
   const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔨 Membre banni")

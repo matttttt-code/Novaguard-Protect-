@@ -8,6 +8,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { sendSanctionDM, sendBlockedActionDM } from "../dm-notify.js";
+import { replyErr, msgErr } from "../reply-logger.js";
 
 export const data = new SlashCommandBuilder()
   .setName("softban")
@@ -32,9 +33,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const days = interaction.options.getInteger("jours") ?? 1;
   const dmOption = interaction.options.getBoolean("dm");
 
-  if (!member || !interaction.guild) return interaction.reply({ content: "❌ Membre introuvable.", ephemeral: true });
-  if (member.id === interaction.user.id) return interaction.reply({ content: "❌ Vous ne pouvez pas vous softbannir.", ephemeral: true });
-  if (member.id === interaction.client.user?.id) return interaction.reply({ content: "❌ Je ne peux pas me softbannir moi-même.", ephemeral: true });
+  if (!member || !interaction.guild) return replyErr(interaction, "❌ Membre introuvable.");
+  if (member.id === interaction.user.id) return replyErr(interaction, "❌ Vous ne pouvez pas vous softbannir.");
+  if (member.id === interaction.client.user?.id) return replyErr(interaction, "❌ Je ne peux pas me softbannir moi-même.");
 
   const moderator = interaction.member as GuildMember | null;
   if (moderator && member.roles.highest.position >= moderator.roles.highest.position) {
@@ -44,9 +45,9 @@ export async function execute(interaction: ChatInputCommandInteraction) {
       targetTag: member.user.tag, targetId: member.id,
       blockReason: "Rôle de la cible supérieur ou égal à celui du modérateur",
     });
-    return interaction.reply({ content: "❌ Vous ne pouvez pas softbannir un membre dont le rôle est supérieur ou égal au vôtre.", ephemeral: true });
+    return replyErr(interaction, "❌ Vous ne pouvez pas softbannir un membre dont le rôle est supérieur ou égal au vôtre.");
   }
-  if (!member.bannable) return interaction.reply({ content: "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).", ephemeral: true });
+  if (!member.bannable) return replyErr(interaction, "❌ Je ne peux pas bannir ce membre (son rôle est supérieur ou égal au mien).");
 
   await interaction.deferReply();
 

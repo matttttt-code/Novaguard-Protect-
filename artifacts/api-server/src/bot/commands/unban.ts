@@ -10,6 +10,7 @@ import {
 } from "discord.js";
 import { sendLog, logEmbed } from "../log.js";
 import { getAlertPing } from "../alert-ping.js";
+import { replyErr, replyWarn, msgErr, msgWarn } from "../reply-logger.js";
 import { getConfig } from "../guild-config-store.js";
 import { logger } from "../../lib/logger.js";
 import {
@@ -94,21 +95,18 @@ export async function execute(interaction: ChatInputCommandInteraction) {
   const reason = interaction.options.getString("raison") ?? "Aucune raison fournie";
 
   if (!interaction.guild) {
-    return interaction.reply({ content: "Cette commande n'est disponible que sur un serveur.", ephemeral: true });
+    return replyErr(interaction, "Cette commande n'est disponible que sur un serveur.");
   }
 
   let ban;
   try {
     ban = await interaction.guild.bans.fetch(userId);
   } catch {
-    return interaction.reply({ content: "Cet utilisateur n'est pas banni ou l'ID est invalide.", ephemeral: true });
+    return replyErr(interaction, "❌ Cet utilisateur n'est pas banni ou l'ID est invalide.");
   }
 
   if (isBlacklisted(interaction.guild.id, userId)) {
-    await interaction.reply({
-      content: "⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.",
-      ephemeral: true,
-    });
+    await replyWarn(interaction, "⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.");
     await sendUnbanApproval(
       interaction.client, interaction.guild, userId, ban.user.tag,
       reason, interaction.user.tag, interaction.user.id
@@ -145,13 +143,13 @@ export async function executeMessage(message: Message, args: string[]) {
   if (!message.guild || !message.member) return;
 
   if (!message.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-    await message.reply("❌ Permission insuffisante (BanMembers requise).");
+    await msgErr(message, "unban", "❌ Permission insuffisante (BanMembers requise).");
     return;
   }
 
   const userId = args[0];
   if (!userId) {
-    await message.reply("Usage : `&unban <userId> [raison]`");
+    await msgErr(message, "unban", "Usage : `&unban <userId> [raison]`");
     return;
   }
 
@@ -161,12 +159,12 @@ export async function executeMessage(message: Message, args: string[]) {
   try {
     ban = await message.guild.bans.fetch(userId);
   } catch {
-    await message.reply("❌ Cet utilisateur n'est pas banni ou l'ID est invalide.");
+    await msgErr(message, "unban", "❌ Cet utilisateur n'est pas banni ou l'ID est invalide.");
     return;
   }
 
   if (isBlacklisted(message.guild.id, userId)) {
-    await message.reply("⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.");
+    await msgWarn(message, "unban", "⚠️ Cet utilisateur est dans la **liste noire**. Une demande d'approbation a été envoyée dans le salon de logs avec un ping @here. Un administrateur doit valider.");
     await sendUnbanApproval(
       message.client, message.guild, userId, ban.user.tag,
       reason, message.author.tag, message.author.id
