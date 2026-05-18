@@ -1018,6 +1018,14 @@ router.post("/owner/bot/broadcast", async (req, res) => {
   if (!client?.isReady()) { res.status(503).json({ error: "Bot non connecté" }); return; }
   const { message } = req.body as { message?: string };
   if (!message?.trim()) { res.status(400).json({ error: "Message vide" }); return; }
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFF4500)
+    .setTitle("📢 Diffusion Globale")
+    .setDescription(message.trim())
+    .setFooter({ text: "Message officiel de l'administration" })
+    .setTimestamp();
+
   const results: { guildId: string; guildName: string; ok: boolean; error?: string }[] = [];
   for (const guild of client.guilds.cache.values()) {
     try {
@@ -1026,7 +1034,7 @@ router.post("/owner/bot/broadcast", async (req, res) => {
       if (!logChannelId) { results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: "Pas de salon log configuré" }); continue; }
       const channel = guild.channels.cache.get(logChannelId);
       if (!channel?.isTextBased()) { results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: "Salon introuvable" }); continue; }
-      await channel.send({ content: message.trim() });
+      await channel.send({ embeds: [embed] });
       results.push({ guildId: guild.id, guildName: guild.name, ok: true });
     } catch (e: any) {
       results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: e.message });
