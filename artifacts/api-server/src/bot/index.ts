@@ -638,9 +638,20 @@ export function startBot(): void {
       const keywords = getSuspectKeywords(guildId);
       const usernameLower = member.user.username.toLowerCase();
       const displayNameLower = (member.displayName ?? "").toLowerCase();
-      const matchedKeyword = keywords.find((kw) => usernameLower.includes(kw) || displayNameLower.includes(kw));
+      const globalNameLower = (member.user.globalName ?? "").toLowerCase();
+      const tagLower = member.user.tag.toLowerCase();
+      const matchedKeyword = keywords.find((kw) =>
+        usernameLower.includes(kw) ||
+        displayNameLower.includes(kw) ||
+        globalNameLower.includes(kw) ||
+        tagLower.includes(kw)
+      );
       if (matchedKeyword) {
-        const kwReasons = [`Nom contient le mot-clé suspect : \`${matchedKeyword}\``];
+        const matchedIn =
+          usernameLower.includes(matchedKeyword) ? "username" :
+          globalNameLower.includes(matchedKeyword) ? "global name" :
+          displayNameLower.includes(matchedKeyword) ? "pseudo serveur" : "tag";
+        const kwReasons = [`Nom contient le mot-clé suspect : \`${matchedKeyword}\` (dans ${matchedIn})`];
         void saveSuspectAccount({
           guildId,
           guildName: member.guild.name,
