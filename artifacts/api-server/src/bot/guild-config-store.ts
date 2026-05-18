@@ -224,6 +224,13 @@ export function removeSuspectKeyword(guildId: string, word: string): boolean {
 }
 
 export function getBlServers(guildId: string): string[] { return getConfig(guildId).blServers ?? []; }
+export function getAllBlServerIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const cfg of configs.values()) {
+    for (const id of (cfg.blServers ?? [])) ids.add(id);
+  }
+  return ids;
+}
 export function addBlServer(guildId: string, serverId: string): void {
   const cfg = getOrCreate(guildId);
   const list = [...(cfg.blServers ?? []), serverId].filter((v, i, a) => a.indexOf(v) === i);

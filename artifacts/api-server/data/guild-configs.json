@@ -186,7 +186,11 @@
     "antiBotEnabled": false,
     "antiEveryoneEnabled": false,
     "antiEveryoneTimeoutSecs": 300,
-    "suspectKeywords": []
+    "suspectKeywords": [],
+    "blServers": [],
+    "blTags": [
+      "#dgsi"
+    ]
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -375,7 +379,9 @@
     "antiEveryoneTimeoutSecs": 300,
     "suspectKeywords": [
       "#dgsi"
-    ]
+    ],
+    "blServers": [],
+    "blTags": []
   },
   "1505649273251954739": {
     "logChannelId": "1505649273738629265",
@@ -562,6 +568,8 @@
     "antiBotEnabled": false,
     "antiEveryoneEnabled": false,
     "antiEveryoneTimeoutSecs": 300,
-    "suspectKeywords": []
+    "suspectKeywords": [],
+    "blServers": [],
+    "blTags": []
   }
 }
