@@ -324,15 +324,22 @@ export default function OwnerPanel() {
   const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
 
   // ── Verif state ────────────────────────────────────────────────────────────
+  interface VerifAccount {
+    ageDays: number; createdTimestamp: number; hasAvatar: boolean;
+    flags: string[]; trustFlags: string[]; vpnFlagged: boolean;
+    riskScore: number; riskLevel: string; guildsSeenCount: number;
+    suspectHistory: { guildName: string; reasons: string[]; actionTaken: string; vpnSuspicion: boolean; detectedAt: string | null }[];
+  }
   interface VerifSpecific {
     mode: "specific"; userId: string; tag: string; avatar: string;
     found: boolean; guildId?: string; guildName?: string;
     joinedAt?: string | null; roles?: { id: string; name: string }[];
-    error?: string;
+    account?: VerifAccount; error?: string;
   }
   interface VerifBlacklist {
     mode: "blacklist"; userId: string; tag: string; avatar: string; foundCount: number;
     results: { guildId: string; label: string; found: boolean; botPresent: boolean }[];
+    account?: VerifAccount;
   }
   type VerifResult = VerifSpecific | VerifBlacklist;
 
@@ -4430,11 +4437,86 @@ export default function OwnerPanel() {
                   {/* En-tête utilisateur */}
                   <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
                     <img src={verifResult.avatar} alt="" className="h-10 w-10 rounded-full flex-shrink-0" />
-                    <div>
+                    <div className="flex-1">
                       <p className="text-sm font-medium">{verifResult.tag}</p>
                       <p className="text-xs text-muted-foreground font-mono">{verifResult.userId}</p>
                     </div>
+                    {verifResult.account && (
+                      <div className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                        verifResult.account.riskScore >= 60 ? "border-red-500/40 bg-red-500/10 text-red-400" :
+                        verifResult.account.riskScore >= 35 ? "border-orange-500/40 bg-orange-500/10 text-orange-400" :
+                        verifResult.account.riskScore >= 15 ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400" :
+                        "border-green-500/40 bg-green-500/10 text-green-400"
+                      }`}>
+                        {verifResult.account.riskScore >= 60 ? "🔴" : verifResult.account.riskScore >= 35 ? "🟠" : verifResult.account.riskScore >= 15 ? "🟡" : "✅"} {verifResult.account.riskLevel}
+                      </div>
+                    )}
                   </div>
+
+                  {/* Infos compte enrichies */}
+                  {verifResult.account && (() => {
+                    const acc = verifResult.account;
+                    const ageLabel = acc.ageDays < 1 ? "< 1 jour" : acc.ageDays < 30 ? `${acc.ageDays}j` : acc.ageDays < 365 ? `${Math.floor(acc.ageDays / 30)} mois` : `${Math.floor(acc.ageDays / 365)} an(s)`;
+                    const ageColor = acc.ageDays < 7 ? "text-red-400" : acc.ageDays < 30 ? "text-orange-400" : acc.ageDays < 90 ? "text-yellow-400" : "text-green-400";
+                    const BADGE_LABELS: Record<string, string> = {
+                      Staff: "👑 Discord Staff", Partner: "🤝 Partner", BugHunterLevel1: "🐛 Bug Hunter",
+                      BugHunterLevel2: "🏆 Bug Hunter Gold", PremiumEarlySupporter: "💎 Early Supporter",
+                      VerifiedDeveloper: "🔧 Verified Dev", CertifiedModerator: "🛡️ Certified Mod", ActiveDeveloper: "⚙️ Active Dev",
+                      HypeSquadOnlineHouse1: "🏠 Bravery", HypeSquadOnlineHouse2: "🏠 Brilliance", HypeSquadOnlineHouse3: "🏠 Balance",
+                    };
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/10 p-3 space-y-2 text-xs">
+                        <p className="text-sm font-semibold">Profil Discord</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Âge du compte</p>
+                            <p className={`font-semibold ${ageColor}`}>{ageLabel}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Créé le</p>
+                            <p className="font-mono">{new Date(acc.createdTimestamp).toLocaleDateString("fr-FR")}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Avatar</p>
+                            <p>{acc.hasAvatar ? "✅ Personnalisé" : "⚠️ Défaut"}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Score risque</p>
+                            <p className="font-semibold">{acc.riskScore}/100</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Signalé sur</p>
+                            <p>{acc.guildsSeenCount > 1 ? <span className="text-orange-400 font-semibold">{acc.guildsSeenCount} serveurs ⚠️</span> : `${acc.guildsSeenCount} serveur`}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">VPN / Proxy</p>
+                            <p>{acc.vpnFlagged ? <span className="text-red-400 font-semibold">🔴 Détecté</span> : "—"}</p>
+                          </div>
+                        </div>
+                        {acc.flags.length > 0 && (
+                          <div className="space-y-0.5 pt-1 border-t border-border/50">
+                            <p className="text-muted-foreground">Badges Discord</p>
+                            <p className="flex flex-wrap gap-1">{acc.flags.map((f) => <span key={f} className={`px-1.5 py-0.5 rounded bg-muted/50 ${acc.trustFlags.includes(f) ? "text-indigo-300" : "text-muted-foreground"}`}>{BADGE_LABELS[f] ?? f}</span>)}</p>
+                          </div>
+                        )}
+                        {acc.suspectHistory.length > 0 && (
+                          <div className="space-y-1 pt-1 border-t border-border/50">
+                            <p className="text-muted-foreground font-semibold">Historique suspect ({acc.suspectHistory.length})</p>
+                            {acc.suspectHistory.map((h, i) => (
+                              <div key={i} className="flex items-start gap-1.5 text-xs">
+                                <span className="text-red-400 shrink-0">•</span>
+                                <span className="text-muted-foreground shrink-0">{h.detectedAt ? new Date(h.detectedAt).toLocaleDateString("fr-FR") : "?"}</span>
+                                <span className="font-medium shrink-0">{h.guildName}</span>
+                                <span className="text-muted-foreground truncate">{h.reasons.slice(0, 2).join(", ")}</span>
+                                {h.vpnSuspicion && <span className="text-orange-400 shrink-0">🌐VPN</span>}
+                                <span className="shrink-0 font-mono bg-muted/50 px-1 rounded">{h.actionTaken}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Mode serveur précis */}
                   {verifResult.mode === "specific" && (
@@ -4469,22 +4551,23 @@ export default function OwnerPanel() {
                       <div className={`rounded-lg border p-3 text-sm font-medium flex items-center gap-2 ${verifResult.foundCount > 0 ? "border-red-500/40 bg-red-500/5 text-red-400" : "border-green-500/40 bg-green-500/5 text-green-400"}`}>
                         {verifResult.foundCount > 0
                           ? <><ShieldAlert className="h-4 w-4" /> Présent dans {verifResult.foundCount} serveur(s) blacklisté(s) !</>
-                          : <><ShieldCheck className="h-4 w-4" /> Aucun serveur blacklisté détecté</>
+                          : <><ShieldCheck className="h-4 w-4" /> Absent de tous les serveurs blacklistés vérifiables</>
                         }
                       </div>
                       <div className="rounded-lg border border-border divide-y divide-border/50">
                         {verifResult.results.map((r) => (
                           <div key={r.guildId} className="flex items-center gap-2 px-3 py-2 text-xs">
-                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${r.found ? "bg-red-500" : r.botPresent ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${r.found ? "bg-red-500" : r.botPresent ? "bg-green-500" : "bg-muted-foreground/30"}`} />
                             <span className="flex-1 truncate font-medium">{r.label !== r.guildId ? r.label : "—"}</span>
-                            <span className="font-mono text-muted-foreground">{r.guildId}</span>
-                            <span className={`shrink-0 ${r.found ? "text-red-400" : r.botPresent ? "text-green-400" : "text-muted-foreground"}`}>
-                              {r.found ? "⚠️ Présent" : r.botPresent ? "✅ Absent" : "⬛ Bot absent"}
+                            <span className="font-mono text-muted-foreground shrink-0">{r.guildId}</span>
+                            <span className={`shrink-0 font-medium ${r.found ? "text-red-400" : r.botPresent ? "text-green-400" : "text-muted-foreground"}`}>
+                              {r.found ? "🔴 Présent" : r.botPresent ? "✅ Absent" : "⬛ Bot absent"}
                             </span>
                           </div>
                         ))}
                         {verifResult.results.length === 0 && <p className="px-3 py-4 text-xs text-muted-foreground text-center">Aucun serveur dans la blacklist.</p>}
                       </div>
+                      <p className="text-xs text-muted-foreground">⬛ Bot absent = serveur blacklisté sans bot — présence non vérifiable automatiquement.</p>
                     </div>
                   )}
                 </div>

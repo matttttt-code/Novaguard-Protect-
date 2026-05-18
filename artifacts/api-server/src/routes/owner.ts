@@ -12,7 +12,7 @@ import {
   PresenceStatusData,
   AuditLogEvent,
 } from "discord.js";
-import { getConfig, setConfig, getSuspectKeywords, addSuspectKeyword, removeSuspectKeyword, getBlServers, addBlServer, removeBlServer, getBlTags, addBlTag, removeBlTag } from "../bot/guild-config-store.js";
+import { getConfig, setConfig, getSuspectKeywords, addSuspectKeyword, removeSuspectKeyword, getBlServers, addBlServer, removeBlServer, getBlTags, addBlTag, removeBlTag, getAllBlServerIds } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { addToGlobalBlacklist, removeFromGlobalBlacklist, addToBlacklist, removeFromBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
@@ -1663,7 +1663,7 @@ router.get("/owner/user-commands", async (req, res) => {
 });
 
 // ── Suspect Accounts ──────────────────────────────────────────────────────────
-import { getSuspectAccounts, deleteSuspectAccount, markSuspectVerified, updateSuspectTags } from "../bot/suspect-accounts-db.js";
+import { getSuspectAccounts, deleteSuspectAccount, markSuspectVerified, updateSuspectTags, getSuspectsByUserId } from "../bot/suspect-accounts-db.js";
 
 router.get("/owner/suspect-accounts", async (req, res) => {
   try {
@@ -1743,25 +1743,62 @@ router.get("/owner/verif", async (req, res) => {
   const client = getClient();
   if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
 
-  let targetUser;
-  try { targetUser = await client.users.fetch(userId.trim()); }
+  let targetUser: import("discord.js").User;
+  try { targetUser = await client.users.fetch(userId.trim(), { force: true }); }
   catch { res.status(404).json({ error: "Utilisateur Discord introuvable (ID invalide)." }); return; }
+
+  // ── Infos compte enrichies ─────────────────────────────────────────────────
+  const ageDays = Math.floor((Date.now() - targetUser.createdTimestamp) / 86_400_000);
+  const hasAvatar = !!targetUser.avatar;
+  const flags = targetUser.flags?.toArray() ?? [];
+  const suspectHistory = await getSuspectsByUserId(targetUser.id).catch(() => [] as Awaited<ReturnType<typeof getSuspectsByUserId>>);
+  const guildsSeenIn = [...new Set(suspectHistory.map((s) => s.guildId))];
+  const vpnFlagged = suspectHistory.some((s) => s.vpnSuspicion);
+
+  const TRUST_FLAGS = ["Staff", "Partner", "BugHunterLevel1", "BugHunterLevel2", "PremiumEarlySupporter", "VerifiedDeveloper", "CertifiedModerator", "ActiveDeveloper"];
+  const trustFlags = flags.filter((f) => TRUST_FLAGS.includes(f));
+
+  let riskScore = 0;
+  if (ageDays < 7)         riskScore += 40;
+  else if (ageDays < 30)   riskScore += 25;
+  else if (ageDays < 90)   riskScore += 10;
+  else if (ageDays < 365)  riskScore += 3;
+  if (!hasAvatar)          riskScore += 10;
+  if (trustFlags.length === 0) riskScore += 5;
+  if (vpnFlagged)          riskScore += 20;
+  riskScore += Math.min(suspectHistory.length * 8, 40);
+  if (guildsSeenIn.length > 1) riskScore += 15;
+
+  const account = {
+    ageDays,
+    createdTimestamp: targetUser.createdTimestamp,
+    hasAvatar,
+    flags,
+    trustFlags,
+    vpnFlagged,
+    riskScore,
+    riskLevel: riskScore >= 60 ? "DANGER ÉLEVÉ" : riskScore >= 35 ? "SUSPECT" : riskScore >= 15 ? "MODÉRÉ" : "FAIBLE",
+    suspectHistory: suspectHistory.slice(0, 10).map((s) => ({
+      guildName: s.guildName,
+      reasons: s.reasons,
+      actionTaken: s.actionTaken,
+      vpnSuspicion: s.vpnSuspicion,
+      detectedAt: s.detectedAt,
+    })),
+    guildsSeenCount: guildsSeenIn.length,
+  };
 
   // Mode : vérification dans un seul serveur précis
   if (specificGuildId?.trim()) {
     const guild = client.guilds.cache.get(specificGuildId) ?? await client.guilds.fetch(specificGuildId).catch(() => null);
     if (!guild) {
-      res.json({
-        userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
-        mode: "specific", found: false,
-        error: "Serveur introuvable — le bot doit être présent dans ce serveur pour vérifier.",
-      });
+      res.json({ userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(), mode: "specific", found: false, account, error: "Serveur introuvable — le bot doit être présent dans ce serveur." });
       return;
     }
     const member = await guild.members.fetch(targetUser.id).catch(() => null);
     res.json({
       userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
-      mode: "specific",
+      mode: "specific", account,
       guildId: guild.id, guildName: guild.name,
       found: !!member,
       joinedAt: member?.joinedAt?.toISOString() ?? null,
@@ -1770,20 +1807,32 @@ router.get("/owner/verif", async (req, res) => {
     return;
   }
 
-  // Mode : vérification contre toute la blacklist
-  const blacklist = getBlacklistedServers();
+  // Mode : vérification contre toute la blacklist (les deux stores)
+  const globalServers = getBlacklistedServers();
+  const guildBlIds = getAllBlServerIds();
+
+  // Fusionner les deux listes (éviter les doublons)
+  const allEntries = new Map<string, string>(); // guildId → label
+  for (const e of globalServers) allEntries.set(e.guildId, e.label);
+  for (const id of guildBlIds) if (!allEntries.has(id)) allEntries.set(id, id);
+
   const results: { guildId: string; label: string; found: boolean; botPresent: boolean }[] = [];
-  for (const entry of blacklist) {
-    const guild = client.guilds.cache.get(entry.guildId);
-    if (!guild) { results.push({ guildId: entry.guildId, label: entry.label, found: false, botPresent: false }); continue; }
+  for (const [blGuildId, label] of allEntries) {
+    const guild = client.guilds.cache.get(blGuildId);
+    if (!guild) { results.push({ guildId: blGuildId, label, found: false, botPresent: false }); continue; }
     const member = await guild.members.fetch(targetUser.id).catch(() => null);
-    results.push({ guildId: entry.guildId, label: entry.label, found: !!member, botPresent: true });
+    results.push({ guildId: blGuildId, label: guild.name || label, found: !!member, botPresent: true });
   }
+
+  const foundCount = results.filter(r => r.found).length;
+  // Ajout du score blacklist
+  account.riskScore = Math.min(100, account.riskScore + foundCount * 15);
+
   res.json({
     userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
-    mode: "blacklist",
+    mode: "blacklist", account,
     results,
-    foundCount: results.filter(r => r.found).length,
+    foundCount,
   });
 });
 
