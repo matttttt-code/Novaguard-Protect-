@@ -380,6 +380,8 @@ export default function OwnerPanel() {
   const [vpJoinMeLoading, setVpJoinMeLoading] = useState(false);
   const [vpAnnounceText, setVpAnnounceText] = useState("");
   const [vpAnnouncing, setVpAnnouncing] = useState(false);
+  const [vpAutoJoin, setVpAutoJoin] = useState(true);
+  const [vpAutoJoinSaving, setVpAutoJoinSaving] = useState(false);
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -1604,7 +1606,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
             <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
             <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
-            <TabsTrigger value="voicepresence" className="gap-1.5 text-xs" onClick={async () => { const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`); if (r.ok) setVoicePresence(await r.json()); }}><Headphones className="h-3.5 w-3.5" />Présence Vocale</TabsTrigger>
+            <TabsTrigger value="voicepresence" className="gap-1.5 text-xs" onClick={async () => { const [r1, r2] = await Promise.all([apiFetch(`/api/owner/guilds/${guildId}/voice-presence`), apiFetch(`/api/owner/guilds/${guildId}/voice-autojoin`)]); if (r1.ok) setVoicePresence(await r1.json()); if (r2.ok) { const d = await r2.json(); setVpAutoJoin(d.enabled); } }}><Headphones className="h-3.5 w-3.5" />Présence Vocale</TabsTrigger>
           </>}
           {/* Sécurité */}
           {activeCategory === "securite" && <>
@@ -3162,6 +3164,33 @@ export default function OwnerPanel() {
               </div>
 
               <div className="border-t border-border" />
+
+              {/* Auto-join toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/10 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <Headphones className="h-4 w-4 text-indigo-400" /> Auto-join
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Le bot rejoint le vocal quand tu le quittes</p>
+                </div>
+                <button
+                  disabled={vpAutoJoinSaving}
+                  onClick={async () => {
+                    setVpAutoJoinSaving(true);
+                    try {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-autojoin`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ enabled: !vpAutoJoin }),
+                      });
+                      if (r.ok) { const d = await r.json(); setVpAutoJoin(d.enabled); }
+                      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    } finally { setVpAutoJoinSaving(false); }
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${vpAutoJoin ? "bg-indigo-600" : "bg-muted-foreground/30"} ${vpAutoJoinSaving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${vpAutoJoin ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
 
               {/* Statut actuel */}
               <div className={`rounded-lg border p-4 flex items-center gap-3 ${voicePresence.connected ? "border-green-500/40 bg-green-500/5" : "border-border bg-muted/30"}`}>

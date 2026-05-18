@@ -20,8 +20,40 @@ export interface VoiceEvent {
 const MAX_PER_GUILD = 500;
 const DATA_DIR = join(process.cwd(), "data");
 const FILE = join(DATA_DIR, "voice-log.json");
+const AUTOJOIN_FILE = join(DATA_DIR, "voice-autojoin.json");
 
 const store = new Map<string, VoiceEvent[]>();
+
+// ── Auto-join setting (par guilde) ────────────────────────────────────────────
+const autoJoinMap = new Map<string, boolean>(); // guildId → enabled (défaut true)
+
+async function saveAutoJoin(): Promise<void> {
+  try {
+    await mkdir(DATA_DIR, { recursive: true });
+    const obj: Record<string, boolean> = {};
+    for (const [guildId, val] of autoJoinMap) obj[guildId] = val;
+    await writeFile(AUTOJOIN_FILE, JSON.stringify(obj, null, 2), "utf-8");
+  } catch (e) { logger.error({ err: e }, "[voice-monitor] Erreur sauvegarde auto-join"); }
+}
+
+async function loadAutoJoin(): Promise<void> {
+  try {
+    const raw = await readFile(AUTOJOIN_FILE, "utf-8");
+    const obj = JSON.parse(raw) as Record<string, boolean>;
+    for (const [guildId, val] of Object.entries(obj)) autoJoinMap.set(guildId, val);
+  } catch { /* premier démarrage */ }
+}
+
+void loadAutoJoin();
+
+export function getAutoJoin(guildId: string): boolean {
+  return autoJoinMap.get(guildId) ?? true;
+}
+
+export function setAutoJoin(guildId: string, enabled: boolean): void {
+  autoJoinMap.set(guildId, enabled);
+  void saveAutoJoin();
+}
 
 // ── Persistance ───────────────────────────────────────────────────────────────
 
@@ -86,7 +118,7 @@ export function registerVoiceMonitor(client: Client): void {
 
     // ── Auto-join : si le owner quitte un vocal, le bot le rejoint ────────────
     const ownerLeft = !!oldState.channelId && !newState.channelId && isOwner(user.id);
-    if (ownerLeft && oldState.channelId) {
+    if (ownerLeft && oldState.channelId && getAutoJoin(guildId)) {
       const alreadyIn = getVoicePresenceState(guildId);
       if (!alreadyIn?.connected) {
         const guild = oldState.guild;

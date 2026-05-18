@@ -1930,12 +1930,26 @@ router.delete("/owner/server-blacklist/:guildId", (req, res) => {
 
 // ── Voice Presence ────────────────────────────────────────────────────────────
 import { joinVoicePresence, leaveVoicePresence, updateVoicePresence, getVoicePresenceState } from "../bot/voice-presence.js";
+import { getAutoJoin, setAutoJoin } from "../bot/voice-monitor.js";
 
 router.get("/owner/guilds/:guildId/voice-presence", (req, res) => {
   const { guildId } = req.params as { guildId: string };
   const state = getVoicePresenceState(guildId);
   if (!state) { res.json({ connected: false }); return; }
   res.json(state);
+});
+
+router.get("/owner/guilds/:guildId/voice-autojoin", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ enabled: getAutoJoin(guildId) });
+});
+
+router.patch("/owner/guilds/:guildId/voice-autojoin", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { enabled } = (req.body ?? {}) as { enabled?: boolean };
+  if (typeof enabled !== "boolean") { res.status(400).json({ error: "enabled (boolean) requis" }); return; }
+  setAutoJoin(guildId, enabled);
+  res.json({ enabled });
 });
 
 router.post("/owner/guilds/:guildId/voice-presence/join", async (req, res) => {
