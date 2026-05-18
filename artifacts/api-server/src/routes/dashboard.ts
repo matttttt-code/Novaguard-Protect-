@@ -101,7 +101,7 @@ router.patch("/dashboard/config/:guildId", authMiddleware, (req, res) => {
 });
 
 // ── GET /api/dashboard/logs/:guildId ────────────────────────────────────────
-router.get("/dashboard/logs/:guildId", authMiddleware, (req, res) => {
+router.get("/dashboard/logs/:guildId", authMiddleware, async (req, res) => {
   const { guildId } = req.params as { guildId: string };
   const payload: JwtPayload = (req as any).jwtPayload;
   if (!payload.isOwner && !payload.guilds.some((g) => g.id === guildId)) {
@@ -110,20 +110,20 @@ router.get("/dashboard/logs/:guildId", authMiddleware, (req, res) => {
   }
   const limit = Math.min(Number(req.query["limit"] ?? 100), 200);
   const type = req.query["type"] as string | undefined;
-  let logs = getGuildLogs(guildId, limit);
+  let logs = await getGuildLogs(guildId, limit);
   if (type) logs = logs.filter((l) => l.type === type);
   res.json(logs);
 });
 
 // ── GET /api/dashboard/errors ────────────────────────────────────────────────
-router.get("/dashboard/errors", authMiddleware, (req, res) => {
+router.get("/dashboard/errors", authMiddleware, async (req, res) => {
   const payload: JwtPayload = (req as any).jwtPayload;
   if (!payload.isOwner) {
     res.status(403).json({ error: "Réservé au propriétaire." });
     return;
   }
   const limit = Math.min(Number(req.query["limit"] ?? 100), 100);
-  res.json(getAllBotErrors(limit));
+  res.json(await getAllBotErrors(limit));
 });
 
 export default router;

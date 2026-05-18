@@ -9,7 +9,9 @@ import {
   Client,
 } from "discord.js";
 import { addToBlacklist, addToGlobalBlacklist, isBlacklisted, isGloballyBlacklisted } from "../blacklist-store.js";
+import { addToGlobalBlacklistDB } from "../global-blacklist-db.js";
 import { sendLog, logEmbed } from "../log.js";
+import { logger } from "../../lib/logger.js";
 import { sendSanctionDM } from "../dm-notify.js";
 
 async function execBlacklist(
@@ -40,6 +42,9 @@ async function execBlacklist(
 
   addToBlacklist(guild.id, entry);
   addToGlobalBlacklist(entry);
+  addToGlobalBlacklistDB({ userId: user.id, userTag: user.tag, reason, moderatorTag, moderatorId }).catch((e) =>
+    logger.error({ err: e }, "[blacklist] Impossible de persister en DB")
+  );
 
   if (member) {
     await sendSanctionDM(user, "ban", `[BLACKLIST] ${reason}`, guild);

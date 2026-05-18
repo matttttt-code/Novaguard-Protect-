@@ -29,10 +29,12 @@ import { logger } from "../lib/logger.js";
 import {
   isBlacklisted,
   isGloballyBlacklisted,
+  addToGlobalBlacklist,
   getPendingUnban,
   removePendingUnban,
   removeFromBlacklist,
 } from "./blacklist-store.js";
+import { getAllGlobalBlacklistedDB } from "./global-blacklist-db.js";
 import { sendLog, logEmbed } from "./log.js";
 import {
   isRaidMode, isJoinLocked, getConfig, isRaidMode2,
@@ -154,6 +156,24 @@ export function startBot(): void {
     });
     await initInviteTracker(readyClient).catch(() => null);
     startTempBanScheduler(readyClient);
+
+    // Charge la blacklist globale depuis la DB dans le store mémoire
+    try {
+      const dbBlacklist = await getAllGlobalBlacklistedDB();
+      for (const row of dbBlacklist) {
+        addToGlobalBlacklist({
+          userId: row.userId,
+          userTag: row.userTag,
+          reason: row.reason,
+          moderatorTag: row.moderatorTag,
+          moderatorId: row.moderatorId,
+          timestamp: row.createdAt,
+        });
+      }
+      logger.info({ count: dbBlacklist.length }, "Blacklist globale chargée depuis la DB");
+    } catch (err) {
+      logger.error({ err }, "Impossible de charger la blacklist globale depuis la DB");
+    }
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {

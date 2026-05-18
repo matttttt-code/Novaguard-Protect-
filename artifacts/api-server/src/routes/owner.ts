@@ -13,6 +13,7 @@ import {
 } from "discord.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
+import { addToGlobalBlacklist, removeFromGlobalBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 
 const router = Router();
@@ -304,6 +305,8 @@ router.post("/owner/blacklist", async (req, res) => {
   }
   try {
     await addToGlobalBlacklistDB({ userId, userTag, reason, moderatorTag, moderatorId });
+    // Sync in-memory store
+    addToGlobalBlacklist({ userId, userTag, reason, moderatorTag, moderatorId, timestamp: new Date() });
     // Also ban from all guilds
     const client = getClient();
     if (client) {
@@ -320,6 +323,8 @@ router.delete("/owner/blacklist/:userId", async (req, res) => {
   const { userId } = req.params as { userId: string };
   try {
     await removeFromGlobalBlacklistDB(userId);
+    // Sync in-memory store
+    removeFromGlobalBlacklist(userId);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });

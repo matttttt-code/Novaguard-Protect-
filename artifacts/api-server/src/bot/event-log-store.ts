@@ -1,10 +1,12 @@
 /**
- * In-memory event log store — ring buffer, 200 entries per guild.
- * Three categories:
- *  - config_change  : a guild config field was changed via dashboard or command
- *  - command_exec   : a slash or prefix command was executed (success or error)
- *  - bot_error      : an unhandled error was caught in a command/button/modal handler
+ * Event log store — ring buffer mémoire (200 entrées/guild) + persistance DB.
+ * Trois catégories :
+ *  - config_change  : modification d'un paramètre serveur via dashboard ou commande
+ *  - command_exec   : exécution d'une commande slash ou prefix
+ *  - bot_error      : erreur non gérée dans un handler de commande/bouton/modal
  */
+
+import { insertEventLogDB, getGuildLogsDB, getBotErrorsDB } from "./event-log-db.js";
 
 export type LogType = "config_change" | "command_exec" | "bot_error";
 
@@ -66,6 +68,7 @@ export function logConfigChange(
     userTag: source,
   };
   pushToGuild(guildId, entry);
+  insertEventLogDB(entry);
 }
 
 export function logCommandExec(
@@ -88,6 +91,7 @@ export function logCommandExec(
     success,
   };
   if (guildId) pushToGuild(guildId, entry);
+  insertEventLogDB(entry);
 }
 
 export function logBotError(
@@ -108,14 +112,23 @@ export function logBotError(
   botErrors.unshift(entry);
   if (botErrors.length > MAX_BOT_ERRORS) botErrors.length = MAX_BOT_ERRORS;
   if (guildId) pushToGuild(guildId, entry);
+  insertEventLogDB(entry);
 }
 
-// ── Public readers ─────────────────────────────────────────────────────────────
+// ── Public readers — retournent l'historique complet depuis la DB ─────────────
 
-export function getGuildLogs(guildId: string, limit = 100): EventLog[] {
-  return (guildLogs.get(guildId) ?? []).slice(0, limit);
+export async function getGuildLogs(guildId: string, limit = 100): Promise<EventLog[]> {
+  try {
+    return await getGuildLogsDB(guildId, Math.min(limit, 200));
+  } catch {
+    return (guildLogs.get(guildId) ?? []).slice(0, limit);
+  }
 }
 
-export function getAllBotErrors(limit = 100): EventLog[] {
-  return botErrors.slice(0, limit);
+export async function getAllBotErrors(limit = 100): Promise<EventLog[]> {
+  try {
+    return await getBotErrorsDB(Math.min(limit, 100));
+  } catch {
+    return botErrors.slice(0, limit);
+  }
 }
