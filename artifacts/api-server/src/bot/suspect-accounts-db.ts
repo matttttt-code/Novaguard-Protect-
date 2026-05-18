@@ -66,3 +66,16 @@ export async function markSuspectVerified(id: number, verified: boolean): Promis
 export async function updateSuspectTags(id: number, tags: string[]): Promise<void> {
   await db.update(suspectAccountsTable).set({ tags: tags.join("|") }).where(eq(suspectAccountsTable.id, id));
 }
+
+export async function getSuspectsByUserId(userId: string) {
+  const rows = await db
+    .select()
+    .from(suspectAccountsTable)
+    .where(eq(suspectAccountsTable.userId, userId))
+    .orderBy(desc(suspectAccountsTable.detectedAt));
+  return rows.map((r) => ({
+    ...r,
+    reasons: r.reasons.split("|").filter(Boolean),
+    tags: r.tags.split("|").filter(Boolean),
+  }));
+}
