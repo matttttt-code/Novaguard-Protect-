@@ -1698,6 +1698,59 @@ router.post("/owner/guilds/:guildId/members/:memberId/timeout", async (req, res)
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Verif (dashboard) ────────────────────────────────────────────────────────
+import { getBlacklistedServers } from "../bot/server-blacklist-store.js";
+
+router.get("/owner/verif", async (req, res) => {
+  const { userId, guildId: specificGuildId } = req.query as { userId?: string; guildId?: string };
+  if (!userId?.trim()) { res.status(400).json({ error: "userId requis" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+
+  let targetUser;
+  try { targetUser = await client.users.fetch(userId.trim()); }
+  catch { res.status(404).json({ error: "Utilisateur Discord introuvable (ID invalide)." }); return; }
+
+  // Mode : vérification dans un seul serveur précis
+  if (specificGuildId?.trim()) {
+    const guild = client.guilds.cache.get(specificGuildId) ?? await client.guilds.fetch(specificGuildId).catch(() => null);
+    if (!guild) {
+      res.json({
+        userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
+        mode: "specific", found: false,
+        error: "Serveur introuvable — le bot doit être présent dans ce serveur pour vérifier.",
+      });
+      return;
+    }
+    const member = await guild.members.fetch(targetUser.id).catch(() => null);
+    res.json({
+      userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
+      mode: "specific",
+      guildId: guild.id, guildName: guild.name,
+      found: !!member,
+      joinedAt: member?.joinedAt?.toISOString() ?? null,
+      roles: member?.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name })) ?? [],
+    });
+    return;
+  }
+
+  // Mode : vérification contre toute la blacklist
+  const blacklist = getBlacklistedServers();
+  const results: { guildId: string; label: string; found: boolean; botPresent: boolean }[] = [];
+  for (const entry of blacklist) {
+    const guild = client.guilds.cache.get(entry.guildId);
+    if (!guild) { results.push({ guildId: entry.guildId, label: entry.label, found: false, botPresent: false }); continue; }
+    const member = await guild.members.fetch(targetUser.id).catch(() => null);
+    results.push({ guildId: entry.guildId, label: entry.label, found: !!member, botPresent: true });
+  }
+  res.json({
+    userId: targetUser.id, tag: targetUser.tag, avatar: targetUser.displayAvatarURL(),
+    mode: "blacklist",
+    results,
+    foundCount: results.filter(r => r.found).length,
+  });
+});
+
 // ── Server Members (spy) ──────────────────────────────────────────────────────
 router.get("/owner/server-members", async (req, res) => {
   const { guildId: targetGuildId } = req.query as { guildId?: string };
@@ -1745,10 +1798,10 @@ router.post("/owner/guilds/:guildId/ban-list", async (req, res) => {
 });
 
 // ── Server Blacklist ──────────────────────────────────────────────────────────
-import { addBlacklistedServer, removeBlacklistedServer, getBlacklistedServers } from "../bot/server-blacklist-store.js";
+import { addBlacklistedServer, removeBlacklistedServer, getBlacklistedServers as _getBlSrvs } from "../bot/server-blacklist-store.js";
 
 router.get("/owner/server-blacklist", (_req, res) => {
-  res.json(getBlacklistedServers());
+  res.json(_getBlSrvs());
 });
 
 router.post("/owner/server-blacklist", (req, res) => {

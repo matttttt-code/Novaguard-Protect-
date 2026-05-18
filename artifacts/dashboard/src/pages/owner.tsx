@@ -19,7 +19,7 @@ import {
   Wifi, WifiOff, Radio, Activity, Server, Mic, MicOff, Headphones,
   BookOpen, Download, Copy, ScrollText, Link2Off,
   Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
-  UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning, ShieldAlert,
+  UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning, ShieldAlert, ShieldCheck,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -123,7 +123,7 @@ const ALL_COMMANDS = [
 // ── Catégories de navigation ──────────────────────────────────────────────────
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
   general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence"] },
-  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
   moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
   config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl"] },
@@ -312,6 +312,24 @@ export default function OwnerPanel() {
   const [broadcastMsg, setBroadcastMsg] = useState("");
   const [broadcasting, setBroadcasting] = useState(false);
   const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
+
+  // ── Verif state ────────────────────────────────────────────────────────────
+  interface VerifSpecific {
+    mode: "specific"; userId: string; tag: string; avatar: string;
+    found: boolean; guildId?: string; guildName?: string;
+    joinedAt?: string | null; roles?: { id: string; name: string }[];
+    error?: string;
+  }
+  interface VerifBlacklist {
+    mode: "blacklist"; userId: string; tag: string; avatar: string; foundCount: number;
+    results: { guildId: string; label: string; found: boolean; botPresent: boolean }[];
+  }
+  type VerifResult = VerifSpecific | VerifBlacklist;
+
+  const [verifUserId, setVerifUserId] = useState("");
+  const [verifGuildId, setVerifGuildId] = useState("");
+  const [verifLoading, setVerifLoading] = useState(false);
+  const [verifResult, setVerifResult] = useState<VerifResult | null>(null);
 
   // ── Spy Members state ──────────────────────────────────────────────────────
   interface SpyMember { id: string; tag: string; username: string; joinedAt: string | null; }
@@ -1556,6 +1574,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
             <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
             <TabsTrigger value="spy-members" className="gap-1.5 text-xs" onClick={() => { if (!spyBanGuildId) setSpyBanGuildId(guildId ?? ""); fetchAllGuilds(); }}><Users className="h-3.5 w-3.5" />Membres Serveur</TabsTrigger>
+            <TabsTrigger value="verif-check" className="gap-1.5 text-xs"><ShieldCheck className="h-3.5 w-3.5" />Vérif Utilisateur</TabsTrigger>
             <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
             <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
             <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
@@ -4135,6 +4154,119 @@ export default function OwnerPanel() {
                       Bannir {spyResult.memberCount} membre(s)
                     </Button>
                   </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Vérif Utilisateur ────────────────────────────────────────────── */}
+        <TabsContent value="verif-check" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-indigo-400" /> Vérification Utilisateur
+              </CardTitle>
+              <CardDescription>
+                Vérifie si un utilisateur est présent dans un serveur précis ou dans tous les serveurs blacklistés.
+                Le bot doit être présent dans le serveur cible.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">ID de l'utilisateur <span className="text-red-400">*</span></label>
+                    <Input value={verifUserId} onChange={(e) => setVerifUserId(e.target.value.trim())} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">ID du serveur <span className="text-muted-foreground">(optionnel — vide = vérifie toute la blacklist)</span></label>
+                    <Input value={verifGuildId} onChange={(e) => setVerifGuildId(e.target.value.trim())} placeholder="Laisser vide pour vérifier la blacklist…" className="font-mono text-sm" />
+                  </div>
+                </div>
+                <Button
+                  disabled={verifLoading || !verifUserId.trim()}
+                  className="gap-2 w-full"
+                  onClick={async () => {
+                    setVerifLoading(true); setVerifResult(null);
+                    try {
+                      const url = verifGuildId.trim()
+                        ? `/api/owner/verif?userId=${encodeURIComponent(verifUserId)}&guildId=${encodeURIComponent(verifGuildId)}`
+                        : `/api/owner/verif?userId=${encodeURIComponent(verifUserId)}`;
+                      const r = await apiFetch(url);
+                      if (r.ok) setVerifResult(await r.json());
+                      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    } finally { setVerifLoading(false); }
+                  }}
+                >
+                  {verifLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Vérifier
+                </Button>
+              </div>
+
+              {/* Résultat */}
+              {verifResult && (
+                <div className="space-y-3">
+                  {/* En-tête utilisateur */}
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
+                    <img src={verifResult.avatar} alt="" className="h-10 w-10 rounded-full flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium">{verifResult.tag}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{verifResult.userId}</p>
+                    </div>
+                  </div>
+
+                  {/* Mode serveur précis */}
+                  {verifResult.mode === "specific" && (
+                    verifResult.error
+                      ? <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-sm text-orange-300">{verifResult.error}</div>
+                      : verifResult.found
+                        ? (
+                          <div className="rounded-lg border border-green-500/40 bg-green-500/5 p-4 space-y-2">
+                            <p className="text-sm font-semibold text-green-400 flex items-center gap-2">
+                              <ShieldCheck className="h-4 w-4" /> Présent dans {verifResult.guildName}
+                            </p>
+                            {verifResult.joinedAt && <p className="text-xs text-muted-foreground">Rejoint le {new Date(verifResult.joinedAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</p>}
+                            {verifResult.roles && verifResult.roles.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {verifResult.roles.slice(0, 12).map(r => (
+                                  <span key={r.id} className="text-xs bg-muted/50 px-1.5 py-0.5 rounded font-mono">{r.name}</span>
+                                ))}
+                                {verifResult.roles.length > 12 && <span className="text-xs text-muted-foreground">+{verifResult.roles.length - 12}</span>}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                            ✅ Pas présent dans <span className="text-foreground font-medium">{verifResult.guildName}</span>
+                          </div>
+                        )
+                  )}
+
+                  {/* Mode blacklist */}
+                  {verifResult.mode === "blacklist" && (
+                    <div className="space-y-2">
+                      <div className={`rounded-lg border p-3 text-sm font-medium flex items-center gap-2 ${verifResult.foundCount > 0 ? "border-red-500/40 bg-red-500/5 text-red-400" : "border-green-500/40 bg-green-500/5 text-green-400"}`}>
+                        {verifResult.foundCount > 0
+                          ? <><ShieldAlert className="h-4 w-4" /> Présent dans {verifResult.foundCount} serveur(s) blacklisté(s) !</>
+                          : <><ShieldCheck className="h-4 w-4" /> Aucun serveur blacklisté détecté</>
+                        }
+                      </div>
+                      <div className="rounded-lg border border-border divide-y divide-border/50">
+                        {verifResult.results.map((r) => (
+                          <div key={r.guildId} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${r.found ? "bg-red-500" : r.botPresent ? "bg-green-500" : "bg-muted-foreground/40"}`} />
+                            <span className="flex-1 truncate font-medium">{r.label !== r.guildId ? r.label : "—"}</span>
+                            <span className="font-mono text-muted-foreground">{r.guildId}</span>
+                            <span className={`shrink-0 ${r.found ? "text-red-400" : r.botPresent ? "text-green-400" : "text-muted-foreground"}`}>
+                              {r.found ? "⚠️ Présent" : r.botPresent ? "✅ Absent" : "⬛ Bot absent"}
+                            </span>
+                          </div>
+                        ))}
+                        {verifResult.results.length === 0 && <p className="px-3 py-4 text-xs text-muted-foreground text-center">Aucun serveur dans la blacklist.</p>}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </CardContent>

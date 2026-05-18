@@ -183,7 +183,10 @@
     "antiMoveEnabled": false,
     "antiMuteEnabled": false,
     "antiDisconnectEnabled": false,
-    "antiBotEnabled": false
+    "antiBotEnabled": false,
+    "antiEveryoneEnabled": false,
+    "antiEveryoneTimeoutSecs": 300,
+    "suspectKeywords": []
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -367,7 +370,12 @@
     "antiMoveEnabled": false,
     "antiMuteEnabled": false,
     "antiDisconnectEnabled": false,
-    "antiBotEnabled": false
+    "antiBotEnabled": false,
+    "antiEveryoneEnabled": false,
+    "antiEveryoneTimeoutSecs": 300,
+    "suspectKeywords": [
+      "#dgsi"
+    ]
   },
   "1505649273251954739": {
     "logChannelId": "1505649273738629265",
@@ -551,6 +559,9 @@
     "antiMoveEnabled": false,
     "antiMuteEnabled": false,
     "antiDisconnectEnabled": false,
-    "antiBotEnabled": false
+    "antiBotEnabled": false,
+    "antiEveryoneEnabled": false,
+    "antiEveryoneTimeoutSecs": 300,
+    "suspectKeywords": []
   }
 }
