@@ -21,6 +21,7 @@
     "captchaVerifiedRoleId": "1504474629878710414",
     "sanctionDmEnabled": true,
     "inviteLogChannelId": "1504513378591309954",
+    "messageLogChannelId": null,
     "securityLevel": 1,
     "antiInsultEnabled": true,
     "antiInsultWords": [
@@ -174,7 +175,15 @@
     "vpnCheckEnabled": true,
     "vpnCheckMinAgeDays": 7,
     "vpnCheckAction": "flag",
-    "vpnCheckRequireNoAvatar": false
+    "vpnCheckRequireNoAvatar": false,
+    "antiRaiderEnabled": false,
+    "antiRaiderThreshold": 5,
+    "antiRaiderWindow": 10,
+    "antiRaiderAction": "timeout",
+    "antiMoveEnabled": false,
+    "antiMuteEnabled": false,
+    "antiDisconnectEnabled": false,
+    "antiBotEnabled": false
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -198,6 +207,7 @@
     "captchaVerifiedRoleId": "1504538153900572672",
     "sanctionDmEnabled": true,
     "inviteLogChannelId": null,
+    "messageLogChannelId": null,
     "securityLevel": 1,
     "antiInsultEnabled": false,
     "antiInsultWords": [
@@ -349,7 +359,15 @@
     "vpnCheckEnabled": false,
     "vpnCheckMinAgeDays": 30,
     "vpnCheckAction": "kick",
-    "vpnCheckRequireNoAvatar": false
+    "vpnCheckRequireNoAvatar": false,
+    "antiRaiderEnabled": false,
+    "antiRaiderThreshold": 5,
+    "antiRaiderWindow": 10,
+    "antiRaiderAction": "timeout",
+    "antiMoveEnabled": false,
+    "antiMuteEnabled": false,
+    "antiDisconnectEnabled": false,
+    "antiBotEnabled": false
   },
   "1505649273251954739": {
     "logChannelId": "1505649273738629265",
@@ -373,6 +391,7 @@
     "captchaVerifiedRoleId": null,
     "sanctionDmEnabled": true,
     "inviteLogChannelId": null,
+    "messageLogChannelId": null,
     "securityLevel": 3,
     "antiInsultEnabled": true,
     "antiInsultWords": [
@@ -524,6 +543,14 @@
     "vpnCheckEnabled": false,
     "vpnCheckMinAgeDays": 30,
     "vpnCheckAction": "kick",
-    "vpnCheckRequireNoAvatar": false
+    "vpnCheckRequireNoAvatar": false,
+    "antiRaiderEnabled": false,
+    "antiRaiderThreshold": 5,
+    "antiRaiderWindow": 10,
+    "antiRaiderAction": "timeout",
+    "antiMoveEnabled": false,
+    "antiMuteEnabled": false,
+    "antiDisconnectEnabled": false,
+    "antiBotEnabled": false
   }
 }

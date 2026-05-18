@@ -79,7 +79,7 @@ import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM, requestAdminDMApproval } from 
 import { getAdminDMPending, removeAdminDMPending } from "./admin-dm-pending-store.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
 import { isInviteBlacklisted } from "./invite-blacklist-store.js";
-import { getSupportRequest, removeSupportRequest } from "./pending-support-store.js";
+import { getSupportRequest, removeSupportRequest, consumeSupportResponse } from "./pending-support-store.js";
 import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 import { getAlertPing } from "./alert-ping.js";
@@ -1743,7 +1743,8 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
     try { targetUser = await client.users.fetch(targetUserId); }
     catch { await interaction.reply({ content: "❌ Impossible de trouver cet utilisateur.", ephemeral: true }); return; }
     await interaction.deferReply({ ephemeral: true });
-    const ticketCh = await createTicketForUser(client, guild, targetUser);
+    const formTranscript = consumeSupportResponse(targetUserId);
+    const ticketCh = await createTicketForUser(client, guild, targetUser, formTranscript);
     if (!ticketCh) { await interaction.editReply({ content: "❌ Impossible de créer le salon ticket." }); return; }
     await interaction.editReply({ content: `✅ Ticket créé pour <@${targetUserId}> : <#${ticketCh.id}>` });
     await interaction.message.edit({ components: [] }).catch(() => null);
@@ -1839,7 +1840,7 @@ async function handleButtonInteraction(client: Client, interaction: ButtonIntera
 
 // ──── TICKET HELPERS ────
 
-async function createTicketForUser(client: Client, guild: Guild, user: User): Promise<TextChannel | null> {
+async function createTicketForUser(client: Client, guild: Guild, user: User, formTranscript?: string): Promise<TextChannel | null> {
   const config = getConfig(guild.id);
   const ticketNumber = nextTicketNumber(guild.id);
   const safeName = user.username.toLowerCase().replace(/[^a-z0-9]/g, "-").slice(0, 20);
@@ -1887,6 +1888,16 @@ async function createTicketForUser(client: Client, guild: Guild, user: User): Pr
 
   const staffPing = config.ticketStaffRoleId ? `<@&${config.ticketStaffRoleId}>` : "";
   await ticketChannel.send({ content: `<@${user.id}>${staffPing ? ` ${staffPing}` : ""}`, embeds: [welcomeEmbed], components: [closeRow] });
+
+  if (formTranscript) {
+    const transcriptEmbed = new EmbedBuilder()
+      .setColor(0xf59e0b)
+      .setTitle("📋 Réponses au formulaire de support")
+      .setDescription(formTranscript.slice(0, 4000))
+      .setFooter({ text: "Réponses soumises par l'utilisateur via /support" })
+      .setTimestamp();
+    await ticketChannel.send({ embeds: [transcriptEmbed] });
+  }
 
   await sendLog(client, new EmbedBuilder().setColor(0x6366f1).setTitle("🎫 Ticket ouvert")
     .addFields({ name: "Créateur", value: `${user.tag} (\`${user.id}\`)`, inline: true }, { name: "Salon", value: `<#${ticketChannel.id}>`, inline: true }).setTimestamp(),

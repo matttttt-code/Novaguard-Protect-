@@ -9,7 +9,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
-import { addSupportRequest, hasSupportRequest } from "../pending-support-store.js";
+import { addSupportRequest, hasSupportRequest, saveSupportResponse } from "../pending-support-store.js";
 import { sendLog } from "../log.js";
 import { getConfig } from "../guild-config-store.js";
 
@@ -101,6 +101,7 @@ export async function handleSupportResponse(
   responseContent: string,
   username: string
 ): Promise<void> {
+  saveSupportResponse(userId, responseContent);
   const embed = new EmbedBuilder()
     .setColor(0x6366f1)
     .setTitle("📩 Nouvelle demande de support")
