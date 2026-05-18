@@ -10,6 +10,7 @@ import {
   EmbedBuilder,
   ActivityType,
   PresenceStatusData,
+  AuditLogEvent,
 } from "discord.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
@@ -327,6 +328,84 @@ router.delete("/owner/blacklist/:userId", async (req, res) => {
     removeFromGlobalBlacklist(userId);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── POST /api/owner/blacklist/recover — récupère les bans [BLACKLIST] depuis l'audit log Discord ──
+router.post("/owner/blacklist/recover", async (_req, res) => {
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non connecté" }); return; }
+
+  const recovered: { userId: string; userTag: string; reason: string; guildId: string; guildName: string }[] = [];
+  const errors: string[] = [];
+
+  for (const [, guild] of client.guilds.cache) {
+    try {
+      let before: string | undefined;
+      let keepFetching = true;
+
+      while (keepFetching) {
+        const entries = await guild.fetchAuditLogs({
+          type: AuditLogEvent.MemberBanAdd,
+          limit: 100,
+          ...(before ? { before } : {}),
+        });
+
+        if (entries.entries.size === 0) break;
+
+        for (const entry of entries.entries.values()) {
+          const reason = entry.reason ?? "";
+          if (!reason.includes("[BLACKLIST]") && !reason.includes("[GLOBAL BLACKLIST]")) continue;
+          if (!entry.target) continue;
+
+          const userId = entry.target.id;
+          let userTag = "Inconnu";
+          try {
+            const user = await client.users.fetch(userId);
+            userTag = user.tag;
+          } catch { /* utilisateur inconnu */ }
+
+          // Nettoie la raison — retire le préfixe [BLACKLIST] ou [GLOBAL BLACKLIST]
+          const cleanReason = reason
+            .replace(/^\[GLOBAL BLACKLIST\]\s*/i, "")
+            .replace(/^\[BLACKLIST\]\s*/i, "")
+            .replace(/ — blacklisté sur .+$/, "")
+            .trim() || "Blacklist (récupéré depuis l'audit log)";
+
+          const executorTag = entry.executor?.tag ?? "Inconnu";
+          const executorId = entry.executorId ?? client.user!.id;
+
+          recovered.push({ userId, userTag, reason: cleanReason, guildId: guild.id, guildName: guild.name });
+
+          // Insère en DB (ignore les doublons)
+          try {
+            await addToGlobalBlacklistDB({ userId, userTag, reason: cleanReason, moderatorTag: executorTag, moderatorId: executorId });
+            addToGlobalBlacklist({ userId, userTag, reason: cleanReason, moderatorTag: executorTag, moderatorId: executorId, timestamp: entry.createdAt });
+          } catch (e: any) {
+            errors.push(`${userId}: ${e.message}`);
+          }
+        }
+
+        // Pagination : si moins de 100 résultats, on a tout récupéré
+        if (entries.entries.size < 100) {
+          keepFetching = false;
+        } else {
+          before = entries.entries.last()?.id;
+        }
+      }
+    } catch (e: any) {
+      errors.push(`Guild ${guild.id}: ${e.message}`);
+    }
+  }
+
+  // Déduplique par userId (un même user peut apparaître sur plusieurs serveurs)
+  const seen = new Set<string>();
+  const unique = recovered.filter((r) => {
+    if (seen.has(r.userId)) return false;
+    seen.add(r.userId);
+    return true;
+  });
+
+  res.json({ recovered: unique.length, entries: unique, errors });
 });
 
 // ── Disabled Commands ─────────────────────────────────────────────────────────
