@@ -17,22 +17,30 @@ async function doClose(client: Client, channel: TextChannel, closedBy: string, c
   const ticket = getTicketByChannel(channel.id);
 
   // Save transcript to DB before channel is deleted
-  if (ticket) {
-    try {
-      const guild = client.guilds.cache.get(guildId);
-      const { content, count } = await buildTranscriptContent(channel);
-      await saveTranscriptToDB({
-        ticket,
-        guildName: guild?.name ?? guildId,
-        channelName: channel.name,
-        content,
-        messageCount: count,
-        closedBy,
-        closedById,
-        reason,
-      });
-    } catch { /* non-blocking */ }
-  }
+  try {
+    const guild = client.guilds.cache.get(guildId);
+    const { content, count } = await buildTranscriptContent(channel);
+    const ticketData = ticket ?? {
+      channelId: channel.id,
+      ticketNumber: Number(channel.name.replace(/\D/g, "").slice(-4)) || 0,
+      userId: "unknown",
+      username: "Inconnu",
+      guildId,
+      createdAt: new Date(),
+      claimedBy: null,
+      claimedById: null,
+    };
+    await saveTranscriptToDB({
+      ticket: ticketData,
+      guildName: guild?.name ?? guildId,
+      channelName: channel.name,
+      content,
+      messageCount: count,
+      closedBy,
+      closedById,
+      reason,
+    });
+  } catch { /* non-blocking */ }
 
   const embed = new EmbedBuilder()
     .setColor(0xef4444)

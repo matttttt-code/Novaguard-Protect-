@@ -19,7 +19,7 @@ import {
   Wifi, WifiOff, Radio, Activity, Server,
   BookOpen, Download, Copy, ScrollText, Link2Off,
   Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
-  UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning,
+  UserCheck, ChevronRight, ExternalLink, Unlink, MessageSquareWarning, ShieldAlert,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -91,6 +91,8 @@ type CustomCmd = { name: string; response: string; createdBy: string; createdAt:
 type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
 type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
 type BotStatusEvent = { id: string; type: string; timestamp: number; detail: string; ping?: number; errCode?: string };
+type UserCmd = { id: number; type: string; guildId: string | null; guildName: string | null; userId: string; userTag: string; data: Record<string, unknown>; createdAt: string };
+type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string };
 type MemberProfile = {
   userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
   joinedAt: string | null; roles: { id: string; name: string; color: string }[];
@@ -349,6 +351,17 @@ export default function OwnerPanel() {
   const [maintenanceState, setMaintenanceState] = useState<{ active: boolean; message: string } | null>(null);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [maintenanceMsgDraft, setMaintenanceMsgDraft] = useState("");
+
+  // ── User Commands state ────────────────────────────────────────────────────
+  const [userCmds, setUserCmds] = useState<UserCmd[]>([]);
+  const [ucLoading, setUcLoading] = useState(false);
+  const [ucTypeFilter, setUcTypeFilter] = useState<"all" | "rolerequest" | "suggestion">("all");
+  const [ucSearch, setUcSearch] = useState("");
+
+  // ── Suspect Accounts state ─────────────────────────────────────────────────
+  const [suspectAccounts, setSuspectAccounts] = useState<SuspectAcc[]>([]);
+  const [saLoading, setSaLoading] = useState(false);
+  const [saActionLoading, setSaActionLoading] = useState<number | null>(null);
 
   // ── Masse-action ──────────────────────────────────────────────────────────
   const [massRoleId, setMassRoleId] = useState("");
@@ -933,7 +946,7 @@ export default function OwnerPanel() {
         body: JSON.stringify({ reason: closeTicketReason.trim() }),
       });
       const d = await r.json();
-      if (r.ok) { toast({ title: "Ticket fermé ✓" }); setCloseTicketReason(""); await fetchTickets(); }
+      if (r.ok) { toast({ title: "Ticket fermé ✓" }); setCloseTicketReason(""); await fetchTickets(); void fetchTranscripts(); }
       else toast({ title: "Erreur", description: d.error, variant: "destructive" });
     } finally { setClosingTicket(""); }
   }
@@ -1091,6 +1104,46 @@ export default function OwnerPanel() {
       if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); setMaintenanceMsgDraft(d.message); }
     } finally { setMaintenanceLoading(false); }
   }, [guildId]);
+
+  const fetchUserCmds = useCallback(async () => {
+    setUcLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/user-commands?limit=200`);
+      if (r.ok) setUserCmds(await r.json() as UserCmd[]);
+    } finally { setUcLoading(false); }
+  }, []);
+
+  const fetchSuspectAccounts = useCallback(async () => {
+    setSaLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts?limit=200`);
+      if (r.ok) setSuspectAccounts(await r.json() as SuspectAcc[]);
+    } finally { setSaLoading(false); }
+  }, []);
+
+  async function doSuspectAction(sa: SuspectAcc, action: "timeout" | "kick" | "ban") {
+    setSaActionLoading(sa.id);
+    try {
+      let r: Response;
+      const reasonBase = `[Dashboard Owner] Compte suspect (${sa.reasons.join(", ")})`;
+      if (action === "timeout") {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/timeout`, {
+          method: "POST", body: JSON.stringify({ durationMs: 24 * 3_600_000, reason: reasonBase }),
+        });
+      } else if (action === "kick") {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/kick`, {
+          method: "POST", body: JSON.stringify({ reason: reasonBase }),
+        });
+      } else {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/ban`, {
+          method: "POST", body: JSON.stringify({ reason: reasonBase }),
+        });
+      }
+      const d = await r.json();
+      if (r.ok) toast({ title: `Action appliquée ✓ (${action})` });
+      else toast({ title: "Erreur", description: (d as { error?: string }).error, variant: "destructive" });
+    } finally { setSaActionLoading(null); }
+  }
 
   const fetchInvites = useCallback(async () => {
     setInvitesLoading(true);
@@ -1330,6 +1383,8 @@ export default function OwnerPanel() {
           <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
           <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
           <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
+          <TabsTrigger value="usercommands" className="gap-1.5 text-xs" onClick={fetchUserCmds}><MessageSquareWarning className="h-3.5 w-3.5" />Cmd. Users</TabsTrigger>
+          <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
           <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
           <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
           <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
@@ -3810,6 +3865,160 @@ export default function OwnerPanel() {
                         </div>
                       );
                     })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── COMMANDES USERS ─────────────────────────────────────────────── */}
+        <TabsContent value="usercommands" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <MessageSquareWarning className="h-4 w-4 text-indigo-500" />
+                Commandes Utilisateurs
+              </CardTitle>
+              <CardDescription>Historique des demandes de rôle et suggestions reçues.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <div className="flex gap-1">
+                  {(["all", "rolerequest", "suggestion"] as const).map((t) => (
+                    <Button key={t} size="sm" variant={ucTypeFilter === t ? "default" : "outline"} className="text-xs h-7"
+                      onClick={() => setUcTypeFilter(t)}>
+                      {t === "all" ? "Tout" : t === "rolerequest" ? "📋 Demandes rôle" : "💡 Suggestions"}
+                    </Button>
+                  ))}
+                </div>
+                <Input placeholder="Rechercher un utilisateur…" value={ucSearch} onChange={(e) => setUcSearch(e.target.value)} className="h-7 text-xs max-w-48" />
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchUserCmds} disabled={ucLoading}>
+                  {ucLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Rafraîchir
+                </Button>
+              </div>
+
+              {ucLoading ? (
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+              ) : userCmds.filter((c) =>
+                (ucTypeFilter === "all" || c.type === ucTypeFilter) &&
+                (!ucSearch || c.userTag.toLowerCase().includes(ucSearch.toLowerCase()) || c.userId.includes(ucSearch))
+              ).length === 0 ? (
+                <p className="text-sm text-center text-muted-foreground py-8">Aucune commande utilisateur enregistrée.</p>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                  {userCmds
+                    .filter((c) =>
+                      (ucTypeFilter === "all" || c.type === ucTypeFilter) &&
+                      (!ucSearch || c.userTag.toLowerCase().includes(ucSearch.toLowerCase()) || c.userId.includes(ucSearch))
+                    )
+                    .map((c) => {
+                      const isRoleReq = c.type === "rolerequest";
+                      const d = c.data;
+                      return (
+                        <div key={c.id} className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${isRoleReq ? "bg-indigo-500/10 text-indigo-500 border-indigo-300" : "bg-amber-500/10 text-amber-600 border-amber-300"}`}>
+                              {isRoleReq ? "📋 rôle" : "💡 suggestion"}
+                            </Badge>
+                            <span className="text-xs font-medium">{c.userTag}</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">{c.userId}</span>
+                            {c.guildName && <Badge variant="secondary" className="text-[10px]">{c.guildName}</Badge>}
+                            <span className="text-xs text-muted-foreground ml-auto">{new Date(c.createdAt).toLocaleString("fr-FR")}</span>
+                          </div>
+                          {isRoleReq ? (
+                            <div className="text-xs space-y-0.5">
+                              <p><span className="text-muted-foreground">Rôle demandé :</span> <span className="font-medium">{String(d.roleName ?? "")}</span></p>
+                              <p><span className="text-muted-foreground">Raison :</span> {String(d.reason ?? "")}</p>
+                              <p className="text-muted-foreground">Via : {String(d.via ?? "")}</p>
+                            </div>
+                          ) : (
+                            <div className="text-xs space-y-0.5">
+                              <p><span className="text-muted-foreground">Catégorie :</span> {String(d.categorie ?? "")}</p>
+                              <p className="break-words">{String(d.texte ?? "")}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── COMPTES SUSPECTS ────────────────────────────────────────────── */}
+        <TabsContent value="suspectaccounts" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                Comptes Suspects
+              </CardTitle>
+              <CardDescription>
+                Historique des comptes signalés comme suspects à l'arrivée sur les serveurs. Actions rapides disponibles.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchSuspectAccounts} disabled={saLoading}>
+                  {saLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Rafraîchir
+                </Button>
+                <span className="text-xs text-muted-foreground">{suspectAccounts.length} entrée(s)</span>
+              </div>
+
+              <div className="rounded-md border border-orange-200 bg-orange-500/5 px-3 py-2 text-xs text-orange-700 dark:text-orange-400">
+                ⚠️ Les actions rapides agissent <strong>immédiatement</strong> sur le membre dans son serveur d'origine. Assure-toi que le bot y est toujours présent.
+              </div>
+
+              {saLoading ? (
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}</div>
+              ) : suspectAccounts.length === 0 ? (
+                <p className="text-sm text-center text-muted-foreground py-8">Aucun compte suspect enregistré. Les comptes suspects sont détectés à l'arrivée (niveau sécurité ≥ 2 ou détection activée).</p>
+              ) : (
+                <div className="space-y-2 max-h-[700px] overflow-y-auto pr-1">
+                  {suspectAccounts.map((sa) => (
+                    <div key={sa.id} className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-2">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Badge variant="outline" className="text-[10px] font-mono uppercase px-1.5 py-0 bg-orange-500/10 text-orange-600 border-orange-300">
+                          🕵️ suspect
+                        </Badge>
+                        <span className="text-xs font-medium">{sa.userTag}</span>
+                        <span className="font-mono text-[10px] text-muted-foreground">{sa.userId}</span>
+                        <Badge variant="secondary" className="text-[10px]">{sa.guildName || sa.guildId}</Badge>
+                        <Badge variant="outline" className="text-[10px]">Niv. sécu {sa.securityLevel}</Badge>
+                        <span className="text-xs text-muted-foreground ml-auto">{new Date(sa.detectedAt).toLocaleString("fr-FR")}</span>
+                      </div>
+                      <div className="text-xs space-y-0.5">
+                        <p><span className="text-muted-foreground">Âge du compte :</span> <span className="font-medium">{sa.accountAgeDays < 1 ? "< 1 jour" : `${sa.accountAgeDays} jour(s)`}</span></p>
+                        {sa.hasNoAvatar && <p className="text-amber-600">• Aucune photo de profil</p>}
+                        {sa.reasons.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {sa.reasons.map((r, i) => <Badge key={i} variant="secondary" className="text-[9px] font-normal">{r}</Badge>)}
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-1.5 flex-wrap">
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                          disabled={saActionLoading === sa.id}
+                          onClick={() => doSuspectAction(sa, "timeout")}>
+                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Clock className="h-2.5 w-2.5" />}
+                          Timeout 24h
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                          disabled={saActionLoading === sa.id}
+                          onClick={() => doSuspectAction(sa, "kick")}>
+                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <UserX className="h-2.5 w-2.5" />}
+                          Expulser
+                        </Button>
+                        <Button size="sm" variant="destructive" className="h-6 text-[10px] gap-1"
+                          disabled={saActionLoading === sa.id}
+                          onClick={() => { if (confirm(`Bannir ${sa.userTag} de ${sa.guildName} ?`)) doSuspectAction(sa, "ban"); }}>
+                          {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Ban className="h-2.5 w-2.5" />}
+                          Bannir
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </CardContent>

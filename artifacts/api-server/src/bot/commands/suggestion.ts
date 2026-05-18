@@ -5,6 +5,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLogDM, LOG_DM_USER_ID } from "../dm-notify.js";
+import { saveUserCommand } from "../user-commands-db.js";
 
 const CATEGORIES: Record<string, string> = {
   fonctionnalite: "✨ Fonctionnalité",
@@ -55,6 +56,15 @@ async function buildAndSend(
     .setTimestamp();
 
   await sendLogDM(client, embed);
+
+  void saveUserCommand({
+    type: "suggestion",
+    guildId: guildId ?? null,
+    guildName: guildName ?? null,
+    userId: authorId,
+    userTag: authorTag,
+    data: { texte, categorie: categorieKey ? (CATEGORIES[categorieKey] ?? "Autre") : "Autre" },
+  }).catch(() => null);
 }
 
 export async function execute(interaction: ChatInputCommandInteraction) {

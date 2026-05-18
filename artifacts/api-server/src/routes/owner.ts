@@ -1570,4 +1570,44 @@ router.post("/owner/errortest", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ── User Commands ─────────────────────────────────────────────────────────────
+import { getUserCommands } from "../bot/user-commands-db.js";
+
+router.get("/owner/user-commands", async (req, res) => {
+  try {
+    const type = req.query["type"] as string | undefined;
+    const guildId = req.query["guildId"] as string | undefined;
+    const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
+    const rows = await getUserCommands({ type, guildId, limit });
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Suspect Accounts ──────────────────────────────────────────────────────────
+import { getSuspectAccounts } from "../bot/suspect-accounts-db.js";
+
+router.get("/owner/suspect-accounts", async (req, res) => {
+  try {
+    const guildId = req.query["guildId"] as string | undefined;
+    const limit = Math.min(Number(req.query["limit"] ?? 200), 500);
+    const rows = await getSuspectAccounts({ guildId, limit });
+    res.json(rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Timeout member ────────────────────────────────────────────────────────────
+router.post("/owner/guilds/:guildId/members/:memberId/timeout", async (req, res) => {
+  const { guildId, memberId } = req.params as { guildId: string; memberId: string };
+  const { durationMs, reason } = req.body as { durationMs?: number; reason?: string };
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  try {
+    const member = await guild.members.fetch(memberId);
+    const ms = Math.min(durationMs ?? 3_600_000, 28 * 24 * 3_600_000);
+    await member.timeout(ms, reason?.trim() || "Timeout via Dashboard Owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 export default router;

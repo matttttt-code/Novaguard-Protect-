@@ -4,3 +4,5 @@ export * from "./disabled-commands";
 export * from "./guild-settings";
 export * from "./captcha-logs";
 export * from "./event-logs";
+export * from "./user-commands";
+export * from "./suspect-accounts";

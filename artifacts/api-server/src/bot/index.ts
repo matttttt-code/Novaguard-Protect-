@@ -63,6 +63,7 @@ import { setClient } from "./client-store.js";
 import { setOwnerIds } from "./owner-store.js";
 import { startTempBanScheduler } from "./tempban-store.js";
 import { registerAntiGhostPing } from "./commands/antighostping.js";
+import { saveSuspectAccount } from "./suspect-accounts-db.js";
 import { getAntilinkConfig } from "./antilink-store.js";
 import { addWarning } from "./warnings-store.js";
 import { registerScamLinkDetection } from "./commands/scamlink.js";
@@ -640,6 +641,18 @@ export function startBot(): void {
         .setFooter({ text: "Aucune action automatique prise — surveille ce compte." })
         .setTimestamp()
       ).catch(() => null);
+
+      void saveSuspectAccount({
+        guildId,
+        guildName: member.guild.name,
+        userId: member.id,
+        userTag: member.user.tag,
+        accountAgeDays,
+        hasNoAvatar,
+        reasons: suspectReasons,
+        actionTaken: "flagged",
+        securityLevel: secLvl,
+      }).catch(() => null);
     }
   });
 

@@ -10,6 +10,7 @@ import {
   Message,
 } from "discord.js";
 import { sendLog } from "../log.js";
+import { saveUserCommand } from "../user-commands-db.js";
 
 export const data = new SlashCommandBuilder()
   .setName("rolerequest")
@@ -79,6 +80,15 @@ export async function executeMessage(message: Message, args: string[]) {
     .setFooter({ text: "Demande de rôle via préfixe" })
     .setTimestamp(), { guildId: message.guild.id, pingContent: "<@&1505490829513457745>" });
 
+  void saveUserCommand({
+    type: "rolerequest",
+    guildId: message.guild.id,
+    guildName: message.guild.name,
+    userId: message.author.id,
+    userTag: message.author.tag,
+    data: { roleName: args[0] ?? "", reason, resolvedRoleId: resolved?.id ?? null, via: "prefix" },
+  }).catch(() => null);
+
   await message.reply({
     embeds: [new EmbedBuilder()
       .setColor(0x22c55e)
@@ -120,6 +130,15 @@ export async function handleRoleRequestModal(
     )
     .setFooter({ text: `${guild.name} • Demande de rôle`, iconURL: guild.iconURL() ?? undefined })
     .setTimestamp(), { guildId: guild.id, pingContent: "<@&1505490829513457745>" });
+
+  void saveUserCommand({
+    type: "rolerequest",
+    guildId: guild.id,
+    guildName: guild.name,
+    userId: interaction.user.id,
+    userTag: interaction.user.tag,
+    data: { roleName, reason, resolvedRoleId: resolved?.id ?? null, via: "modal" },
+  }).catch(() => null);
 
   await interaction.reply({
     embeds: [new EmbedBuilder()
