@@ -5,6 +5,7 @@ import {
 import { logger } from "../lib/logger.js";
 import { getConfig } from "./guild-config-store.js";
 import { addAdminDMPending } from "./admin-dm-pending-store.js";
+import { logBotStatusEvent } from "./bot-status-store.js";
 
 export const LOG_DM_USER_ID = "1209963350218248203";
 
@@ -64,6 +65,7 @@ export async function sendSanctionDM(
     await user.send({ embeds: [embed] });
   } catch {
     logger.warn({ userId: user.id }, "Impossible d'envoyer un DM de sanction (DMs fermés)");
+    logBotStatusEvent("dm_failed", `DM de sanction (${type}) échoué — ${user.tag} (\`${user.id}\`) sur ${guild.name} — DMs fermés`);
   }
 }
 

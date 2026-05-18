@@ -25,6 +25,7 @@ import { getQuarantineList, removeQuarantine, QuarantineEntry } from "../bot/qua
 import { resetStaffWindow } from "../bot/staff-ratelimit.js";
 import { getVoiceLog, clearVoiceLog } from "../bot/voice-monitor.js";
 import { getBotRepliesForGuild } from "../bot/event-log-store.js";
+import { getBotStatusEvents } from "../bot/bot-status-store.js";
 import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan } from "../bot/tempban-store.js";
 import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
 import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
@@ -1463,6 +1464,12 @@ router.delete("/owner/guilds/:guildId/quarantine/:userId", async (req, res) => {
     } catch { /* ignore */ }
   }
   res.json({ ok: removed });
+});
+
+// ── GET /api/owner/bot-status-events ─────────────────────────────────────────
+router.get("/owner/bot-status-events", (req, res) => {
+  const limit = Math.min(parseInt((req.query as { limit?: string }).limit ?? "200", 10) || 200, 500);
+  res.json(getBotStatusEvents(limit));
 });
 
 // ── GET /api/owner/guilds/:guildId/bot-reply-logs ────────────────────────────

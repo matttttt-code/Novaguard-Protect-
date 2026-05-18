@@ -86,6 +86,7 @@ type LogChannels = { logChannelId: string | null; banLogChannelId: string | null
 type CustomCmd = { name: string; response: string; createdBy: string; createdAt: string };
 type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
 type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
+type BotStatusEvent = { id: string; type: string; timestamp: number; detail: string; ping?: number; errCode?: string };
 type MemberProfile = {
   userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
   joinedAt: string | null; roles: { id: string; name: string; color: string }[];
@@ -268,6 +269,8 @@ export default function OwnerPanel() {
   // ── Bot status state ────────────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
   const [botStatusLoading, setBotStatusLoading] = useState(false);
+  const [botStatusEvents, setBotStatusEvents] = useState<BotStatusEvent[]>([]);
+  const [bseLoading, setBseLoading] = useState(false);
   const [botActionLoading, setBotActionLoading] = useState<string>("");
   const [presenceStatus, setPresenceStatus] = useState<"online" | "idle" | "dnd" | "invisible">("online");
   const [presenceActivityType, setPresenceActivityType] = useState("0");
@@ -833,6 +836,14 @@ export default function OwnerPanel() {
     } finally { setBotStatusLoading(false); }
   }, []);
 
+  const fetchBotStatusEvents = useCallback(async () => {
+    setBseLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/bot-status-events?limit=200");
+      if (r.ok) setBotStatusEvents(await r.json() as BotStatusEvent[]);
+    } finally { setBseLoading(false); }
+  }, []);
+
   async function botAction(action: "restart" | "disconnect" | "reconnect") {
     setBotActionLoading(action);
     try {
@@ -1265,7 +1276,7 @@ export default function OwnerPanel() {
           <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
           <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
           <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
-          <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={fetchBotStatus}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
+          <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
           <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
           <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
           <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
@@ -2555,6 +2566,67 @@ export default function OwnerPanel() {
                       )}
                     </div>
                   )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bot status event log */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">📋 Journal d'Événements Bot</CardTitle>
+                  <CardDescription>Ping élevé, reconnexions Discord, DM échoués, erreurs non gérées, démarrages.</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchBotStatusEvents} disabled={bseLoading} className="gap-1.5 shrink-0">
+                  {bseLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Actualiser
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {bseLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : botStatusEvents.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Aucun événement enregistré depuis le dernier démarrage.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
+                  {botStatusEvents.map((ev) => {
+                    const icons: Record<string, string> = {
+                      ready: "🟢", ping_alert: "🟡", reconnect: "🔄",
+                      shard_resume: "✅", shard_disconnect: "🔌",
+                      dm_failed: "✉️", client_error: "🔴",
+                      unhandled_rejection: "💥", shutdown: "🛑",
+                    };
+                    const colors: Record<string, string> = {
+                      ready: "text-green-600 border-green-300 bg-green-500/10",
+                      ping_alert: "text-yellow-600 border-yellow-300 bg-yellow-500/10",
+                      reconnect: "text-blue-600 border-blue-300 bg-blue-500/10",
+                      shard_resume: "text-green-600 border-green-300 bg-green-500/10",
+                      shard_disconnect: "text-orange-600 border-orange-300 bg-orange-500/10",
+                      dm_failed: "text-purple-600 border-purple-300 bg-purple-500/10",
+                      client_error: "text-red-600 border-red-300 bg-red-500/10",
+                      unhandled_rejection: "text-red-700 border-red-400 bg-red-500/15",
+                      shutdown: "text-gray-600 border-gray-300 bg-gray-500/10",
+                    };
+                    const icon = icons[ev.type] ?? "❓";
+                    const colorClass = colors[ev.type] ?? "text-muted-foreground border-border bg-muted/20";
+                    return (
+                      <div key={ev.id} className="flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2">
+                        <span className="shrink-0 mt-0.5">{icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className={`text-[10px] font-mono px-1.5 py-0 ${colorClass}`}>{ev.type.replace(/_/g, " ")}</Badge>
+                            {ev.errCode && <span className="font-mono text-[10px] text-muted-foreground">{ev.errCode}</span>}
+                            {ev.ping != null && <span className="text-[10px] text-yellow-600 font-mono">{ev.ping}ms</span>}
+                            <span className="text-xs text-muted-foreground ml-auto shrink-0">{new Date(ev.timestamp).toLocaleString("fr-FR")}</span>
+                          </div>
+                          <p className="text-sm mt-0.5 break-words text-muted-foreground">{ev.detail}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>

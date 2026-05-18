@@ -71,6 +71,7 @@ import { checkAntiAlt } from "./commands/antialt.js";
 import { captchaTimeouts } from "./captcha-timeout-store.js";
 import { handleRoleRequestModal } from "./commands/rolerequest.js";
 import { registerBotAlerts, sendStartupAlert, sendCommandErrorAlert, sendButtonErrorAlert, sendModalErrorAlert, sendClientErrorAlert, generateErrorCode } from "./bot-alerts.js";
+import { logBotStatusEvent } from "./bot-status-store.js";
 import { sendLogDM, LOG_DM_USER_ID, sendAdminsDM, requestAdminDMApproval } from "./dm-notify.js";
 import { getAdminDMPending, removeAdminDMPending } from "./admin-dm-pending-store.js";
 import { initInviteTracker, onMemberJoin, onMemberLeave } from "./invite-tracker.js";
@@ -122,6 +123,7 @@ export function startBot(): void {
   client.on("error", (err) => {
     const errCode = generateErrorCode();
     logger.error({ err, errCode }, "Erreur non gérée du client Discord");
+    logBotStatusEvent("client_error", err.message.slice(0, 300), { errCode });
     void sendClientErrorAlert(client, err, errCode).catch(() => null);
   });
   registerBotAlerts(client);
@@ -129,6 +131,7 @@ export function startBot(): void {
   client.once(Events.ClientReady, async (readyClient) => {
     setClient(readyClient);
     logger.info({ tag: readyClient.user.tag }, "Bot Discord connecté");
+    logBotStatusEvent("ready", `Bot connecté en tant que ${readyClient.user.tag} — ${readyClient.guilds.cache.size} serveur(s)`);
 
     // Récupère le propriétaire de l'application pour le panneau owner
     try {

@@ -2,6 +2,7 @@ import { Client, EmbedBuilder } from "discord.js";
 import { sendLogDM } from "./dm-notify.js";
 import { logger } from "../lib/logger.js";
 import { getConfig } from "./guild-config-store.js";
+import { logBotStatusEvent } from "./bot-status-store.js";
 
 let pingAlertCooldown = false;
 let unhandledRejectionCooldown = false;
@@ -187,6 +188,7 @@ export function registerBotAlerts(client: Client): void {
     if (ping > 100 && !pingAlertCooldown) {
       pingAlertCooldown = true;
       logger.warn({ ping }, "Ping WebSocket élevé");
+      logBotStatusEvent("ping_alert", `Ping WebSocket élevé : ${ping}ms (seuil > 100ms)`, { ping });
       await sendLogDM(client, new EmbedBuilder()
         .setColor(0xf59e0b)
         .setTitle("⚠️ Ping élevé")
@@ -203,6 +205,22 @@ export function registerBotAlerts(client: Client): void {
   }, 30_000);
   if (typeof pingInterval.unref === "function") pingInterval.unref();
 
+  // ── Reconnexion / déconnexion de shard ──
+  client.on("shardDisconnect" as never, (event: { code: number; reason?: string }, id: number) => {
+    logBotStatusEvent("shard_disconnect", `Shard ${id} déconnecté — code ${event.code}${event.reason ? ` (${event.reason})` : ""}`);
+    logger.warn({ shardId: id, code: event.code }, "Shard déconnecté");
+  });
+
+  client.on("shardReconnecting" as never, (id: number) => {
+    logBotStatusEvent("reconnect", `Shard ${id} en cours de reconnexion…`);
+    logger.info({ shardId: id }, "Shard reconnexion en cours");
+  });
+
+  client.on("shardResume" as never, (id: number, replayed: number) => {
+    logBotStatusEvent("shard_resume", `Shard ${id} reconnecté — ${replayed} événement(s) rejoués`);
+    logger.info({ shardId: id, replayed }, "Shard reconnexion réussie");
+  });
+
   // ── Promesses rejetées non gérées ──
   process.on("unhandledRejection", async (reason) => {
     logger.error({ reason }, "Promesse rejetée non gérée");
@@ -211,6 +229,7 @@ export function registerBotAlerts(client: Client): void {
     const errCode = generateErrorCode();
     const msg = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? (reason.stack ?? "").slice(0, 700) : "";
+    logBotStatusEvent("unhandled_rejection", msg.slice(0, 300), { errCode });
     await sendLogDM(client, new EmbedBuilder()
       .setColor(0xef4444)
       .setTitle("💥 Promesse rejetée non gérée")
@@ -227,8 +246,9 @@ export function registerBotAlerts(client: Client): void {
   // ── Arrêt propre (SIGTERM / SIGINT) ──
   const shutdownHandler = async (signal: string) => {
     logger.info({ signal }, "Signal reçu — arrêt du bot");
+    const uptimeMin = Math.floor(process.uptime() / 60);
+    logBotStatusEvent("shutdown", `Signal ${signal} reçu — uptime ${uptimeMin} min, ping ${client.ws.ping >= 0 ? client.ws.ping + "ms" : "N/A"}`);
     try {
-      const uptimeMin = Math.floor(process.uptime() / 60);
       const mem = process.memoryUsage();
       const heapMB = (mem.heapUsed / 1024 / 1024).toFixed(1);
       await sendLogDM(client, new EmbedBuilder()
