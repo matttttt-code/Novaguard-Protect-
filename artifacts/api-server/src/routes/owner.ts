@@ -1790,4 +1790,34 @@ router.get("/owner/guilds/:guildId/voice-channels", (req, res) => {
   res.json(channels);
 });
 
+router.post("/owner/guilds/:guildId/voice-presence/join-me", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const payload = (req as any).jwtPayload as { userId?: string } | undefined;
+  const userId = payload?.userId;
+  if (!userId) { res.status(401).json({ error: "Impossible d'identifier votre compte Discord (token invalide)" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+  const state = getVoicePresenceState(guildId);
+  if (!state?.connected || !state.channelId) { res.status(400).json({ error: "Le bot n'est pas dans un salon vocal" }); return; }
+  try {
+    const member = await guild.members.fetch(userId).catch(() => null);
+    if (!member) { res.status(404).json({ error: "Vous n'êtes pas membre de ce serveur" }); return; }
+    await member.voice.setChannel(state.channelId, "Rejoint via Dashboard Owner");
+    if (state.selfDeaf) {
+      const updated = updateVoicePresence(guild, { selfDeaf: false });
+      res.json({ ok: true, channelId: state.channelId, channelName: state.channelName, voicePresence: updated });
+    } else {
+      res.json({ ok: true, channelId: state.channelId, channelName: state.channelName });
+    }
+  } catch (e: any) {
+    if (e.code === 40032 || e.message?.includes("not in a voice channel")) {
+      res.status(400).json({ error: "Vous devez d'abord rejoindre n'importe quel salon vocal sur Discord avant que le bot puisse vous déplacer." });
+    } else {
+      res.status(500).json({ error: e.message });
+    }
+  }
+});
+
 export default router;

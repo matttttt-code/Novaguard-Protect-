@@ -328,6 +328,7 @@ export default function OwnerPanel() {
   const [vpSelectedChannel, setVpSelectedChannel] = useState("");
   const [vpNickname, setVpNickname] = useState("");
   const [vpNickSaving, setVpNickSaving] = useState(false);
+  const [vpJoinMeLoading, setVpJoinMeLoading] = useState(false);
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -3087,6 +3088,36 @@ export default function OwnerPanel() {
                       <Loader2 className="h-4 w-4 animate-spin" /> Mise à jour en cours…
                     </div>
                   )}
+
+                  {/* Me connecter au vocal */}
+                  <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-2">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Mic className="h-4 w-4 text-indigo-400" /> Rejoindre le vocal du bot
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Vous devez d'abord être connecté à n'importe quel salon vocal sur Discord. Le bot vous déplacera dans son salon et désactivera son casque pour vous entendre.
+                    </p>
+                    <Button
+                      className="gap-2 w-full bg-indigo-600 hover:bg-indigo-500"
+                      disabled={vpJoinMeLoading}
+                      onClick={async () => {
+                        setVpJoinMeLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/join-me`, { method: "POST" });
+                          const d = await r.json();
+                          if (r.ok) {
+                            if (d.voicePresence) setVoicePresence(d.voicePresence);
+                            toast({ title: "✓ Déplacé vers " + (d.channelName ?? d.channelId), description: "Le bot peut maintenant vous entendre." });
+                          } else {
+                            toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                          }
+                        } finally { setVpJoinMeLoading(false); }
+                      }}
+                    >
+                      {vpJoinMeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
+                      Me connecter au vocal
+                    </Button>
+                  </div>
 
                   {/* Quitter */}
                   <Button
