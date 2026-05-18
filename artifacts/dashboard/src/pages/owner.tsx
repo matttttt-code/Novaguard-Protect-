@@ -16,6 +16,7 @@ import {
   Plus, Settings, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
   Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
   Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
+  Wifi, WifiOff, Radio, Activity, Server,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -51,6 +52,12 @@ type AutomodCfg = {
 type ActiveTicket = {
   channelId: string; ticketNumber: number; userId: string; username: string;
   claimedBy: string | null; createdAt: string;
+};
+type BotStatusInfo = {
+  online: boolean; wsStatus: number; ping: number; uptime: number | null;
+  guildCount: number; userCount: number; memory: number;
+  username: string | null; tag: string | null; avatarURL: string | null;
+  presence: { status: string; activities: { name: string; type: number }[] } | null;
 };
 
 type BotSettings = {
@@ -231,6 +238,18 @@ export default function OwnerPanel() {
   const [amSaving, setAmSaving] = useState(false);
   const [amNewWord, setAmNewWord] = useState("");
   const [amNewDomain, setAmNewDomain] = useState("");
+
+  // ── Bot status state ────────────────────────────────────────────────────────
+  const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
+  const [botStatusLoading, setBotStatusLoading] = useState(false);
+  const [botActionLoading, setBotActionLoading] = useState<string>("");
+  const [presenceStatus, setPresenceStatus] = useState<"online" | "idle" | "dnd" | "invisible">("online");
+  const [presenceActivityType, setPresenceActivityType] = useState("0");
+  const [presenceActivityText, setPresenceActivityText] = useState("");
+  const [presenceSaving, setPresenceSaving] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -673,6 +692,52 @@ export default function OwnerPanel() {
     await patchAutomod({ antilinkAllowedDomains: automodCfg.antilinkAllowedDomains.filter((d) => d !== domain) });
   }
 
+  // ── Bot status actions ─────────────────────────────────────────────────────
+  const fetchBotStatus = useCallback(async () => {
+    setBotStatusLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/bot/status");
+      if (r.ok) setBotStatus(await r.json());
+    } finally { setBotStatusLoading(false); }
+  }, []);
+
+  async function botAction(action: "restart" | "disconnect" | "reconnect") {
+    setBotActionLoading(action);
+    try {
+      const r = await apiFetch(`/api/owner/bot/${action}`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) {
+        toast({ title: { restart: "Bot redémarré ✓", disconnect: "Bot déconnecté ✓", reconnect: "Bot reconnecté ✓" }[action] });
+        setTimeout(fetchBotStatus, 3000);
+      } else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBotActionLoading(""); }
+  }
+
+  async function savePresence() {
+    setPresenceSaving(true);
+    try {
+      const r = await apiFetch("/api/owner/bot/presence", {
+        method: "PATCH",
+        body: JSON.stringify({ status: presenceStatus, activityType: Number(presenceActivityType), activityText: presenceActivityText }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Présence mise à jour ✓" }); setTimeout(fetchBotStatus, 1500); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setPresenceSaving(false); }
+  }
+
+  async function doBroadcast() {
+    if (!broadcastMsg.trim()) return;
+    setBroadcasting(true);
+    setBroadcastResults([]);
+    try {
+      const r = await apiFetch("/api/owner/bot/broadcast", { method: "POST", body: JSON.stringify({ message: broadcastMsg.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Diffusion envoyée ✓" }); setBroadcastResults(d.results ?? []); setBroadcastMsg(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBroadcasting(false); }
+  }
+
   // ── Ticket actions ─────────────────────────────────────────────────────────
   async function doCloseTicket(channelId: string) {
     if (!closeTicketReason.trim()) { toast({ title: "Raison requise", variant: "destructive" }); return; }
@@ -799,6 +864,7 @@ export default function OwnerPanel() {
           <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
           <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
           <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
+          <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={fetchBotStatus}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -1985,6 +2051,213 @@ export default function OwnerPanel() {
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* ── Bot Status ─────────────────────────────────────────────────────── */}
+        <TabsContent value="botstatus" className="space-y-4">
+
+          {/* Stats */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">📊 Statut en Temps Réel</CardTitle>
+                <CardDescription>Informations live sur la connexion et les ressources du bot.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchBotStatus} disabled={botStatusLoading} className="gap-2">
+                <RefreshCw className={`h-3.5 w-3.5 ${botStatusLoading ? "animate-spin" : ""}`} />
+                Actualiser
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {!botStatus ? (
+                <div className="flex justify-center items-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Bot identity */}
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
+                    {botStatus.avatarURL ? (
+                      <img src={botStatus.avatarURL} alt="avatar" className="h-12 w-12 rounded-full" />
+                    ) : (
+                      <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center"><Server className="h-6 w-6" /></div>
+                    )}
+                    <div>
+                      <p className="font-semibold">{botStatus.username ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{botStatus.tag ?? "non connecté"}</p>
+                    </div>
+                    <div className="ml-auto">
+                      {botStatus.online ? (
+                        <Badge className="gap-1.5 bg-green-500/20 text-green-400 border-green-500/30">
+                          <Wifi className="h-3 w-3" /> En ligne
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="gap-1.5">
+                          <WifiOff className="h-3 w-3" /> Hors ligne
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Metrics grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{botStatus.ping >= 0 ? `${botStatus.ping}ms` : "—"}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Ping WS</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">
+                        {botStatus.uptime != null
+                          ? (() => { const h = Math.floor(botStatus.uptime / 3600000); const m = Math.floor((botStatus.uptime % 3600000) / 60000); return h > 0 ? `${h}h${m}m` : `${m}m`; })()
+                          : "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Uptime</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{botStatus.guildCount}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Serveurs</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{(botStatus.memory / 1024 / 1024).toFixed(0)} MB</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">RAM (heap)</p>
+                    </div>
+                  </div>
+
+                  {/* Current presence */}
+                  {botStatus.presence && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Activity className="h-3.5 w-3.5" />
+                      Présence actuelle :
+                      <Badge variant="outline" className="text-xs capitalize">{botStatus.presence.status}</Badge>
+                      {botStatus.presence.activities.length > 0 && (
+                        <span className="font-mono text-xs">{botStatus.presence.activities[0].name}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Controls */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⚡ Contrôle du Processus</CardTitle>
+              <CardDescription>Redémarre, déconnecte ou reconnecte le bot Discord. L'API reste active en permanence.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={() => botAction("restart")}
+                  disabled={!!botActionLoading}
+                  className="gap-2"
+                >
+                  {botActionLoading === "restart" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Redémarrer
+                </Button>
+                <Button
+                  onClick={() => botAction("disconnect")}
+                  disabled={!!botActionLoading}
+                  variant="destructive"
+                  className="gap-2"
+                >
+                  {botActionLoading === "disconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
+                  Déconnecter
+                </Button>
+                <Button
+                  onClick={() => botAction("reconnect")}
+                  disabled={!!botActionLoading}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  {botActionLoading === "reconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
+                  Reconnecter
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                ⚠️ <strong>Redémarrer</strong> = déconnexion + reconnexion immédiate. <strong>Déconnecter</strong> coupe le bot jusqu'au prochain "Reconnecter".
+              </p>
+            </CardContent>
+          </Card>
+
+          {/* Presence setter */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎭 Présence Personnalisée</CardTitle>
+              <CardDescription>Change le statut et l'activité affichés sur le profil Discord du bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Statut</label>
+                  <Select value={presenceStatus} onValueChange={(v) => setPresenceStatus(v as typeof presenceStatus)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="online">🟢 En ligne</SelectItem>
+                      <SelectItem value="idle">🟡 Absent</SelectItem>
+                      <SelectItem value="dnd">🔴 Ne pas déranger</SelectItem>
+                      <SelectItem value="invisible">⚫ Invisible</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Type d'activité</label>
+                  <Select value={presenceActivityType} onValueChange={setPresenceActivityType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">🎮 Joue à</SelectItem>
+                      <SelectItem value="1">📡 Stream</SelectItem>
+                      <SelectItem value="2">🎵 Écoute</SelectItem>
+                      <SelectItem value="3">👁️ Regarde</SelectItem>
+                      <SelectItem value="5">🏆 Participe à</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Texte de l'activité</label>
+                  <Input
+                    value={presenceActivityText}
+                    onChange={(e) => setPresenceActivityText(e.target.value)}
+                    placeholder="le serveur 🛡️ (vide = aucune activité)"
+                  />
+                </div>
+              </div>
+              <Button onClick={savePresence} disabled={presenceSaving} className="gap-2">
+                {presenceSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <>🎭 Appliquer la présence</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Broadcast */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📢 Diffusion Globale</CardTitle>
+              <CardDescription>Envoie un message dans le salon de logs de chaque serveur où le bot est présent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={broadcastMsg}
+                onChange={(e) => setBroadcastMsg(e.target.value)}
+                placeholder="Message à envoyer dans tous les salons logs..."
+                rows={3}
+                className="font-mono text-sm resize-none"
+              />
+              <Button onClick={doBroadcast} disabled={broadcasting || !broadcastMsg.trim()} variant="destructive" className="gap-2">
+                {broadcasting ? <><Loader2 className="h-4 w-4 animate-spin" />Diffusion…</> : <><Radio className="h-4 w-4" />Diffuser sur tous les serveurs</>}
+              </Button>
+              {broadcastResults.length > 0 && (
+                <div className="space-y-1 max-h-48 overflow-y-auto text-xs">
+                  {broadcastResults.map((r) => (
+                    <div key={r.guildName} className={`flex items-center gap-2 px-2 py-1 rounded ${r.ok ? "bg-green-500/10 text-green-400" : "bg-destructive/10 text-destructive"}`}>
+                      {r.ok ? "✅" : "❌"} <span className="font-medium">{r.guildName}</span>
+                      {r.error && <span className="text-muted-foreground ml-auto">{r.error}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
         </TabsContent>
 
       </Tabs>

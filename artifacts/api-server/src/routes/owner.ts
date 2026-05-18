@@ -8,6 +8,8 @@ import {
   GuildMember,
   WebhookClient,
   EmbedBuilder,
+  ActivityType,
+  PresenceStatusData,
 } from "discord.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
@@ -801,6 +803,105 @@ router.post("/owner/guilds/:guildId/tickets/:channelId/close", async (req, res) 
     }, 5000);
     res.json({ ok: true });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Bot Status & Control ──────────────────────────────────────────────────────
+router.get("/owner/bot/status", (req, res) => {
+  const client = getClient();
+  if (!client || !client.isReady()) {
+    res.json({ online: false, wsStatus: -1, ping: -1, uptime: null, guildCount: 0, userCount: 0, memory: process.memoryUsage().heapUsed, username: null, avatarURL: null, presence: null });
+    return;
+  }
+  const totalUsers = client.guilds.cache.reduce((a, g) => a + g.memberCount, 0);
+  res.json({
+    online: true,
+    wsStatus: client.ws.status,
+    ping: client.ws.ping,
+    uptime: client.uptime,
+    guildCount: client.guilds.cache.size,
+    userCount: totalUsers,
+    memory: process.memoryUsage().heapUsed,
+    username: client.user.username,
+    tag: client.user.tag,
+    avatarURL: client.user.displayAvatarURL({ size: 64 }),
+    presence: {
+      status: client.user.presence?.status ?? "online",
+      activities: client.user.presence?.activities?.map((a) => ({ name: a.name, type: a.type })) ?? [],
+    },
+  });
+});
+
+router.post("/owner/bot/restart", async (req, res) => {
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Client introuvable" }); return; }
+  const token = process.env["DISCORD_TOKEN"];
+  if (!token) { res.status(503).json({ error: "DISCORD_TOKEN manquant" }); return; }
+  try {
+    req.log.info("Bot restart demandé via dashboard");
+    client.destroy();
+    await client.login(token);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/bot/disconnect", (req, res) => {
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Client introuvable" }); return; }
+  req.log.info("Bot disconnect demandé via dashboard");
+  client.destroy();
+  res.json({ ok: true });
+});
+
+router.post("/owner/bot/reconnect", async (req, res) => {
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Client introuvable" }); return; }
+  const token = process.env["DISCORD_TOKEN"];
+  if (!token) { res.status(503).json({ error: "DISCORD_TOKEN manquant" }); return; }
+  try {
+    req.log.info("Bot reconnect demandé via dashboard");
+    await client.login(token);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.patch("/owner/bot/presence", async (req, res) => {
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const { status, activityType, activityText } = req.body as { status?: string; activityType?: number; activityText?: string };
+  try {
+    const presenceData: Parameters<typeof client.user.setPresence>[0] = {};
+    if (status) presenceData.status = status as PresenceStatusData;
+    if (activityText) {
+      const type = (activityType ?? ActivityType.Playing) as ActivityType;
+      presenceData.activities = [{ name: activityText, type }];
+    } else if (activityText === "") {
+      presenceData.activities = [];
+    }
+    client.user.setPresence(presenceData);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/owner/bot/broadcast", async (req, res) => {
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  const { message } = req.body as { message?: string };
+  if (!message?.trim()) { res.status(400).json({ error: "Message vide" }); return; }
+  const results: { guildId: string; guildName: string; ok: boolean; error?: string }[] = [];
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      const cfg = getConfig(guild.id);
+      const logChannelId = cfg?.logChannelId;
+      if (!logChannelId) { results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: "Pas de salon log configuré" }); continue; }
+      const channel = guild.channels.cache.get(logChannelId);
+      if (!channel?.isTextBased()) { results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: "Salon introuvable" }); continue; }
+      await channel.send({ content: message.trim() });
+      results.push({ guildId: guild.id, guildName: guild.name, ok: true });
+    } catch (e: any) {
+      results.push({ guildId: guild.id, guildName: guild.name, ok: false, error: e.message });
+    }
+  }
+  res.json({ results });
 });
 
 // ── Error Test (alertes DM) ───────────────────────────────────────────────────
