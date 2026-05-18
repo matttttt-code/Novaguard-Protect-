@@ -1,9 +1,9 @@
 declare module "node-gtts" {
   import { Readable } from "stream";
-  class gTTS {
-    constructor(text: string, lang: string);
-    stream(): Readable;
-    save(filepath: string, callback: (err: Error | null) => void): void;
+  interface TTS {
+    stream(text: string): Readable;
+    save(filepath: string, text: string, callback: (err: Error | null) => void): void;
   }
+  function gTTS(lang: string, debug?: boolean): TTS;
   export = gTTS;
 }

@@ -2014,8 +2014,8 @@ router.post("/owner/guilds/:guildId/voice-presence/announce", async (req, res) =
 
   try {
     const gTTS = (await import("node-gtts")).default;
-    const tts = new gTTS(text.trim(), "fr");
-    const stream = tts.stream();
+    const tts = gTTS("fr");
+    const stream = tts.stream(text.trim());
 
     const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
     const player = createAudioPlayer();
