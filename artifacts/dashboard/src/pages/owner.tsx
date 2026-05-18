@@ -378,6 +378,8 @@ export default function OwnerPanel() {
   const [vpNickname, setVpNickname] = useState("");
   const [vpNickSaving, setVpNickSaving] = useState(false);
   const [vpJoinMeLoading, setVpJoinMeLoading] = useState(false);
+  const [vpAnnounceText, setVpAnnounceText] = useState("");
+  const [vpAnnouncing, setVpAnnouncing] = useState(false);
 
   // ── Tickets state ──────────────────────────────────────────────────────────
   const [tickets, setTickets] = useState<ActiveTicket[]>([]);
@@ -3310,6 +3312,49 @@ export default function OwnerPanel() {
                       {vpJoinMeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
                       Me connecter au vocal
                     </Button>
+                  </div>
+
+                  {/* Annonces vocales TTS */}
+                  <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Volume2 className="h-4 w-4 text-indigo-400" /> Annonce vocale (TTS)
+                    </p>
+                    <p className="text-xs text-muted-foreground">Le bot lira ce message à voix haute dans le salon vocal.</p>
+                    <textarea
+                      value={vpAnnounceText}
+                      onChange={(e) => setVpAnnounceText(e.target.value)}
+                      placeholder="Tapez votre message ici…"
+                      rows={3}
+                      maxLength={500}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">{vpAnnounceText.length}/500</span>
+                      <Button
+                        size="sm"
+                        className="gap-2 bg-indigo-600 hover:bg-indigo-500"
+                        disabled={vpAnnouncing || !vpAnnounceText.trim()}
+                        onClick={async () => {
+                          setVpAnnouncing(true);
+                          try {
+                            const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/announce`, {
+                              method: "POST",
+                              body: JSON.stringify({ text: vpAnnounceText.trim() }),
+                            });
+                            const d = await r.json();
+                            if (r.ok) {
+                              toast({ title: "✓ Annonce envoyée", description: "Le bot parle dans le salon vocal." });
+                              setVpAnnounceText("");
+                            } else {
+                              toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                            }
+                          } finally { setVpAnnouncing(false); }
+                        }}
+                      >
+                        {vpAnnouncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Volume2 className="h-3.5 w-3.5" />}
+                        Annoncer
+                      </Button>
+                    </div>
                   </div>
 
                   {/* Quitter */}

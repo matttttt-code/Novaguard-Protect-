@@ -1999,6 +1999,39 @@ router.get("/owner/guilds/:guildId/voice-channels", (req, res) => {
   res.json(channels);
 });
 
+router.post("/owner/guilds/:guildId/voice-presence/announce", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { text } = (req.body ?? {}) as { text?: string };
+  if (!text?.trim()) { res.status(400).json({ error: "Texte requis" }); return; }
+  if (text.trim().length > 500) { res.status(400).json({ error: "Texte trop long (max 500 car.)" }); return; }
+
+  const state = getVoicePresenceState(guildId);
+  if (!state?.connected) { res.status(400).json({ error: "Le bot n'est pas dans un salon vocal" }); return; }
+
+  const { getVoiceConnection, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = await import("@discordjs/voice");
+  const connection = getVoiceConnection(guildId);
+  if (!connection) { res.status(400).json({ error: "Connexion vocale introuvable" }); return; }
+
+  try {
+    const gTTS = (await import("node-gtts")).default;
+    const tts = new gTTS(text.trim(), "fr");
+    const stream = tts.stream();
+
+    const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+    const player = createAudioPlayer();
+    connection.subscribe(player);
+    player.play(resource);
+
+    await new Promise<void>((resolve, reject) => {
+      player.on(AudioPlayerStatus.Idle, () => { player.stop(); resolve(); });
+      player.on("error", reject);
+      setTimeout(() => { player.stop(); resolve(); }, 30_000);
+    });
+
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/owner/guilds/:guildId/voice-presence/join-me", async (req, res) => {
   const { guildId } = req.params as { guildId: string };
   const payload = (req as any).jwtPayload as { userId?: string } | undefined;
