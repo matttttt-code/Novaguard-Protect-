@@ -2034,25 +2034,40 @@ router.post("/owner/guilds/:guildId/voice-presence/announce", async (req, res) =
   res.json({ ok: true });
 
   const wasMuted = state.selfMute;
+  let tmpFile: string | null = null;
   try {
+    const { join: pathJoin } = await import("path");
+    const { tmpdir } = await import("os");
+    const { unlink } = await import("fs/promises");
     const gTTS = (await import("node-gtts")).default;
     const tts = gTTS("fr");
-    const stream = tts.stream(text.trim());
 
-    // Unmute temporairement si le bot est muted (sinon l'audio ne sort pas)
-    if (wasMuted) updateVoicePresence(guild, { selfMute: false });
+    // Sauvegarder dans un fichier temp (plus fiable que le streaming direct)
+    tmpFile = pathJoin(tmpdir(), `tts-${Date.now()}.mp3`);
+    await new Promise<void>((resolve, reject) => {
+      tts.save(tmpFile as string, text.trim(), (err: Error | null) => err ? reject(err) : resolve());
+    });
 
-    const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
+    // Unmute si nécessaire + attendre la propagation Discord (~400ms)
+    if (wasMuted) {
+      updateVoicePresence(guild, { selfMute: false });
+      await new Promise<void>((resolve) => setTimeout(resolve, 400));
+    }
+
+    const resource = createAudioResource(tmpFile);
     const player = createAudioPlayer();
     connection.subscribe(player);
     player.play(resource);
 
     await new Promise<void>((resolve) => {
       player.on(AudioPlayerStatus.Idle, () => { player.stop(); resolve(); });
-      player.on("error", () => resolve());
+      player.on("error", (e) => { req.log.warn({ err: e }, "[tts] AudioPlayer error"); resolve(); });
       setTimeout(resolve, 20_000);
     });
-  } catch { /* silencieux — déjà répondu au client */ }
+
+    // Nettoyer le fichier temp
+    if (tmpFile) await unlink(tmpFile).catch(() => {});
+  } catch (e) { req.log.warn({ err: e }, "[tts] Erreur annonce vocale"); }
   finally {
     // Re-mute si le bot était muted avant
     if (wasMuted) {
