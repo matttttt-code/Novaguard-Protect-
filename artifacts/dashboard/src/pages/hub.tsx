@@ -1,9 +1,9 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useGetDashboardStats, useGetDashboardGuilds } from "@workspace/api-client-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Users, Server, Clock, HardDrive, Wifi, LogOut, Shield } from "lucide-react";
+import { Users, Server, Clock, HardDrive, Wifi, LogOut, Shield, AlertTriangle, Ban, Terminal, Wrench } from "lucide-react";
 import { clearToken, getToken, decodeToken } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
@@ -41,6 +41,19 @@ export default function Hub() {
   });
 
   const { data: guilds, isError: guildsError } = useGetDashboardGuilds();
+
+  const [activityStats, setActivityStats] = useState<{
+    totalWarns: number; activeTempBans: number; activeQuarantines: number;
+    customCommands: number; maintenanceServers: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const t = getToken();
+    fetch("/api/dashboard/activity-stats", { headers: t ? { Authorization: `Bearer ${t}` } : {} })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setActivityStats(d); })
+      .catch(() => null);
+  }, []);
 
   useEffect(() => {
     if (statsError || guildsError) {
@@ -107,6 +120,19 @@ export default function Hub() {
           <StatCard title="Disponibilité" value={formatUptime(stats.uptimeSeconds)} icon={Clock} className="md:col-span-2" />
         </div>
       </section>
+
+      {activityStats && (
+        <section>
+          <h2 className="text-xl font-semibold mb-4 uppercase tracking-widest text-muted-foreground text-sm">Activité de Modération</h2>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            <StatCard title="Avertissements" value={activityStats.totalWarns.toLocaleString("fr-FR")} icon={AlertTriangle} description="Warns actifs tous serveurs" />
+            <StatCard title="Tempbans Actifs" value={activityStats.activeTempBans.toLocaleString("fr-FR")} icon={Ban} description="Bannissements temporaires" />
+            <StatCard title="Quarantaines" value={activityStats.activeQuarantines.toLocaleString("fr-FR")} icon={Shield} description="Staff en quarantaine" />
+            <StatCard title="Cmds Custom" value={activityStats.customCommands.toLocaleString("fr-FR")} icon={Terminal} description="Commandes personnalisées" />
+            <StatCard title="Maintenance" value={activityStats.maintenanceServers.toLocaleString("fr-FR")} icon={Wrench} description="Serveurs en maintenance" />
+          </div>
+        </section>
+      )}
 
       <section>
         <h2 className="text-xl font-semibold mb-4 uppercase tracking-widest text-muted-foreground text-sm">Serveurs Gérés</h2>

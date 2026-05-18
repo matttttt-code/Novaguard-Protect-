@@ -19,11 +19,16 @@ import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
 import { notifyActionDM } from "../bot/dm-notify.js";
 import { addActionLog, getActionLog } from "../bot/owner-action-log.js";
 import { getAllNotesForGuild, getNotes, deleteNote, clearNotes } from "../bot/notes-store.js";
-import { getAllWarningsForGuild } from "../bot/warnings-store.js";
+import { getAllWarningsForGuild, getWarnings, clearWarnings, removeWarningByCase } from "../bot/warnings-store.js";
 import { getInviteBlacklist, removeInviteBlacklist } from "../bot/invite-blacklist-store.js";
 import { getQuarantineList, removeQuarantine, QuarantineEntry } from "../bot/quarantine-store.js";
 import { resetStaffWindow } from "../bot/staff-ratelimit.js";
 import { getVoiceLog, clearVoiceLog } from "../bot/voice-monitor.js";
+import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan } from "../bot/tempban-store.js";
+import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
+import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
+import { getGlobalWordBlacklist, addGlobalWord, removeGlobalWord } from "../bot/global-word-blacklist-store.js";
+import { AuditLogEvent as DjsAuditLogEvent } from "discord.js";
 
 const router = Router();
 
@@ -1013,6 +1018,344 @@ router.post("/owner/bot/broadcast", async (req, res) => {
     }
   }
   res.json({ results });
+});
+
+// ── GET /api/owner/guilds/:guildId/member-profile/:userId ─────────────────────
+router.get("/owner/guilds/:guildId/member-profile/:userId", async (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const client = getClient();
+  const guild = client?.isReady() ? await client.guilds.fetch(guildId).catch(() => null) : null;
+  const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+  const warns = getWarnings(guildId, userId);
+  const notes = getNotes(guildId, userId);
+  const tempban = hasTempBan(guildId, userId) ? getTempBan(guildId, userId) : null;
+  const qEntry = getQuarantineList(guildId).find(e => e.userId === userId) ?? null;
+  const voiceEvents = getVoiceLog(guildId).filter(e => e.userId === userId).slice(0, 20);
+  res.json({
+    userId,
+    userTag: member?.user.tag ?? null,
+    displayName: member?.displayName ?? null,
+    avatarURL: member?.user.displayAvatarURL() ?? null,
+    joinedAt: member?.joinedAt?.toISOString() ?? null,
+    roles: member?.roles.cache.filter(r => r.id !== guildId).map(r => ({ id: r.id, name: r.name, color: r.hexColor })) ?? [],
+    timed_out_until: member?.communicationDisabledUntil?.toISOString() ?? null,
+    warns,
+    notes,
+    tempban,
+    quarantine: qEntry,
+    voiceEvents,
+  });
+});
+
+// ── DELETE /api/owner/guilds/:guildId/warns/:userId ───────────────────────────
+router.delete("/owner/guilds/:guildId/warns/:userId", (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const count = clearWarnings(guildId, userId);
+  res.json({ ok: true, count });
+});
+
+// ── DELETE /api/owner/guilds/:guildId/warns/:userId/:caseId ──────────────────
+router.delete("/owner/guilds/:guildId/warns/:userId/:caseId", (req, res) => {
+  const { guildId, userId, caseId } = req.params as Record<string, string>;
+  const ok = removeWarningByCase(guildId, userId, Number(caseId));
+  res.json({ ok });
+});
+
+// ── GET /api/owner/guilds/:guildId/tempbans ───────────────────────────────────
+router.get("/owner/guilds/:guildId/tempbans", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getAllTempBansForGuild(guildId));
+});
+
+// ── DELETE /api/owner/guilds/:guildId/tempbans/:userId ────────────────────────
+router.delete("/owner/guilds/:guildId/tempbans/:userId", async (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const client = getClient();
+  removeTempBan(guildId, userId);
+  if (client?.isReady()) {
+    try {
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      if (guild) await guild.members.unban(userId, "Tempban annulé depuis le panel owner").catch(() => null);
+    } catch { /* ignore */ }
+  }
+  res.json({ ok: true });
+});
+
+// ── GET /api/owner/guilds/:guildId/timeouts ───────────────────────────────────
+router.get("/owner/guilds/:guildId/timeouts", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) { res.json([]); return; }
+    const timed = members
+      .filter(m => m.isCommunicationDisabled())
+      .map(m => ({
+        userId: m.id,
+        userTag: m.user.tag,
+        displayName: m.displayName,
+        avatarURL: m.user.displayAvatarURL(),
+        until: m.communicationDisabledUntil?.toISOString() ?? null,
+      }));
+    res.json([...timed.values()]);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE /api/owner/guilds/:guildId/timeouts/:userId ────────────────────────
+router.delete("/owner/guilds/:guildId/timeouts/:userId", async (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+    if (!member) { res.status(404).json({ error: "Membre introuvable" }); return; }
+    await member.disableCommunicationUntil(null, "Timeout levé depuis le panel owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/maintenance ────────────────────────────────
+router.get("/owner/guilds/:guildId/maintenance", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getMaintenanceState(guildId));
+});
+
+// ── PATCH /api/owner/guilds/:guildId/maintenance ──────────────────────────────
+router.patch("/owner/guilds/:guildId/maintenance", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { active, message } = req.body as { active?: boolean; message?: string };
+  if (typeof active !== "boolean") { res.status(400).json({ error: "active (boolean) requis" }); return; }
+  setMaintenance(guildId, active, message);
+  res.json(getMaintenanceState(guildId));
+});
+
+// ── POST /api/owner/guilds/:guildId/mass-action ───────────────────────────────
+router.post("/owner/guilds/:guildId/mass-action", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { action, roleId, reason, timeoutMinutes } = req.body as { action: "kick" | "ban" | "timeout"; roleId: string; reason?: string; timeoutMinutes?: number };
+  if (!action || !roleId) { res.status(400).json({ error: "action et roleId requis" }); return; }
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const members = await guild.members.fetch().catch(() => null);
+    if (!members) { res.json({ ok: true, count: 0 }); return; }
+    const targets = [...members.values()].filter(m => m.roles.cache.has(roleId) && !m.user.bot);
+    const r = reason?.trim() || `Masse-action depuis le panel owner (${action})`;
+    let count = 0;
+    for (const m of targets) {
+      try {
+        if (action === "kick") await m.kick(r);
+        else if (action === "ban") await guild.members.ban(m.id, { reason: r });
+        else if (action === "timeout") await m.disableCommunicationUntil(new Date(Date.now() + (timeoutMinutes ?? 60) * 60000), r);
+        count++;
+      } catch { /* membre protégé */ }
+    }
+    res.json({ ok: true, count });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/invites ────────────────────────────────────
+router.get("/owner/guilds/:guildId/invites", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const invites = await guild.invites.fetch().catch(() => null);
+    if (!invites) { res.json([]); return; }
+    res.json([...invites.values()].map(inv => ({
+      code: inv.code,
+      url: inv.url,
+      uses: inv.uses,
+      maxUses: inv.maxUses,
+      creatorTag: inv.inviter?.tag ?? null,
+      creatorId: inv.inviter?.id ?? null,
+      channelName: inv.channel?.name ?? null,
+      temporary: inv.temporary,
+      expiresAt: inv.expiresAt?.toISOString() ?? null,
+      createdAt: inv.createdAt?.toISOString() ?? null,
+    })));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE /api/owner/guilds/:guildId/invites/:code ───────────────────────────
+router.delete("/owner/guilds/:guildId/invites/:code", async (req, res) => {
+  const { guildId, code } = req.params as Record<string, string>;
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    await guild.invites.delete(code, "Révoquée depuis le panel owner");
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── POST /api/owner/guilds/:guildId/invites/create ───────────────────────────
+router.post("/owner/guilds/:guildId/invites/create", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, maxAge, maxUses, temporary } = req.body as { channelId?: string; maxAge?: number; maxUses?: number; temporary?: boolean };
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const targetChannelId = channelId ?? getConfig(guildId).generalLogChannelId ?? guild.systemChannelId ?? [...guild.channels.cache.values()].find(c => c.type === 0)?.id;
+    if (!targetChannelId) { res.status(400).json({ error: "Aucun salon disponible" }); return; }
+    const ch = guild.channels.cache.get(targetChannelId);
+    if (!ch?.isTextBased()) { res.status(400).json({ error: "Salon invalide" }); return; }
+    const inv = await (ch as TextChannel).createInvite({ maxAge: maxAge ?? 0, maxUses: maxUses ?? 0, temporary: temporary ?? false, reason: "Créée depuis le panel owner" });
+    res.json({ code: inv.code, url: inv.url });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/audit-log ──────────────────────────────────
+router.get("/owner/guilds/:guildId/audit-log", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const limit = Math.min(Number(req.query["limit"] ?? 50), 100);
+    const auditLogs = await guild.fetchAuditLogs({ limit }).catch(() => null);
+    if (!auditLogs) { res.json([]); return; }
+    res.json([...auditLogs.entries.values()].map(e => ({
+      id: e.id,
+      action: e.action,
+      actionType: DjsAuditLogEvent[e.action] ?? String(e.action),
+      executorTag: e.executor?.tag ?? null,
+      executorId: e.executorId,
+      targetId: e.targetId,
+      reason: e.reason ?? null,
+      createdAt: e.createdAt.toISOString(),
+    })));
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/log-channels ───────────────────────────────
+router.get("/owner/guilds/:guildId/log-channels", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const cfg = getConfig(guildId);
+  res.json({
+    logChannelId: cfg.logChannelId ?? null,
+    banLogChannelId: cfg.banLogChannelId ?? null,
+    generalLogChannelId: cfg.generalLogChannelId ?? null,
+    inviteLogChannelId: cfg.inviteLogChannelId ?? null,
+  });
+});
+
+// ── PATCH /api/owner/guilds/:guildId/log-channels ─────────────────────────────
+router.patch("/owner/guilds/:guildId/log-channels", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { logChannelId, banLogChannelId, generalLogChannelId, inviteLogChannelId } = req.body as Record<string, string | null>;
+  const cfg = getConfig(guildId);
+  setConfig(guildId, {
+    ...cfg,
+    logChannelId: logChannelId !== undefined ? logChannelId : cfg.logChannelId,
+    banLogChannelId: banLogChannelId !== undefined ? banLogChannelId : cfg.banLogChannelId,
+    generalLogChannelId: generalLogChannelId !== undefined ? generalLogChannelId : cfg.generalLogChannelId,
+    inviteLogChannelId: inviteLogChannelId !== undefined ? inviteLogChannelId : cfg.inviteLogChannelId,
+  });
+  res.json(getConfig(guildId));
+});
+
+// ── GET /api/owner/guilds/:guildId/config/export ─────────────────────────────
+router.get("/owner/guilds/:guildId/config/export", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const cfg = getConfig(guildId);
+  const antilink = getAntilinkConfig(guildId);
+  const json = JSON.stringify({ guildId, config: cfg, antilink, exportedAt: new Date().toISOString() }, null, 2);
+  res.setHeader("Content-Type", "application/json");
+  res.setHeader("Content-Disposition", `attachment; filename="config-${guildId}.json"`);
+  res.send(json);
+});
+
+// ── POST /api/owner/guilds/:guildId/config/import ────────────────────────────
+router.post("/owner/guilds/:guildId/config/import", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { config } = req.body as { config?: Record<string, unknown> };
+  if (!config || typeof config !== "object") { res.status(400).json({ error: "config requis" }); return; }
+  try {
+    setConfig(guildId, config as any);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/guilds/:guildId/custom-commands ───────────────────────────
+router.get("/owner/guilds/:guildId/custom-commands", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getCustomCommands(guildId));
+});
+
+// ── POST /api/owner/guilds/:guildId/custom-commands ──────────────────────────
+router.post("/owner/guilds/:guildId/custom-commands", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const payload = (req as any).jwtPayload as { userTag?: string } | undefined;
+  const { name, response } = req.body as { name?: string; response?: string };
+  if (!name?.trim() || !response?.trim()) { res.status(400).json({ error: "name et response requis" }); return; }
+  const cmd = { name: name.trim().toLowerCase(), response: response.trim(), createdBy: payload?.userTag ?? "owner", createdAt: new Date().toISOString() };
+  const created = addCustomCommand(guildId, cmd);
+  res.json({ ok: true, created, cmd });
+});
+
+// ── DELETE /api/owner/guilds/:guildId/custom-commands/:name ──────────────────
+router.delete("/owner/guilds/:guildId/custom-commands/:name", (req, res) => {
+  const { guildId, name } = req.params as Record<string, string>;
+  const ok = removeCustomCommand(guildId, decodeURIComponent(name));
+  res.json({ ok });
+});
+
+// ── GET /api/owner/global/word-blacklist ─────────────────────────────────────
+router.get("/owner/global/word-blacklist", (_req, res) => {
+  res.json(getGlobalWordBlacklist());
+});
+
+// ── POST /api/owner/global/word-blacklist ────────────────────────────────────
+router.post("/owner/global/word-blacklist", (req, res) => {
+  const { word } = req.body as { word?: string };
+  if (!word?.trim()) { res.status(400).json({ error: "word requis" }); return; }
+  const ok = addGlobalWord(word.trim());
+  res.json({ ok, words: getGlobalWordBlacklist() });
+});
+
+// ── DELETE /api/owner/global/word-blacklist/:word ────────────────────────────
+router.delete("/owner/global/word-blacklist/:word", (req, res) => {
+  const { word } = req.params as { word: string };
+  const ok = removeGlobalWord(decodeURIComponent(word));
+  res.json({ ok, words: getGlobalWordBlacklist() });
+});
+
+// ── GET /api/owner/global/member/:userId ─────────────────────────────────────
+router.get("/owner/global/member/:userId", async (req, res) => {
+  const { userId } = req.params as { userId: string };
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  const results = await Promise.all([...client.guilds.cache.values()].map(async (guild) => {
+    try {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) return null;
+      return {
+        guildId: guild.id,
+        guildName: guild.name,
+        userTag: member.user.tag,
+        displayName: member.displayName,
+        avatarURL: member.user.displayAvatarURL(),
+        joinedAt: member.joinedAt?.toISOString() ?? null,
+        roles: member.roles.cache.filter(r => r.id !== guild.id).map(r => ({ id: r.id, name: r.name })),
+        timedOut: member.isCommunicationDisabled(),
+        warnCount: getWarnings(guild.id, userId).length,
+      };
+    } catch { return null; }
+  }));
+  res.json(results.filter(Boolean));
 });
 
 // ── GET /api/owner/guilds — liste tous les serveurs ──────────────────────────

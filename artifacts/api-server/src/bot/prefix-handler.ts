@@ -5,6 +5,8 @@ import { logCommandExec, logBotError } from "./event-log-store.js";
 import { isQuarantined, addQuarantine } from "./quarantine-store.js";
 import { recordStaffCommand, RATE_THRESHOLD, RATE_WINDOW_SECONDS } from "./staff-ratelimit.js";
 import { sendLogDM } from "./dm-notify.js";
+import { isMaintenanceMode, getMaintenanceMessage } from "./maintenance-store.js";
+import { getCustomCommand } from "./custom-commands-store.js";
 
 export const PREFIX = "&";
 
@@ -28,9 +30,25 @@ export function registerPrefixHandler(
     const command = commands.find(
       (c) => c.name === commandName || (c.aliases ?? []).includes(commandName)
     );
-    if (!command) return;
+
+    // ── Commandes custom (si aucune commande built-in trouvée) ────────────────
+    if (!command) {
+      if (message.guild) {
+        const customCmd = getCustomCommand(message.guild.id, commandName);
+        if (customCmd) {
+          await message.reply(customCmd.response).catch(() => null);
+        }
+      }
+      return;
+    }
 
     const guildId = message.guild?.id ?? null;
+
+    // ── Mode maintenance ──────────────────────────────────────────────────────
+    if (message.guild && message.guild.ownerId !== message.author.id && isMaintenanceMode(message.guild.id)) {
+      await message.reply(getMaintenanceMessage(message.guild.id)).catch(() => null);
+      return;
+    }
 
     // ── Quarantaine + limite de taux staff ────────────────────────────────────
     if (message.guild && message.member) {

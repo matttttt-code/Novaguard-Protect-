@@ -3,6 +3,12 @@ import { getClient } from "../bot/client-store.js";
 import { getConfig, setConfig } from "../bot/guild-config-store.js";
 import { UpdateGuildConfigBody } from "@workspace/api-zod";
 import { getGuildLogs, getAllBotErrors, logConfigChange } from "../bot/event-log-store.js";
+import { getAllWarningsForGuild } from "../bot/warnings-store.js";
+import { getAllTempBansForGuild, countAllActiveTempBans } from "../bot/tempban-store.js";
+import { getQuarantineList } from "../bot/quarantine-store.js";
+import { countAllCustomCommands, getCustomCommands } from "../bot/custom-commands-store.js";
+import { isMaintenanceMode, getMaintenanceMessage } from "../bot/maintenance-store.js";
+import { getNotes } from "../bot/notes-store.js";
 import { authMiddleware, type JwtPayload } from "../lib/jwt-auth.js";
 import { notifyActionDM } from "../bot/dm-notify.js";
 
@@ -136,6 +142,64 @@ router.get("/dashboard/errors", authMiddleware, async (req, res) => {
   }
   const limit = Math.min(Number(req.query["limit"] ?? 100), 100);
   res.json(await getAllBotErrors(limit));
+});
+
+// ── GET /api/dashboard/activity-stats ────────────────────────────────────────
+router.get("/dashboard/activity-stats", authMiddleware, (req, res) => {
+  const client = getClient();
+  if (!client?.isReady()) {
+    res.json({ totalWarns: 0, activeTempBans: 0, activeQuarantines: 0, customCommands: 0, maintenanceServers: 0 });
+    return;
+  }
+  let totalWarns = 0;
+  let activeQuarantines = 0;
+  let maintenanceServers = 0;
+  for (const guild of client.guilds.cache.values()) {
+    totalWarns += getAllWarningsForGuild(guild.id).reduce((s, u) => s + u.warnings.length, 0);
+    activeQuarantines += getQuarantineList(guild.id).length;
+    if (isMaintenanceMode(guild.id)) maintenanceServers++;
+  }
+  res.json({
+    totalWarns,
+    activeTempBans: countAllActiveTempBans(),
+    activeQuarantines,
+    customCommands: countAllCustomCommands(),
+    maintenanceServers,
+  });
+});
+
+// ── GET /api/dashboard/guilds/:guildId/stats ─────────────────────────────────
+router.get("/dashboard/guilds/:guildId/stats", authMiddleware, async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const payload: JwtPayload = (req as any).jwtPayload;
+  if (!payload.isOwner && !payload.guilds.some((g) => g.id === guildId)) {
+    res.status(403).json({ error: "Accès refusé" }); return;
+  }
+  const warns = getAllWarningsForGuild(guildId);
+  const totalWarns = warns.reduce((s, u) => s + u.warnings.length, 0);
+  const topWarnedUsers = [...warns].sort((a, b) => b.warnings.length - a.warnings.length).slice(0, 5);
+  const tempbans = getAllTempBansForGuild(guildId);
+  const quarantines = getQuarantineList(guildId);
+  const customCmds = getCustomCommands(guildId);
+  type RecentLog = Awaited<ReturnType<typeof getGuildLogs>>[number];
+  const recentLogs: RecentLog[] = await getGuildLogs(guildId, 30).catch(() => []);
+  const commandStats = recentLogs.filter((l) => l.type === "command_exec").reduce((acc: Record<string, number>, l: RecentLog) => {
+    const cmd = l.command ?? "?";
+    acc[cmd] = (acc[cmd] ?? 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const topCommands = Object.entries(commandStats).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }));
+  res.json({
+    totalWarns,
+    topWarnedUsers: topWarnedUsers.map((u) => ({ userId: u.userId, count: u.warnings.length })),
+    activeTempBans: tempbans.length,
+    activeQuarantines: quarantines.length,
+    customCommands: customCmds.length,
+    maintenanceActive: isMaintenanceMode(guildId),
+    maintenanceMessage: isMaintenanceMode(guildId) ? getMaintenanceMessage(guildId) : null,
+    topCommands,
+    recentEvents: recentLogs.slice(0, 15),
+  });
 });
 
 export default router;

@@ -18,6 +18,8 @@ import {
   Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
   Wifi, WifiOff, Radio, Activity, Server,
   BookOpen, Download, Copy, ScrollText, Link2Off,
+  Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
+  UserCheck, ChevronRight, ExternalLink, Unlink,
 } from "lucide-react";
 
 function apiFetch(path: string, opts: RequestInit = {}) {
@@ -74,6 +76,21 @@ type ActionLogEntry = { timestamp: string; method: string; path: string; body: R
 type GuildInfo = { id: string; name: string; memberCount: number; iconURL: string | null };
 type QuarantineEntry = { userId: string; userTag: string; guildId: string; reason: string; triggerCount: number; windowSeconds: number; timestamp: string };
 type VoiceEvent = { timestamp: string; guildId: string; userId: string; userTag: string; type: string; channelId: string | null; channelName: string | null; fromChannelId?: string | null; fromChannelName?: string | null };
+
+type Warning = { caseId: number; reason: string; moderatorTag: string; timestamp: string };
+type TempBanEntry = { guildId: string; userId: string; userTag: string; moderatorTag: string; reason: string; expiresAt: number };
+type TimeoutEntry = { userId: string; userTag: string; displayName: string; avatarURL: string; until: string | null };
+type Invite = { code: string; url: string; uses: number | null; maxUses: number | null; creatorTag: string | null; channelName: string | null; temporary: boolean; expiresAt: string | null; createdAt: string | null };
+type AuditEntry = { id: string; action: number; actionType: string; executorTag: string | null; executorId: string | null; targetId: string | null; reason: string | null; createdAt: string };
+type LogChannels = { logChannelId: string | null; banLogChannelId: string | null; generalLogChannelId: string | null; inviteLogChannelId: string | null };
+type CustomCmd = { name: string; response: string; createdBy: string; createdAt: string };
+type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
+type MemberProfile = {
+  userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
+  joinedAt: string | null; roles: { id: string; name: string; color: string }[];
+  timed_out_until: string | null; warns: Warning[]; notes: NoteEntry[];
+  tempban: TempBanEntry | null; quarantine: QuarantineEntry | null; voiceEvents: VoiceEvent[];
+};
 
 const CHANNEL_TYPE_ICON: Record<number, React.ReactNode> = {
   0: <Hash className="h-3.5 w-3.5" />, 2: <Volume2 className="h-3.5 w-3.5" />,
@@ -294,6 +311,77 @@ export default function OwnerPanel() {
   const [voiceLog, setVoiceLog] = useState<VoiceEvent[]>([]);
   const [voiceLogLoading, setVoiceLogLoading] = useState(false);
   const [voiceSearch, setVoiceSearch] = useState("");
+
+  // ── Fiche membre ───────────────────────────────────────────────────────────
+  const [profileId, setProfileId] = useState("");
+  const [profileData, setProfileData] = useState<MemberProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // ── Warns ─────────────────────────────────────────────────────────────────
+  const [warnsUserId, setWarnsUserId] = useState("");
+  const [warnsData, setWarnsData] = useState<Warning[] | null>(null);
+  const [warnsLoading, setWarnsLoading] = useState(false);
+
+  // ── Tempbans ──────────────────────────────────────────────────────────────
+  const [tempbans, setTempbans] = useState<TempBanEntry[]>([]);
+  const [tempbansLoading, setTempbansLoading] = useState(false);
+
+  // ── Timeouts ──────────────────────────────────────────────────────────────
+  const [timeouts, setTimeouts] = useState<TimeoutEntry[]>([]);
+  const [timeoutsLoading, setTimeoutsLoading] = useState(false);
+
+  // ── Maintenance ───────────────────────────────────────────────────────────
+  const [maintenanceState, setMaintenanceState] = useState<{ active: boolean; message: string } | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceMsgDraft, setMaintenanceMsgDraft] = useState("");
+
+  // ── Masse-action ──────────────────────────────────────────────────────────
+  const [massRoleId, setMassRoleId] = useState("");
+  const [massAction, setMassAction] = useState<"kick" | "ban" | "timeout">("kick");
+  const [massReason, setMassReason] = useState("");
+  const [massTimeoutMins, setMassTimeoutMins] = useState(60);
+  const [massLoading, setMassLoading] = useState(false);
+
+  // ── Invitations ───────────────────────────────────────────────────────────
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [newInviteChannelId, setNewInviteChannelId] = useState("");
+  const [newInviteMaxAge, setNewInviteMaxAge] = useState(0);
+  const [newInviteMaxUses, setNewInviteMaxUses] = useState(0);
+  const [newInviteTemporary, setNewInviteTemporary] = useState(false);
+
+  // ── Audit Log ─────────────────────────────────────────────────────────────
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // ── Log Channels ──────────────────────────────────────────────────────────
+  const [logChannels, setLogChannels] = useState<LogChannels | null>(null);
+  const [logChannelsDraft, setLogChannelsDraft] = useState<LogChannels>({ logChannelId: null, banLogChannelId: null, generalLogChannelId: null, inviteLogChannelId: null });
+  const [logChannelsLoading, setLogChannelsLoading] = useState(false);
+  const [logChannelsSaving, setLogChannelsSaving] = useState(false);
+
+  // ── Config JSON ───────────────────────────────────────────────────────────
+  const [configImportJson, setConfigImportJson] = useState("");
+  const [configImportLoading, setConfigImportLoading] = useState(false);
+  const [configExportLoading, setConfigExportLoading] = useState(false);
+
+  // ── Commandes custom ──────────────────────────────────────────────────────
+  const [customCmds, setCustomCmds] = useState<CustomCmd[]>([]);
+  const [customCmdsLoading, setCustomCmdsLoading] = useState(false);
+  const [ccNewName, setCcNewName] = useState("");
+  const [ccNewResponse, setCcNewResponse] = useState("");
+  const [customCmdSaving, setCustomCmdSaving] = useState(false);
+
+  // ── Mots globaux ──────────────────────────────────────────────────────────
+  const [wordBl, setWordBl] = useState<string[]>([]);
+  const [wordBlLoading, setWordBlLoading] = useState(false);
+  const [newWord, setNewWord] = useState("");
+  const [wordBlSaving, setWordBlSaving] = useState(false);
+
+  // ── Recherche globale ─────────────────────────────────────────────────────
+  const [searchId, setSearchId] = useState("");
+  const [searchResults, setSearchResults] = useState<GlobalMemberResult[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -899,6 +987,144 @@ export default function OwnerPanel() {
   }
 
   // ── Voice log actions ──────────────────────────────────────────────────────
+  const fetchProfile = useCallback(async () => {
+    if (!profileId.trim()) return;
+    setProfileLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/member-profile/${profileId.trim()}`);
+      const d = await r.json() as MemberProfile & { error?: string };
+      if (r.ok) setProfileData(d);
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setProfileLoading(false); }
+  }, [guildId, profileId, toast]);
+
+  const fetchWarns = useCallback(async () => {
+    if (!warnsUserId.trim()) return;
+    setWarnsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/member-profile/${warnsUserId.trim()}`);
+      const d = await r.json() as MemberProfile & { error?: string };
+      if (r.ok) setWarnsData(d.warns ?? []);
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setWarnsLoading(false); }
+  }, [guildId, warnsUserId, toast]);
+
+  const fetchTempbans = useCallback(async () => {
+    setTempbansLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tempbans`);
+      if (r.ok) setTempbans(await r.json() as TempBanEntry[]);
+    } finally { setTempbansLoading(false); }
+  }, [guildId]);
+
+  const fetchTimeouts = useCallback(async () => {
+    setTimeoutsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/timeouts`);
+      if (r.ok) setTimeouts(await r.json() as TimeoutEntry[]);
+    } finally { setTimeoutsLoading(false); }
+  }, [guildId]);
+
+  const fetchMaintenance = useCallback(async () => {
+    setMaintenanceLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`);
+      if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); setMaintenanceMsgDraft(d.message); }
+    } finally { setMaintenanceLoading(false); }
+  }, [guildId]);
+
+  const fetchInvites = useCallback(async () => {
+    setInvitesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/invites`);
+      if (r.ok) setInvites(await r.json() as Invite[]);
+    } finally { setInvitesLoading(false); }
+  }, [guildId]);
+
+  const fetchAuditLog = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/audit-log?limit=50`);
+      if (r.ok) setAuditLog(await r.json() as AuditEntry[]);
+    } finally { setAuditLoading(false); }
+  }, [guildId]);
+
+  const fetchLogChannels = useCallback(async () => {
+    setLogChannelsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/log-channels`);
+      if (r.ok) { const d = await r.json() as LogChannels; setLogChannels(d); setLogChannelsDraft(d); }
+    } finally { setLogChannelsLoading(false); }
+  }, [guildId]);
+
+  const saveLogChannels = async () => {
+    setLogChannelsSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/log-channels`, { method: "PATCH", body: JSON.stringify(logChannelsDraft) });
+      if (r.ok) { setLogChannels(await r.json() as LogChannels); toast({ title: "Salons de logs mis à jour ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setLogChannelsSaving(false); }
+  };
+
+  const fetchCustomCmds = useCallback(async () => {
+    setCustomCmdsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands`);
+      if (r.ok) setCustomCmds(await r.json() as CustomCmd[]);
+    } finally { setCustomCmdsLoading(false); }
+  }, [guildId]);
+
+  const addCustomCmd = async () => {
+    if (!ccNewName.trim() || !ccNewResponse.trim()) return;
+    setCustomCmdSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands`, { method: "POST", body: JSON.stringify({ name: ccNewName.trim(), response: ccNewResponse.trim() }) });
+      const d = await r.json() as { ok?: boolean; error?: string };
+      if (r.ok) { toast({ title: `Commande &${ccNewName.toLowerCase()} créée ✓` }); setCcNewName(""); setCcNewResponse(""); fetchCustomCmds(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setCustomCmdSaving(false); }
+  };
+
+  const deleteCustomCmd = async (name: string) => {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (r.ok) { setCustomCmds(prev => prev.filter(c => c.name !== name)); toast({ title: `Commande &${name} supprimée` }); }
+  };
+
+  const fetchWordBl = useCallback(async () => {
+    setWordBlLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/global/word-blacklist");
+      if (r.ok) setWordBl(await r.json() as string[]);
+    } finally { setWordBlLoading(false); }
+  }, []);
+
+  const addWord = async () => {
+    if (!newWord.trim()) return;
+    setWordBlSaving(true);
+    try {
+      const r = await apiFetch("/api/owner/global/word-blacklist", { method: "POST", body: JSON.stringify({ word: newWord.trim() }) });
+      const d = await r.json() as { ok?: boolean; words?: string[]; error?: string };
+      if (r.ok) { setWordBl(d.words ?? []); setNewWord(""); toast({ title: "Mot ajouté ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setWordBlSaving(false); }
+  };
+
+  const removeWord = async (word: string) => {
+    const r = await apiFetch(`/api/owner/global/word-blacklist/${encodeURIComponent(word)}`, { method: "DELETE" });
+    const d = await r.json() as { words?: string[] };
+    if (r.ok) setWordBl(d.words ?? []);
+  };
+
+  const doGlobalSearch = async () => {
+    if (!searchId.trim()) return;
+    setSearchLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/member/${searchId.trim()}`);
+      if (r.ok) setSearchResults(await r.json() as GlobalMemberResult[]);
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setSearchLoading(false); }
+  };
+
   const fetchVoiceLog = useCallback(async () => {
     setVoiceLogLoading(true);
     try {
@@ -1032,6 +1258,19 @@ export default function OwnerPanel() {
           <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
           <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
           <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
+          <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
+          <TabsTrigger value="warns" className="gap-1.5 text-xs" onClick={() => setWarnsData(null)}><AlertCircle className="h-3.5 w-3.5" />Warns</TabsTrigger>
+          <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
+          <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
+          <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
+          <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
+          <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
+          <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
+          <TabsTrigger value="log-channels" className="gap-1.5 text-xs" onClick={fetchLogChannels}><Hash className="h-3.5 w-3.5" />Logs Config</TabsTrigger>
+          <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
+          <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
+          <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
+          <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -2731,6 +2970,539 @@ export default function OwnerPanel() {
                       );
                     })}
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Fiche Membre ──────────────────────────────────────────────────── */}
+        <TabsContent value="member-profile" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">👤 Fiche Complète d'un Membre</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={profileId} onChange={(e) => setProfileId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" />
+                <Button onClick={fetchProfile} disabled={profileLoading || !profileId.trim()} className="gap-1.5 shrink-0">
+                  {profileLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Rechercher
+                </Button>
+              </div>
+              {profileData && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/40 border border-border">
+                    {profileData.avatarURL && <img src={profileData.avatarURL} className="h-14 w-14 rounded-full border border-border" alt="" />}
+                    <div>
+                      <p className="font-bold text-lg">{profileData.displayName ?? profileData.userTag ?? profileData.userId}</p>
+                      <p className="text-sm text-muted-foreground font-mono">{profileData.userTag} · {profileData.userId}</p>
+                      {profileData.joinedAt && <p className="text-xs text-muted-foreground">Rejoint : {new Date(profileData.joinedAt).toLocaleDateString("fr-FR")}</p>}
+                      {profileData.timed_out_until && <Badge variant="destructive" className="mt-1">Timeout jusqu'au {new Date(profileData.timed_out_until).toLocaleString("fr-FR")}</Badge>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-border p-3 text-center"><p className="text-2xl font-bold font-mono">{profileData.warns.length}</p><p className="text-xs text-muted-foreground uppercase">Warns</p></div>
+                    <div className="rounded-lg border border-border p-3 text-center"><p className="text-2xl font-bold font-mono">{profileData.notes.length}</p><p className="text-xs text-muted-foreground uppercase">Notes</p></div>
+                    <div className={`rounded-lg border p-3 text-center ${profileData.tempban ? "border-destructive bg-destructive/10" : "border-border"}`}><p className="text-xs text-muted-foreground uppercase">{profileData.tempban ? "🔨 Tempban Actif" : "Tempban"}</p>{profileData.tempban && <p className="text-xs font-mono mt-1">Exp : {new Date(profileData.tempban.expiresAt).toLocaleDateString("fr-FR")}</p>}</div>
+                    <div className={`rounded-lg border p-3 text-center col-span-2 md:col-span-1 ${profileData.quarantine ? "border-yellow-500/50 bg-yellow-500/10" : "border-border"}`}><p className="text-xs text-muted-foreground uppercase">{profileData.quarantine ? "🔒 Quarantaine" : "Quarantaine"}</p>{profileData.quarantine && <p className="text-xs font-mono mt-1">{profileData.quarantine.reason}</p>}</div>
+                  </div>
+                  {profileData.roles.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Rôles</p>
+                      <div className="flex flex-wrap gap-1">{profileData.roles.map(r => <Badge key={r.id} variant="outline" style={{ borderColor: r.color !== "#000000" ? r.color : undefined }} className="text-xs font-mono">{r.name}</Badge>)}</div>
+                    </div>
+                  )}
+                  {profileData.warns.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Avertissements</p>
+                      <div className="space-y-1">{profileData.warns.map(w => (
+                        <div key={w.caseId} className="flex items-start gap-2 text-xs rounded bg-muted/30 px-3 py-2">
+                          <span className="font-mono text-muted-foreground shrink-0">#{w.caseId}</span>
+                          <span className="flex-1">{w.reason}</span>
+                          <span className="text-muted-foreground shrink-0">{w.moderatorTag}</span>
+                          <span className="text-muted-foreground shrink-0">{new Date(w.timestamp).toLocaleDateString("fr-FR")}</span>
+                        </div>
+                      ))}</div>
+                    </div>
+                  )}
+                  {profileData.notes.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Notes</p>
+                      <div className="space-y-1">{profileData.notes.map((n, i) => (
+                        <div key={i} className="text-xs rounded bg-muted/30 px-3 py-2"><p>{n.content}</p><p className="text-muted-foreground mt-0.5">{n.moderator} · {new Date(n.timestamp).toLocaleDateString("fr-FR")}</p></div>
+                      ))}</div>
+                    </div>
+                  )}
+                  {profileData.voiceEvents.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Derniers événements vocaux</p>
+                      <div className="space-y-0.5 font-mono text-xs max-h-40 overflow-y-auto">{profileData.voiceEvents.map((e, i) => (
+                        <div key={i} className="flex gap-2 px-2 py-1 rounded hover:bg-muted/40">
+                          <span className="text-muted-foreground shrink-0">{new Date(e.timestamp).toLocaleTimeString("fr-FR")}</span>
+                          <span className="text-primary shrink-0">{e.type}</span>
+                          <span className="text-muted-foreground">{e.channelName ?? e.channelId}</span>
+                        </div>
+                      ))}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Warns ─────────────────────────────────────────────────────────── */}
+        <TabsContent value="warns" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">⚠️ Gestion des Avertissements</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={warnsUserId} onChange={(e) => setWarnsUserId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" />
+                <Button onClick={fetchWarns} disabled={warnsLoading || !warnsUserId.trim()} className="gap-1.5 shrink-0">
+                  {warnsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Charger
+                </Button>
+              </div>
+              {warnsData !== null && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">{warnsData.length} avertissement(s) pour {warnsUserId}</p>
+                    {warnsData.length > 0 && (
+                      <Button size="sm" variant="destructive" className="gap-1.5 text-xs" onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/warns/${warnsUserId}`, { method: "DELETE" });
+                        const d = await r.json() as { count?: number };
+                        if (r.ok) { setWarnsData([]); toast({ title: `${d.count} warn(s) effacé(s) ✓` }); }
+                      }}>
+                        <Trash2 className="h-3.5 w-3.5" /> Tout effacer
+                      </Button>
+                    )}
+                  </div>
+                  {warnsData.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-6">Aucun avertissement.</p>
+                  ) : (
+                    <div className="space-y-1">{warnsData.map((w) => (
+                      <div key={w.caseId} className="flex items-center gap-2 text-xs rounded bg-muted/30 px-3 py-2">
+                        <span className="font-mono text-muted-foreground shrink-0">#{w.caseId}</span>
+                        <span className="flex-1">{w.reason}</span>
+                        <span className="text-muted-foreground shrink-0">{w.moderatorTag}</span>
+                        <span className="text-muted-foreground shrink-0">{new Date(w.timestamp).toLocaleDateString("fr-FR")}</span>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10" onClick={async () => {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/warns/${warnsUserId}/${w.caseId}`, { method: "DELETE" });
+                          if (r.ok) { setWarnsData(prev => (prev ?? []).filter(x => x.caseId !== w.caseId)); toast({ title: `Warn #${w.caseId} supprimé` }); }
+                        }}><X className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    ))}</div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tempbans ──────────────────────────────────────────────────────── */}
+        <TabsContent value="tempbans" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🔨 Bannissements Temporaires ({tempbans.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchTempbans} disabled={tempbansLoading} className="gap-1.5">
+                  {tempbansLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {tempbansLoading ? <Skeleton className="h-40 w-full" /> : tempbans.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun tempban actif.</p>
+              ) : (
+                <div className="space-y-2">{tempbans.map((b) => (
+                  <div key={b.userId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm font-mono truncate">{b.userTag}</p>
+                      <p className="text-xs text-muted-foreground">{b.reason} · par {b.moderatorTag}</p>
+                      <p className="text-xs text-muted-foreground font-mono">Expire : {new Date(b.expiresAt).toLocaleString("fr-FR")}</p>
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0 hover:bg-green-500/10 hover:border-green-500 hover:text-green-400" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/tempbans/${b.userId}`, { method: "DELETE" });
+                      if (r.ok) { setTempbans(prev => prev.filter(x => x.userId !== b.userId)); toast({ title: "Tempban annulé ✓" }); }
+                    }}>
+                      <Unlock className="h-3.5 w-3.5" /> Annuler
+                    </Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Timeouts ──────────────────────────────────────────────────────── */}
+        <TabsContent value="timeouts" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">⏱️ Timeouts Actifs ({timeouts.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchTimeouts} disabled={timeoutsLoading} className="gap-1.5">
+                  {timeoutsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {timeoutsLoading ? <Skeleton className="h-40 w-full" /> : timeouts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun membre en timeout.</p>
+              ) : (
+                <div className="space-y-2">{timeouts.map((t) => (
+                  <div key={t.userId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    {t.avatarURL && <img src={t.avatarURL} className="h-8 w-8 rounded-full border border-border shrink-0" alt="" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm font-mono">{t.displayName} <span className="text-muted-foreground font-normal text-xs">({t.userTag})</span></p>
+                      {t.until && <p className="text-xs text-muted-foreground font-mono">Jusqu'au : {new Date(t.until).toLocaleString("fr-FR")}</p>}
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0 hover:bg-green-500/10 hover:border-green-500 hover:text-green-400" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/timeouts/${t.userId}`, { method: "DELETE" });
+                      if (r.ok) { setTimeouts(prev => prev.filter(x => x.userId !== t.userId)); toast({ title: "Timeout levé ✓" }); }
+                      else { const d = await r.json() as { error?: string }; toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    }}>
+                      <Unlock className="h-3.5 w-3.5" /> Lever
+                    </Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Maintenance ───────────────────────────────────────────────────── */}
+        <TabsContent value="maintenance" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">🔧 Mode Maintenance</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              {maintenanceLoading ? <Skeleton className="h-32 w-full" /> : !maintenanceState ? (
+                <Button onClick={fetchMaintenance}>Charger</Button>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div>
+                      <p className="font-semibold">Mode Maintenance</p>
+                      <p className="text-sm text-muted-foreground">Bloque toutes les commandes (owner du serveur exclu)</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={maintenanceState.active ? "destructive" : "secondary"}>{maintenanceState.active ? "ACTIF" : "INACTIF"}</Badge>
+                      <Button size="sm" variant={maintenanceState.active ? "destructive" : "outline"} className="gap-1.5" onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`, { method: "PATCH", body: JSON.stringify({ active: !maintenanceState.active }) });
+                        if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); toast({ title: d.active ? "Maintenance activée 🔧" : "Maintenance désactivée ✓" }); }
+                      }}>
+                        <Pause className="h-3.5 w-3.5" /> {maintenanceState.active ? "Désactiver" : "Activer"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Message affiché aux utilisateurs</label>
+                    <Textarea value={maintenanceMsgDraft} onChange={(e) => setMaintenanceMsgDraft(e.target.value)} rows={3} className="font-mono text-sm resize-none" />
+                    <Button size="sm" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`, { method: "PATCH", body: JSON.stringify({ active: maintenanceState.active, message: maintenanceMsgDraft }) });
+                      if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); toast({ title: "Message mis à jour ✓" }); }
+                    }}>Sauvegarder le message</Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Masse-Action ──────────────────────────────────────────────────── */}
+        <TabsContent value="mass-action" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">⚡ Masse-Action par Rôle</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <Alert><AlertCircle className="h-4 w-4" /><AlertDescription className="text-sm">Action irréversible sur tous les membres ayant le rôle spécifié. Les bots et membres protégés sont ignorés.</AlertDescription></Alert>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2"><label className="text-sm font-medium">ID du Rôle cible</label><Input value={massRoleId} onChange={(e) => setMassRoleId(e.target.value)} placeholder="ID du rôle Discord…" className="font-mono text-sm" /></div>
+                <div className="space-y-2"><label className="text-sm font-medium">Action</label>
+                  <Select value={massAction} onValueChange={(v) => setMassAction(v as typeof massAction)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kick">👢 Expulser</SelectItem>
+                      <SelectItem value="ban">🔨 Bannir</SelectItem>
+                      <SelectItem value="timeout">⏱️ Timeout</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {massAction === "timeout" && <div className="space-y-2"><label className="text-sm font-medium">Durée (minutes)</label><Input type="number" min={1} value={massTimeoutMins} onChange={(e) => setMassTimeoutMins(Number(e.target.value))} className="font-mono text-sm" /></div>}
+                <div className="space-y-2 md:col-span-2"><label className="text-sm font-medium">Raison</label><Input value={massReason} onChange={(e) => setMassReason(e.target.value)} placeholder="Raison (optionnel)…" className="text-sm" /></div>
+              </div>
+              <Button variant="destructive" disabled={massLoading || !massRoleId.trim()} className="gap-1.5 w-full" onClick={async () => {
+                if (!confirm(`Confirmer la masse-action "${massAction}" sur tous les membres du rôle ${massRoleId} ?`)) return;
+                setMassLoading(true);
+                try {
+                  const r = await apiFetch(`/api/owner/guilds/${guildId}/mass-action`, { method: "POST", body: JSON.stringify({ action: massAction, roleId: massRoleId.trim(), reason: massReason, timeoutMinutes: massTimeoutMins }) });
+                  const d = await r.json() as { count?: number; error?: string };
+                  if (r.ok) toast({ title: `✓ ${d.count} membre(s) traité(s)` });
+                  else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                } finally { setMassLoading(false); }
+              }}>
+                {massLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />} Exécuter la masse-action
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invitations ───────────────────────────────────────────────────── */}
+        <TabsContent value="invitations" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🔗 Invitations ({invites.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchInvites} disabled={invitesLoading} className="gap-1.5">
+                  {invitesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Générer une invitation</p>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">ID Salon (optionnel)</label><Input value={newInviteChannelId} onChange={(e) => setNewInviteChannelId(e.target.value)} placeholder="ID salon…" className="font-mono text-xs" /></div>
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">Durée (0=∞, en secondes)</label><Input type="number" min={0} value={newInviteMaxAge} onChange={(e) => setNewInviteMaxAge(Number(e.target.value))} className="font-mono text-xs" /></div>
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">Utilisations max (0=∞)</label><Input type="number" min={0} value={newInviteMaxUses} onChange={(e) => setNewInviteMaxUses(Number(e.target.value))} className="font-mono text-xs" /></div>
+                </div>
+                <Button size="sm" className="gap-1.5" onClick={async () => {
+                  const r = await apiFetch(`/api/owner/guilds/${guildId}/invites/create`, { method: "POST", body: JSON.stringify({ channelId: newInviteChannelId || undefined, maxAge: newInviteMaxAge, maxUses: newInviteMaxUses, temporary: newInviteTemporary }) });
+                  const d = await r.json() as { url?: string; error?: string };
+                  if (r.ok && d.url) { navigator.clipboard.writeText(d.url).catch(() => null); toast({ title: "Invitation créée ✓", description: d.url }); fetchInvites(); }
+                  else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                }}><Plus className="h-4 w-4" /> Créer & Copier</Button>
+              </div>
+              {invitesLoading ? <Skeleton className="h-40 w-full" /> : invites.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucune invitation active.</p>
+              ) : (
+                <div className="space-y-1">{invites.map((inv) => (
+                  <div key={inv.code} className="flex items-center gap-3 text-xs font-mono rounded bg-muted/20 px-3 py-2">
+                    <span className="font-semibold text-primary w-20 shrink-0">{inv.code}</span>
+                    <span className="text-muted-foreground shrink-0">{inv.uses ?? 0}/{inv.maxUses ?? "∞"}</span>
+                    <span className="text-muted-foreground shrink-0 hidden md:block"># {inv.channelName ?? "?"}</span>
+                    <span className="flex-1 text-muted-foreground hidden lg:block">{inv.creatorTag ?? "?"}</span>
+                    <span className="text-muted-foreground shrink-0">{inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString("fr-FR") : "∞"}</span>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 shrink-0" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/invites/${inv.code}`, { method: "DELETE" });
+                      if (r.ok) { setInvites(prev => prev.filter(i => i.code !== inv.code)); toast({ title: "Invitation révoquée" }); }
+                    }}><X className="h-3.5 w-3.5" /></Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Audit Log ─────────────────────────────────────────────────────── */}
+        <TabsContent value="audit-log" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">📋 Audit Log Discord</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchAuditLog} disabled={auditLoading} className="gap-1.5">
+                  {auditLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {auditLoading ? <Skeleton className="h-48 w-full" /> : auditLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune entrée d'audit.</p>
+              ) : (
+                <div className="space-y-1 max-h-[40rem] overflow-y-auto font-mono text-xs">
+                  {auditLog.map((e) => (
+                    <div key={e.id} className="flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/40">
+                      <span className="text-muted-foreground shrink-0 w-32">{new Date(e.createdAt).toLocaleString("fr-FR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                      <Badge variant="outline" className="text-[10px] shrink-0 font-mono">{e.actionType.replace(/_/g, " ")}</Badge>
+                      <span className="text-primary shrink-0">{e.executorTag ?? e.executorId ?? "?"}</span>
+                      {e.targetId && <span className="text-muted-foreground">→ {e.targetId}</span>}
+                      {e.reason && <span className="text-muted-foreground italic truncate">"{e.reason}"</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Log Channels ──────────────────────────────────────────────────── */}
+        <TabsContent value="log-channels" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">📡 Configuration des Salons de Logs</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              {logChannelsLoading ? <Skeleton className="h-48 w-full" /> : !logChannels ? (
+                <Button onClick={fetchLogChannels}>Charger</Button>
+              ) : (
+                <>
+                  {([
+                    { key: "logChannelId" as const, label: "Salon de Logs Général", icon: "📝" },
+                    { key: "banLogChannelId" as const, label: "Salon de Logs Bans", icon: "🔨" },
+                    { key: "generalLogChannelId" as const, label: "Salon de Logs Serveur", icon: "📊" },
+                    { key: "inviteLogChannelId" as const, label: "Salon de Logs Invitations", icon: "🔗" },
+                  ] as const).map(({ key, label, icon }) => (
+                    <div key={key} className="space-y-1">
+                      <label className="text-sm font-medium">{icon} {label}</label>
+                      <Input value={logChannelsDraft[key] ?? ""} onChange={(e) => setLogChannelsDraft(prev => ({ ...prev, [key]: e.target.value || null }))} placeholder="ID du salon Discord…" className="font-mono text-sm" />
+                    </div>
+                  ))}
+                  <Button onClick={saveLogChannels} disabled={logChannelsSaving} className="gap-1.5 w-full">
+                    {logChannelsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />} Sauvegarder les salons
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Config JSON ───────────────────────────────────────────────────── */}
+        <TabsContent value="config-json" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">📦 Import / Export de Configuration</CardTitle></CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Exporter la configuration</p>
+                <p className="text-xs text-muted-foreground">Télécharge un fichier JSON avec toute la config du serveur.</p>
+                <Button variant="outline" disabled={configExportLoading} className="gap-1.5" onClick={async () => {
+                  setConfigExportLoading(true);
+                  try {
+                    const token = getToken();
+                    const r = await fetch(`/api/owner/guilds/${guildId}/config/export`, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+                    if (!r.ok) { toast({ title: "Erreur export", variant: "destructive" }); return; }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a"); a.href = url; a.download = `config-${guildId}.json`; a.click();
+                    URL.revokeObjectURL(url);
+                    toast({ title: "Config exportée ✓" });
+                  } finally { setConfigExportLoading(false); }
+                }}>
+                  {configExportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Télécharger le JSON
+                </Button>
+              </div>
+              <div className="border-t border-border pt-4 space-y-2">
+                <p className="text-sm font-semibold">Importer une configuration</p>
+                <p className="text-xs text-muted-foreground">Coller le JSON d'une configuration précédemment exportée.</p>
+                <Textarea value={configImportJson} onChange={(e) => setConfigImportJson(e.target.value)} rows={8} placeholder='{"guildId":"...","config":{...}}' className="font-mono text-xs resize-none" />
+                <Button variant="outline" disabled={configImportLoading || !configImportJson.trim()} className="gap-1.5" onClick={async () => {
+                  setConfigImportLoading(true);
+                  try {
+                    const parsed = JSON.parse(configImportJson);
+                    const config = parsed.config ?? parsed;
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/config/import`, { method: "POST", body: JSON.stringify({ config }) });
+                    const d = await r.json() as { ok?: boolean; error?: string };
+                    if (r.ok) { toast({ title: "Configuration importée ✓" }); setConfigImportJson(""); }
+                    else toast({ title: "Erreur import", description: d.error, variant: "destructive" });
+                  } catch { toast({ title: "JSON invalide", variant: "destructive" }); }
+                  finally { setConfigImportLoading(false); }
+                }}>
+                  {configImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Importer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Commandes Custom ──────────────────────────────────────────────── */}
+        <TabsContent value="custom-cmds" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">⚙️ Commandes Personnalisées ({customCmds.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchCustomCmds} disabled={customCmdsLoading} className="gap-1.5">
+                  {customCmdsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              <CardDescription className="font-mono text-xs">Les utilisateurs pourront taper <span className="text-primary">&amp;nom</span> pour obtenir la réponse configurée.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Nouvelle commande</p>
+                <div className="flex gap-2 items-center">
+                  <span className="text-muted-foreground font-mono text-sm shrink-0">&amp;</span>
+                  <Input value={ccNewName} onChange={(e) => setCcNewName(e.target.value.replace(/\s+/g, ""))} placeholder="nom" className="font-mono text-sm w-32" />
+                  <span className="text-muted-foreground text-sm shrink-0">→</span>
+                  <Input value={ccNewResponse} onChange={(e) => setCcNewResponse(e.target.value)} placeholder="Réponse du bot…" className="text-sm flex-1" />
+                  <Button size="sm" disabled={customCmdSaving || !ccNewName.trim() || !ccNewResponse.trim()} onClick={addCustomCmd} className="gap-1.5 shrink-0">
+                    {customCmdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+              {customCmdsLoading ? <Skeleton className="h-32 w-full" /> : customCmds.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucune commande personnalisée.</p>
+              ) : (
+                <div className="space-y-1">{customCmds.map((cmd) => (
+                  <div key={cmd.name} className="flex items-center gap-3 rounded bg-muted/20 px-3 py-2 text-sm">
+                    <span className="font-mono text-primary font-bold shrink-0">&amp;{cmd.name}</span>
+                    <span className="flex-1 truncate text-muted-foreground">{cmd.response}</span>
+                    <span className="text-xs text-muted-foreground shrink-0 hidden md:block">{cmd.createdBy}</span>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 shrink-0" onClick={() => deleteCustomCmd(cmd.name)}><X className="h-3.5 w-3.5" /></Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Mots Globaux ──────────────────────────────────────────────────── */}
+        <TabsContent value="word-bl" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🌍 Blacklist de Mots Globale ({wordBl.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchWordBl} disabled={wordBlLoading} className="gap-1.5">
+                  {wordBlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              <CardDescription className="text-xs">Mots bloqués sur <strong>tous</strong> les serveurs gérés par le bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={newWord} onChange={(e) => setNewWord(e.target.value)} placeholder="Ajouter un mot…" className="font-mono text-sm" onKeyDown={(e) => e.key === "Enter" && addWord()} />
+                <Button onClick={addWord} disabled={wordBlSaving || !newWord.trim()} className="gap-1.5 shrink-0">
+                  {wordBlSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter
+                </Button>
+              </div>
+              {wordBlLoading ? <Skeleton className="h-32 w-full" /> : wordBl.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucun mot dans la blacklist globale.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">{wordBl.map((w) => (
+                  <Badge key={w} variant="secondary" className="gap-1.5 font-mono text-sm pr-1">
+                    {w}
+                    <button onClick={() => removeWord(w)} className="ml-1 hover:text-destructive transition-colors"><X className="h-3 w-3" /></button>
+                  </Badge>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Recherche Globale ─────────────────────────────────────────────── */}
+        <TabsContent value="global-search" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">🔍 Recherche Globale d'un Utilisateur</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={searchId} onChange={(e) => setSearchId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" onKeyDown={(e) => e.key === "Enter" && doGlobalSearch()} />
+                <Button onClick={doGlobalSearch} disabled={searchLoading || !searchId.trim()} className="gap-1.5 shrink-0">
+                  {searchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchCode className="h-4 w-4" />} Rechercher
+                </Button>
+              </div>
+              {searchResults !== null && (
+                searchResults.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">Utilisateur introuvable sur tous les serveurs.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">Présent sur <strong>{searchResults.length}</strong> serveur(s)</p>
+                    {searchResults.map((r) => (
+                      <div key={r.guildId} className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+                        <div className="flex items-center gap-3">
+                          {r.avatarURL && <img src={r.avatarURL} className="h-10 w-10 rounded-full border border-border shrink-0" alt="" />}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold">{r.displayName} <span className="text-muted-foreground font-normal text-xs">({r.userTag})</span></p>
+                            <p className="text-xs text-muted-foreground font-mono">{r.guildName}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            {r.timedOut && <Badge variant="destructive" className="text-xs">Timeout</Badge>}
+                            {r.warnCount > 0 && <Badge variant="secondary" className="text-xs font-mono">{r.warnCount} warn(s)</Badge>}
+                          </div>
+                        </div>
+                        {r.roles.length > 0 && (
+                          <div className="flex flex-wrap gap-1">{r.roles.slice(0, 8).map(role => <Badge key={role.id} variant="outline" className="text-xs font-mono">{role.name}</Badge>)}</div>
+                        )}
+                        {r.joinedAt && <p className="text-xs text-muted-foreground">Rejoint le {new Date(r.joinedAt).toLocaleDateString("fr-FR")}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )
               )}
             </CardContent>
           </Card>

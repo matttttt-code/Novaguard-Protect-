@@ -83,6 +83,8 @@ import { addCaptchaLog } from "./captcha-log-db.js";
 import { isQuarantined, addQuarantine } from "./quarantine-store.js";
 import { recordStaffCommand, RATE_WINDOW_SECONDS } from "./staff-ratelimit.js";
 import { registerVoiceMonitor } from "./voice-monitor.js";
+import { isMaintenanceMode, getMaintenanceMessage } from "./maintenance-store.js";
+import { isGloballyBlacklistedWord } from "./global-word-blacklist-store.js";
 
 function isValidId(s: string): boolean {
   return /^\d{17,20}$/.test(s.trim());
@@ -224,6 +226,16 @@ export function startBot(): void {
 
     const command = commands.find((c) => c.data.name === interaction.commandName);
     if (!command) return;
+
+    // ── Mode maintenance (slash) ───────────────────────────────────────────────
+    if (interaction.guildId && interaction.guild && interaction.guild.ownerId !== interaction.user.id && isMaintenanceMode(interaction.guildId)) {
+      const msg = getMaintenanceMessage(interaction.guildId);
+      try {
+        if (interaction.replied || interaction.deferred) await interaction.followUp({ content: msg, ephemeral: true });
+        else await interaction.reply({ content: msg, ephemeral: true });
+      } catch { /* expirée */ }
+      return;
+    }
 
     // ── Quarantaine + limite de taux staff (slash commands) ───────────────────
     if (interaction.guildId && !interaction.user.bot) {

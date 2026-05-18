@@ -58,6 +58,16 @@ export function getTempBan(guildId: string, userId: string): TempBan | undefined
   return store.get(key(guildId, userId));
 }
 
+export function getAllTempBansForGuild(guildId: string): TempBan[] {
+  const result: TempBan[] = [];
+  store.forEach((ban) => { if (ban.guildId === guildId) result.push(ban); });
+  return result;
+}
+
+export function countAllActiveTempBans(): number {
+  return store.size;
+}
+
 export function startTempBanScheduler(client: Client): void {
   const CHECK_INTERVAL = 30_000;
 

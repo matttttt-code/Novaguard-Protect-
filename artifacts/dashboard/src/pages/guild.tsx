@@ -164,6 +164,74 @@ function BotErrorRow({ log }: { log: EventLog }) {
 }
 
 // ── Logs section ──────────────────────────────────────────────────────────────
+function GuildStatsSection({ guildId }: { guildId: string }) {
+  const [stats, setStats] = useState<{
+    totalWarns: number; topWarnedUsers: { userId: string; count: number }[];
+    activeTempBans: number; activeQuarantines: number; customCommands: number;
+    maintenanceActive: boolean; topCommands: { name: string; count: number }[];
+  } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const token = getToken();
+
+  useEffect(() => {
+    setLoading(true);
+    fetch(`/api/dashboard/guilds/${guildId}/stats`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setStats(d); })
+      .catch(() => null)
+      .finally(() => setLoading(false));
+  }, [guildId, token]);
+
+  if (loading) return <Card className="border-border bg-card"><CardContent className="pt-6"><Skeleton className="h-32 w-full" /></CardContent></Card>;
+  if (!stats) return null;
+
+  return (
+    <Card className="border-border bg-card">
+      <CardHeader>
+        <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+          <Shield className="h-4 w-4" /> Statistiques de Modération
+        </CardTitle>
+        {stats.maintenanceActive && (
+          <div className="flex items-center gap-2 mt-1">
+            <Badge variant="destructive" className="text-xs">🔧 Mode Maintenance Actif</Badge>
+          </div>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {[
+            { label: "Avertissements", value: stats.totalWarns, color: stats.totalWarns > 0 ? "text-yellow-400" : "" },
+            { label: "Tempbans Actifs", value: stats.activeTempBans, color: stats.activeTempBans > 0 ? "text-red-400" : "" },
+            { label: "Quarantaines", value: stats.activeQuarantines, color: stats.activeQuarantines > 0 ? "text-orange-400" : "" },
+            { label: "Cmds Custom", value: stats.customCommands, color: "" },
+          ].map(({ label, value, color }) => (
+            <div key={label} className="rounded-lg border border-border bg-muted/20 p-3 text-center">
+              <p className={`text-2xl font-bold font-mono ${color}`}>{value}</p>
+              <p className="text-xs text-muted-foreground mt-0.5 uppercase">{label}</p>
+            </div>
+          ))}
+        </div>
+        {stats.topCommands.length > 0 && (
+          <div>
+            <p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Top Commandes Récentes</p>
+            <div className="space-y-1">
+              {stats.topCommands.map(({ name, count }) => (
+                <div key={name} className="flex items-center gap-2 text-xs font-mono">
+                  <span className="text-primary font-semibold w-32 truncate">{name}</span>
+                  <div className="flex-1 rounded-full bg-muted h-1.5 overflow-hidden">
+                    <div className="h-full bg-primary rounded-full" style={{ width: `${Math.round((count / stats.topCommands[0]!.count) * 100)}%` }} />
+                  </div>
+                  <span className="text-muted-foreground w-8 text-right">{count}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function LogsSection({ guildId }: { guildId: string }) {
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -605,6 +673,9 @@ export default function GuildConfigEditor() {
 
           {/* JOURNAUX D'ACTIVITÉ */}
           <LogsSection guildId={guildId} />
+
+          {/* STATISTIQUES DU SERVEUR */}
+          <GuildStatsSection guildId={guildId} />
 
         </div>
       </div>
