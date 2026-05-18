@@ -6,7 +6,6 @@ import * as untimeout from "./untimeout.js";
 import * as warn from "./warn.js";
 import * as warnings from "./warnings.js";
 import * as clear from "./clear.js";
-import * as userinfo from "./userinfo.js";
 import * as serverinfo from "./serverinfo.js";
 import * as slowmode from "./slowmode.js";
 import * as lock from "./lock.js";
@@ -80,7 +79,7 @@ export interface Command {
 
 export const commands: Command[] = [
   kick, ban, unban, timeout, untimeout, warn, warnings, clear,
-  userinfo, serverinfo, slowmode, lock, unlock, role, nickname,
+  serverinfo, slowmode, lock, unlock, role, nickname,
   sanctioninfo, infome, getid, botinfo, commandlist,
   blacklist, blacklistinfo, setlog, setbanlog,
   softban, revokeinvites, raidmode, support,
@@ -107,7 +106,7 @@ type PrefixModule = {
 
 const prefixModules: PrefixModule[] = [
   kick, ban, unban, timeout, untimeout, warn, warnings, clear,
-  userinfo, serverinfo, slowmode, lock, unlock, role, nickname,
+  serverinfo, slowmode, lock, unlock, role, nickname,
   sanctioninfo, infome, getid, botinfo, commandlist,
   blacklist, blacklistinfo, setlog, setbanlog,
   softban, revokeinvites, raidmode, support,
