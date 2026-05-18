@@ -2022,28 +2022,43 @@ router.post("/owner/guilds/:guildId/voice-presence/announce", async (req, res) =
   const state = getVoicePresenceState(guildId);
   if (!state?.connected) { res.status(400).json({ error: "Le bot n'est pas dans un salon vocal" }); return; }
 
+  const client = getClient();
+  const guild = client?.guilds.cache.get(guildId);
+  if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+
   const { getVoiceConnection, createAudioPlayer, createAudioResource, AudioPlayerStatus, StreamType } = await import("@discordjs/voice");
   const connection = getVoiceConnection(guildId);
   if (!connection) { res.status(400).json({ error: "Connexion vocale introuvable" }); return; }
 
+  // Répondre immédiatement — le TTS tourne en arrière-plan
+  res.json({ ok: true });
+
+  const wasMuted = state.selfMute;
   try {
     const gTTS = (await import("node-gtts")).default;
     const tts = gTTS("fr");
     const stream = tts.stream(text.trim());
+
+    // Unmute temporairement si le bot est muted (sinon l'audio ne sort pas)
+    if (wasMuted) updateVoicePresence(guild, { selfMute: false });
 
     const resource = createAudioResource(stream, { inputType: StreamType.Arbitrary });
     const player = createAudioPlayer();
     connection.subscribe(player);
     player.play(resource);
 
-    await new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve) => {
       player.on(AudioPlayerStatus.Idle, () => { player.stop(); resolve(); });
-      player.on("error", reject);
-      setTimeout(() => { player.stop(); resolve(); }, 30_000);
+      player.on("error", () => resolve());
+      setTimeout(resolve, 20_000);
     });
-
-    res.json({ ok: true });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+  } catch { /* silencieux — déjà répondu au client */ }
+  finally {
+    // Re-mute si le bot était muted avant
+    if (wasMuted) {
+      try { updateVoicePresence(guild, { selfMute: true }); } catch { /* ignoré */ }
+    }
+  }
 });
 
 router.post("/owner/guilds/:guildId/voice-presence/join-me", async (req, res) => {
