@@ -42,6 +42,9 @@ export interface GuildConfig {
   antiMuteEnabled: boolean;
   antiDisconnectEnabled: boolean;
   antiBotEnabled: boolean;
+  antiEveryoneEnabled: boolean;
+  antiEveryoneTimeoutSecs: number;
+  suspectKeywords: string[];
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -89,6 +92,9 @@ function defaults(): GuildConfig {
     antiMuteEnabled: false,
     antiDisconnectEnabled: false,
     antiBotEnabled: false,
+    antiEveryoneEnabled: false,
+    antiEveryoneTimeoutSecs: 300,
+    suspectKeywords: [],
   };
 }
 
@@ -195,6 +201,23 @@ export function setAntiMoveEnabled(guildId: string, v: boolean): void { set(guil
 export function setAntiMuteEnabled(guildId: string, v: boolean): void { set(guildId, { antiMuteEnabled: v }); }
 export function setAntiDisconnectEnabled(guildId: string, v: boolean): void { set(guildId, { antiDisconnectEnabled: v }); }
 export function setAntiBotEnabled(guildId: string, v: boolean): void { set(guildId, { antiBotEnabled: v }); }
+
+export function setAntiEveryoneEnabled(guildId: string, v: boolean): void { set(guildId, { antiEveryoneEnabled: v }); }
+export function setAntiEveryoneTimeoutSecs(guildId: string, secs: number): void { set(guildId, { antiEveryoneTimeoutSecs: secs }); }
+
+export function getSuspectKeywords(guildId: string): string[] { return getConfig(guildId).suspectKeywords ?? []; }
+export function addSuspectKeyword(guildId: string, word: string): void {
+  const cfg = getOrCreate(guildId);
+  const words = [...cfg.suspectKeywords, word.toLowerCase()].filter((v, i, a) => a.indexOf(v) === i);
+  set(guildId, { suspectKeywords: words });
+}
+export function removeSuspectKeyword(guildId: string, word: string): boolean {
+  const cfg = getOrCreate(guildId);
+  const words = cfg.suspectKeywords.filter((w) => w !== word.toLowerCase());
+  const removed = words.length < cfg.suspectKeywords.length;
+  set(guildId, { suspectKeywords: words });
+  return removed;
+}
 
 export function addWhitelistedInvite(guildId: string, code: string): void {
   const cfg = getOrCreate(guildId);

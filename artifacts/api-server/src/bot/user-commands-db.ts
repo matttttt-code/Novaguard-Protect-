@@ -2,7 +2,7 @@ import { db, userCommandsTable } from "@workspace/db";
 import { desc, eq, and } from "drizzle-orm";
 
 export interface SaveUserCommandOpts {
-  type: "rolerequest" | "suggestion";
+  type: "rolerequest" | "suggestion" | "support";
   guildId?: string | null;
   guildName?: string | null;
   userId: string;

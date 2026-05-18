@@ -48,6 +48,7 @@ import {
   setCaptchaEnabled, setCaptchaChannel, setCaptchaUnverifiedRole, setCaptchaVerifiedRole,
   setSanctionDmEnabled,
   setSecurityLevel,
+  getSuspectKeywords,
 } from "./guild-config-store.js";
 import { logCommandExec, logBotError } from "./event-log-store.js";
 import { getPendingLevel3, removePendingLevel3, markOwnerApproved } from "./security-pending-store.js";
@@ -63,6 +64,7 @@ import { setClient } from "./client-store.js";
 import { setOwnerIds } from "./owner-store.js";
 import { startTempBanScheduler } from "./tempban-store.js";
 import { registerAntiGhostPing } from "./commands/antighostping.js";
+import { registerAntiEveryone } from "./commands/antieveryone.js";
 import { saveSuspectAccount } from "./suspect-accounts-db.js";
 import { getAntilinkConfig } from "./antilink-store.js";
 import { addWarning } from "./warnings-store.js";
@@ -350,6 +352,7 @@ export function startBot(): void {
   registerVoiceMonitor(client);
   registerGeneralLog(client);
   registerAntiGhostPing(client);
+  registerAntiEveryone(client);
   registerScamLinkDetection(client);
 
   // ──── GUILD MEMBER ADD ────
@@ -629,6 +632,35 @@ export function startBot(): void {
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
     await sendWelcomeMessage(client, member, guildId, cfg);
+
+    // ── Détection par mots-clés suspects (nom d'utilisateur) ──
+    {
+      const keywords = getSuspectKeywords(guildId);
+      const usernameLower = member.user.username.toLowerCase();
+      const displayNameLower = (member.displayName ?? "").toLowerCase();
+      const matchedKeyword = keywords.find((kw) => usernameLower.includes(kw) || displayNameLower.includes(kw));
+      if (matchedKeyword) {
+        const kwReasons = [`Nom contient le mot-clé suspect : \`${matchedKeyword}\``];
+        void saveSuspectAccount({
+          guildId,
+          guildName: member.guild.name,
+          userId: member.id,
+          userTag: member.user.tag,
+          accountAgeDays,
+          hasNoAvatar,
+          reasons: kwReasons,
+          actionTaken: "flagged",
+          securityLevel: secLvl,
+          vpnSuspicion: false,
+          userLocale: null,
+        }).catch(() => null);
+        await sendLog(client, logEmbed(0xf59e0b, "🕵️ Compte suspect — Mot-clé détecté", [
+          { name: "Membre", value: `${member.user.tag} (\`${member.id}\`)`, inline: true },
+          { name: "Serveur", value: `${member.guild.name} (\`${guildId}\`)`, inline: true },
+          { name: "Mot-clé", value: `\`${matchedKeyword}\``, inline: true },
+        ], { tag: "Automod", id: "0" }), { guildId });
+      }
+    }
 
     // ── Alerte compte suspect (si suspiciousCheckEnabled ou secLvl >= 2) ──
     if (isSuspect && (isSuspiciousCheckEnabled || secLvl >= 2)) {

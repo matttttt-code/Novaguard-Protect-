@@ -12,6 +12,7 @@ import {
 import { addSupportRequest, hasSupportRequest, saveSupportResponse } from "../pending-support-store.js";
 import { sendLog } from "../log.js";
 import { getConfig } from "../guild-config-store.js";
+import { saveUserCommand } from "../user-commands-db.js";
 
 const SUPPORT_STAFF_ROLE_ID = "1505490829513457745";
 
@@ -102,6 +103,16 @@ export async function handleSupportResponse(
   username: string
 ): Promise<void> {
   saveSupportResponse(userId, responseContent);
+
+  void saveUserCommand({
+    type: "support",
+    guildId,
+    guildName,
+    userId,
+    userTag: username,
+    data: { reponse: responseContent },
+  });
+
   const embed = new EmbedBuilder()
     .setColor(0x6366f1)
     .setTitle("📩 Nouvelle demande de support")

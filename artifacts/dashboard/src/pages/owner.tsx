@@ -72,6 +72,7 @@ type BotSettings = {
 type AntiProtection = {
   antiRaiderEnabled: boolean; antiRaiderThreshold: number; antiRaiderWindow: number; antiRaiderAction: string;
   antiMoveEnabled: boolean; antiMuteEnabled: boolean; antiDisconnectEnabled: boolean; antiBotEnabled: boolean;
+  antiEveryoneEnabled: boolean; antiEveryoneTimeoutSecs: number;
 };
 type NoteEntry = { id: number; content: string; moderator: string; moderatorId: string; timestamp: string };
 type NotesByUser = { userId: string; notes: NoteEntry[] };
@@ -293,6 +294,11 @@ export default function OwnerPanel() {
   const [stripRoleId, setStripRoleId] = useState("");
   const [strippingPerms, setStrippingPerms] = useState(false);
 
+  // ── Suspect keywords state ────────────────────────────────────────────────────
+  const [suspectKeywords, setSuspectKeywords] = useState<string[]>([]);
+  const [skLoading, setSkLoading] = useState(false);
+  const [skNewWord, setSkNewWord] = useState("");
+
   // ── Bot status state ────────────────────────────────────────────────────────
   const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
   const [botStatusLoading, setBotStatusLoading] = useState(false);
@@ -369,7 +375,7 @@ export default function OwnerPanel() {
   // ── User Commands state ────────────────────────────────────────────────────
   const [userCmds, setUserCmds] = useState<UserCmd[]>([]);
   const [ucLoading, setUcLoading] = useState(false);
-  const [ucTypeFilter, setUcTypeFilter] = useState<"all" | "rolerequest" | "suggestion">("all");
+  const [ucTypeFilter, setUcTypeFilter] = useState<"all" | "rolerequest" | "suggestion" | "support">("all");
   const [ucSearch, setUcSearch] = useState("");
 
   // ── Suspect Accounts state ─────────────────────────────────────────────────
@@ -547,6 +553,14 @@ export default function OwnerPanel() {
     } finally { setApLoading(false); }
   }, [guildId]);
 
+  const fetchSuspectKeywords = useCallback(async () => {
+    setSkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords`);
+      if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); }
+    } finally { setSkLoading(false); }
+  }, [guildId]);
+
   useEffect(() => {
     if (!unlocked) return;
     setLoading(true);
@@ -561,7 +575,8 @@ export default function OwnerPanel() {
     fetchRoles();
     fetchAutomod();
     fetchTickets();
-  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets]);
+    fetchSuspectKeywords();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets, fetchSuspectKeywords]);
 
   // ── Derived ────────────────────────────────────────────────────────────────
   const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
@@ -1206,6 +1221,18 @@ export default function OwnerPanel() {
       const fail = d.results?.filter(x => !x.ok).length ?? 0;
       toast({ title: `Action en masse — ${ok} OK, ${fail} échec(s)` });
     } finally { setSaBulkLoading(false); }
+  }
+
+  async function addSkWord() {
+    if (!skNewWord.trim() || !guildId) return;
+    setSkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords`, {
+        method: "POST",
+        body: JSON.stringify({ keyword: skNewWord.trim() }),
+      });
+      if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); setSkNewWord(""); }
+    } finally { setSkLoading(false); }
   }
 
   function exportSuspectsCsv(accounts: SuspectAcc[]) {
@@ -2357,6 +2384,28 @@ export default function OwnerPanel() {
                       </Button>
                     </div>
                   ))}
+
+                  {/* Anti-@everyone / @here */}
+                  <div className="flex items-start gap-3 p-3 rounded-md bg-muted/40">
+                    <span className="text-lg mt-0.5">📢</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">Anti-@everyone / @here</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Supprime le message et timeout l'auteur si un membre sans permission utilise @everyone ou @here.</p>
+                      {antiProtection.antiEveryoneEnabled && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs text-muted-foreground">Durée timeout (s)</label>
+                          <Input type="number" min={10} max={3600} value={antiProtection.antiEveryoneTimeoutSecs}
+                            onChange={(e) => setAntiProtection({ ...antiProtection, antiEveryoneTimeoutSecs: Number(e.target.value) })}
+                            className="h-6 text-xs font-mono w-24" />
+                        </div>
+                      )}
+                    </div>
+                    <Button size="sm" variant={antiProtection.antiEveryoneEnabled ? "default" : "outline"}
+                      onClick={() => setAntiProtection({ ...antiProtection, antiEveryoneEnabled: !antiProtection.antiEveryoneEnabled })}
+                      className="gap-1.5 w-28 shrink-0">
+                      {antiProtection.antiEveryoneEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
 
@@ -4025,11 +4074,11 @@ export default function OwnerPanel() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex flex-wrap gap-2">
-                <div className="flex gap-1">
-                  {(["all", "rolerequest", "suggestion"] as const).map((t) => (
+                <div className="flex gap-1 flex-wrap">
+                  {(["all", "rolerequest", "suggestion", "support"] as const).map((t) => (
                     <Button key={t} size="sm" variant={ucTypeFilter === t ? "default" : "outline"} className="text-xs h-7"
                       onClick={() => setUcTypeFilter(t)}>
-                      {t === "all" ? "Tout" : t === "rolerequest" ? "📋 Demandes rôle" : "💡 Suggestions"}
+                      {t === "all" ? "Tout" : t === "rolerequest" ? "📋 Demandes rôle" : t === "suggestion" ? "💡 Suggestions" : "🎫 Support"}
                     </Button>
                   ))}
                 </div>
@@ -4055,12 +4104,13 @@ export default function OwnerPanel() {
                     )
                     .map((c) => {
                       const isRoleReq = c.type === "rolerequest";
+                      const isSupport = c.type === "support";
                       const d = c.data;
                       return (
                         <div key={c.id} className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${isRoleReq ? "bg-indigo-500/10 text-indigo-500 border-indigo-300" : "bg-amber-500/10 text-amber-600 border-amber-300"}`}>
-                              {isRoleReq ? "📋 rôle" : "💡 suggestion"}
+                            <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${isRoleReq ? "bg-indigo-500/10 text-indigo-500 border-indigo-300" : isSupport ? "bg-violet-500/10 text-violet-600 border-violet-300" : "bg-amber-500/10 text-amber-600 border-amber-300"}`}>
+                              {isRoleReq ? "📋 rôle" : isSupport ? "🎫 support" : "💡 suggestion"}
                             </Badge>
                             <span className="text-xs font-medium">{c.userTag}</span>
                             <span className="font-mono text-[10px] text-muted-foreground">{c.userId}</span>
@@ -4072,6 +4122,10 @@ export default function OwnerPanel() {
                               <p><span className="text-muted-foreground">Rôle demandé :</span> <span className="font-medium">{String(d.roleName ?? "")}</span></p>
                               <p><span className="text-muted-foreground">Raison :</span> {String(d.reason ?? "")}</p>
                               <p className="text-muted-foreground">Via : {String(d.via ?? "")}</p>
+                            </div>
+                          ) : isSupport ? (
+                            <div className="text-xs space-y-0.5">
+                              <p className="break-words"><span className="text-muted-foreground">Réponse :</span> {String(d.reponse ?? "")}</p>
                             </div>
                           ) : (
                             <div className="text-xs space-y-0.5">
@@ -4090,6 +4144,55 @@ export default function OwnerPanel() {
 
         {/* ── COMPTES SUSPECTS ────────────────────────────────────────────── */}
         <TabsContent value="suspectaccounts" className="space-y-4">
+
+          {/* Mots-clés auto-suspects */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-amber-500" />
+                Mots-clés auto-suspects
+              </CardTitle>
+              <CardDescription>
+                Tout nouveau membre dont le nom d'utilisateur ou le pseudo contient l'un de ces mots-clés sera automatiquement signalé comme suspect.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Ajouter un mot-clé…"
+                  value={skNewWord}
+                  onChange={(e) => setSkNewWord(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkWord(); } }}
+                  className="h-8 text-xs font-mono"
+                />
+                <Button size="sm" className="h-8 text-xs gap-1 shrink-0" onClick={addSkWord} disabled={skLoading || !skNewWord.trim()}>
+                  {skLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "＋"} Ajouter
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1 shrink-0" onClick={fetchSuspectKeywords} disabled={skLoading}>
+                  {skLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"}
+                </Button>
+              </div>
+              {suspectKeywords.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-3">Aucun mot-clé configuré. Les arrivées ne seront pas filtrées par nom.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {suspectKeywords.map((kw) => (
+                    <Badge key={kw} variant="outline" className="text-xs font-mono gap-1.5 pr-1 bg-amber-500/10 text-amber-700 border-amber-300 dark:text-amber-400">
+                      {kw}
+                      <button
+                        className="ml-0.5 text-amber-500 hover:text-red-500 transition-colors"
+                        onClick={async () => {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords/${encodeURIComponent(kw)}`, { method: "DELETE" });
+                          if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); }
+                        }}
+                      >✕</button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Stats résumées */}
           {suspectAccounts.length > 0 && (() => {
             const guilds = [...new Set(suspectAccounts.map(s => s.guildId))];

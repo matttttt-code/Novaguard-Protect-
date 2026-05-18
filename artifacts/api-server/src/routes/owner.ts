@@ -12,7 +12,7 @@ import {
   PresenceStatusData,
   AuditLogEvent,
 } from "discord.js";
-import { getConfig, setConfig } from "../bot/guild-config-store.js";
+import { getConfig, setConfig, getSuspectKeywords, addSuspectKeyword, removeSuspectKeyword } from "../bot/guild-config-store.js";
 import { getAntilinkConfig, setAntilinkConfig } from "../bot/antilink-store.js";
 import { addToGlobalBlacklist, removeFromGlobalBlacklist, addToBlacklist, removeFromBlacklist } from "../bot/blacklist-store.js";
 import { sendAll as sendErrTest } from "../bot/commands/errortest.js";
@@ -504,8 +504,10 @@ import { getGuildSettings, upsertGuildSettings } from "../bot/guild-settings-db.
 
 router.get("/owner/guilds/:guildId/settings", async (req, res) => {
   try {
-    const settings = await getGuildSettings(req.params["guildId"] as string);
-    res.json(settings);
+    const guildId = req.params["guildId"] as string;
+    const settings = await getGuildSettings(guildId);
+    const cfg = getConfig(guildId);
+    res.json({ ...settings, captchaEnabled: cfg.captchaEnabled || settings.captchaEnabled });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1480,6 +1482,8 @@ router.get("/owner/guilds/:guildId/anti-protection", (req, res) => {
     antiMuteEnabled: cfg.antiMuteEnabled,
     antiDisconnectEnabled: cfg.antiDisconnectEnabled,
     antiBotEnabled: cfg.antiBotEnabled,
+    antiEveryoneEnabled: cfg.antiEveryoneEnabled,
+    antiEveryoneTimeoutSecs: cfg.antiEveryoneTimeoutSecs,
   });
 });
 
@@ -1489,6 +1493,7 @@ router.patch("/owner/guilds/:guildId/anti-protection", (req, res) => {
   const allowed = [
     "antiRaiderEnabled", "antiRaiderThreshold", "antiRaiderWindow", "antiRaiderAction",
     "antiMoveEnabled", "antiMuteEnabled", "antiDisconnectEnabled", "antiBotEnabled",
+    "antiEveryoneEnabled", "antiEveryoneTimeoutSecs",
   ] as const;
   const patch: Record<string, unknown> = {};
   for (const key of allowed) {
@@ -1507,7 +1512,31 @@ router.patch("/owner/guilds/:guildId/anti-protection", (req, res) => {
     antiMuteEnabled: cfg.antiMuteEnabled,
     antiDisconnectEnabled: cfg.antiDisconnectEnabled,
     antiBotEnabled: cfg.antiBotEnabled,
+    antiEveryoneEnabled: cfg.antiEveryoneEnabled,
+    antiEveryoneTimeoutSecs: cfg.antiEveryoneTimeoutSecs,
   });
+});
+
+// ── Suspect keywords ──────────────────────────────────────────────────────────
+router.get("/owner/guilds/:guildId/suspect-keywords", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ keywords: getSuspectKeywords(guildId) });
+});
+
+router.post("/owner/guilds/:guildId/suspect-keywords", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { keyword } = (req.body ?? {}) as { keyword?: string };
+  if (!keyword || typeof keyword !== "string" || !keyword.trim()) {
+    res.status(400).json({ error: "keyword requis" }); return;
+  }
+  addSuspectKeyword(guildId, keyword.trim().toLowerCase());
+  res.json({ keywords: getSuspectKeywords(guildId) });
+});
+
+router.delete("/owner/guilds/:guildId/suspect-keywords/:keyword", (req, res) => {
+  const { guildId, keyword } = req.params as { guildId: string; keyword: string };
+  removeSuspectKeyword(guildId, keyword);
+  res.json({ keywords: getSuspectKeywords(guildId) });
 });
 
 // ── POST /api/owner/guilds/:guildId/roles/:roleId/strip-permissions ───────────
