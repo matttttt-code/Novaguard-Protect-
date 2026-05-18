@@ -17,6 +17,7 @@ import {
   ChannelType,
   type ApplicationCommandDataResolvable,
   Guild,
+  GuildMember,
   User,
   Message,
   GuildVerificationLevel,
@@ -79,6 +80,9 @@ import { handleSupportResponse } from "./commands/support.js";
 import { openTicket, getTicketByChannel, getTicketChannelByUser, closeTicket, isTicketChannel, nextTicketNumber } from "./ticket-store.js";
 import { getAlertPing } from "./alert-ping.js";
 import { addCaptchaLog } from "./captcha-log-db.js";
+import { isQuarantined, addQuarantine } from "./quarantine-store.js";
+import { recordStaffCommand, RATE_WINDOW_SECONDS } from "./staff-ratelimit.js";
+import { registerVoiceMonitor } from "./voice-monitor.js";
 
 function isValidId(s: string): boolean {
   return /^\d{17,20}$/.test(s.trim());
@@ -221,6 +225,38 @@ export function startBot(): void {
     const command = commands.find((c) => c.data.name === interaction.commandName);
     if (!command) return;
 
+    // ── Quarantaine + limite de taux staff (slash commands) ───────────────────
+    if (interaction.guildId && !interaction.user.bot) {
+      if (isQuarantined(interaction.guildId, interaction.user.id)) {
+        const msg = "🔒 Vous êtes en **quarantaine**. Seul un propriétaire du bot peut vous libérer depuis le panel owner.";
+        try {
+          if (interaction.replied || interaction.deferred) await interaction.followUp({ content: msg, ephemeral: true });
+          else await interaction.reply({ content: msg, ephemeral: true });
+        } catch { /* interaction expirée */ }
+        return;
+      }
+      const slashMember = interaction.member as GuildMember | null;
+      if (slashMember && interaction.guild && interaction.guild.ownerId !== interaction.user.id) {
+        const STAFF_PERMS = [PermissionFlagsBits.KickMembers, PermissionFlagsBits.BanMembers, PermissionFlagsBits.ModerateMembers, PermissionFlagsBits.ManageGuild];
+        const isStaff = STAFF_PERMS.some((p) => slashMember.permissions.has(p));
+        if (isStaff) {
+          const { exceeded, count } = recordStaffCommand(interaction.guildId, interaction.user.id);
+          if (exceeded) {
+            const reason = `Utilisation excessive de commandes (${count} en ${RATE_WINDOW_SECONDS}s)`;
+            addQuarantine({ userId: interaction.user.id, userTag: interaction.user.tag, guildId: interaction.guildId, reason, triggerCount: count, windowSeconds: RATE_WINDOW_SECONDS, timestamp: new Date().toISOString() });
+            try { await slashMember.disableCommunicationUntil(new Date(Date.now() + 27 * 24 * 3600 * 1000), reason); } catch { /* perm manquante */ }
+            void sendLogDM(client, new EmbedBuilder().setTitle("🔒 Quarantaine automatique").setDescription(`<@${interaction.user.id}> (\`${interaction.user.tag}\`) sur **${interaction.guild.name}**\n> ${reason}`).setColor(0xef4444).setTimestamp()).catch(() => null);
+            const msg = "🔒 Vous avez été mis en **quarantaine** pour utilisation excessive de commandes. Un propriétaire du bot doit vous libérer depuis le panel owner.";
+            try {
+              if (interaction.replied || interaction.deferred) await interaction.followUp({ content: msg, ephemeral: true });
+              else await interaction.reply({ content: msg, ephemeral: true });
+            } catch { /* expirée */ }
+            return;
+          }
+        }
+      }
+    }
+
     try {
       await command.execute(interaction);
       logCommandExec(interaction.guild?.id ?? null, interaction.commandName, "slash", interaction.user.tag, interaction.user.id, true);
@@ -293,6 +329,7 @@ export function startBot(): void {
 
   registerAutoMod(client, hasMessageContent);
   registerPrefixHandler(client, prefixCommands);
+  registerVoiceMonitor(client);
   registerGeneralLog(client);
   registerAntiGhostPing(client);
   registerScamLinkDetection(client);

@@ -72,6 +72,8 @@ type NotesByUser = { userId: string; notes: NoteEntry[] };
 type InviteBlEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; timestamp: string };
 type ActionLogEntry = { timestamp: string; method: string; path: string; body: Record<string, unknown> };
 type GuildInfo = { id: string; name: string; memberCount: number; iconURL: string | null };
+type QuarantineEntry = { userId: string; userTag: string; guildId: string; reason: string; triggerCount: number; windowSeconds: number; timestamp: string };
+type VoiceEvent = { timestamp: string; guildId: string; userId: string; userTag: string; type: string; channelId: string | null; channelName: string | null; fromChannelId?: string | null; fromChannelName?: string | null };
 
 const CHANNEL_TYPE_ICON: Record<number, React.ReactNode> = {
   0: <Hash className="h-3.5 w-3.5" />, 2: <Volume2 className="h-3.5 w-3.5" />,
@@ -282,6 +284,16 @@ export default function OwnerPanel() {
   // ── Action log state ───────────────────────────────────────────────────────
   const [actionLog, setActionLog] = useState<ActionLogEntry[]>([]);
   const [actionLogLoading, setActionLogLoading] = useState(false);
+
+  // ── Quarantaine state ──────────────────────────────────────────────────────
+  const [quarantineList, setQuarantineList] = useState<QuarantineEntry[]>([]);
+  const [quarantineLoading, setQuarantineLoading] = useState(false);
+  const [liftingQ, setLiftingQ] = useState("");
+
+  // ── Voice log state ────────────────────────────────────────────────────────
+  const [voiceLog, setVoiceLog] = useState<VoiceEvent[]>([]);
+  const [voiceLogLoading, setVoiceLogLoading] = useState(false);
+  const [voiceSearch, setVoiceSearch] = useState("");
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -867,6 +879,41 @@ export default function OwnerPanel() {
     } finally { setActionLogLoading(false); }
   }, []);
 
+  // ── Quarantaine actions ────────────────────────────────────────────────────
+  const fetchQuarantine = useCallback(async () => {
+    setQuarantineLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/quarantine`);
+      if (r.ok) setQuarantineList(await r.json());
+    } finally { setQuarantineLoading(false); }
+  }, [guildId]);
+
+  async function liftQuarantine(userId: string) {
+    setLiftingQ(userId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/quarantine/${userId}`, { method: "DELETE" });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Quarantaine levée ✓" }); await fetchQuarantine(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setLiftingQ(""); }
+  }
+
+  // ── Voice log actions ──────────────────────────────────────────────────────
+  const fetchVoiceLog = useCallback(async () => {
+    setVoiceLogLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-log`);
+      if (r.ok) setVoiceLog(await r.json());
+    } finally { setVoiceLogLoading(false); }
+  }, [guildId]);
+
+  async function clearVoiceLogAction() {
+    if (!confirm("Effacer tout le journal vocal ?")) return;
+    await apiFetch(`/api/owner/guilds/${guildId}/voice-log`, { method: "DELETE" });
+    setVoiceLog([]);
+    toast({ title: "Journal vocal effacé ✓" });
+  }
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -983,6 +1030,8 @@ export default function OwnerPanel() {
           <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
           <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
           <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
+          <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
+          <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
         </TabsList>
 
         {/* ── Messages ──────────────────────────────────────────────────────── */}
@@ -2561,6 +2610,126 @@ export default function OwnerPanel() {
                       )}
                     </div>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Quarantaine ───────────────────────────────────────────────────── */}
+        <TabsContent value="quarantine" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔒 Quarantaine Staff ({quarantineList.length})</CardTitle>
+              <CardDescription>
+                Membres staff mis en quarantaine automatiquement (≥ 10 commandes en 30s). Le timeout Discord de 27 jours est appliqué.
+                <br />
+                <span className="text-amber-500 font-medium">Seul ce panel peut lever une quarantaine.</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button variant="outline" size="sm" onClick={fetchQuarantine} disabled={quarantineLoading} className="gap-1.5">
+                {quarantineLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Actualiser
+              </Button>
+              {quarantineLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : quarantineList.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+                  <ShieldOff className="h-8 w-8 opacity-30" />
+                  <p className="text-sm">Aucun membre en quarantaine sur ce serveur.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {quarantineList.map((entry) => (
+                    <div key={entry.userId} className="flex items-start gap-3 p-4 border border-amber-500/30 bg-amber-500/5 rounded-lg">
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="destructive" className="text-xs">QUARANTAINE</Badge>
+                          <span className="font-mono text-sm font-semibold">{entry.userTag}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono">{entry.userId}</p>
+                        <p className="text-xs">
+                          <span className="text-amber-400 font-medium">Déclencheur :</span> {entry.triggerCount} commandes en {entry.windowSeconds}s
+                        </p>
+                        <p className="text-xs text-muted-foreground">{entry.reason}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(entry.timestamp).toLocaleString("fr-FR")}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => liftQuarantine(entry.userId)}
+                        disabled={liftingQ === entry.userId}
+                        className="gap-1.5 shrink-0 border-green-500/50 text-green-500 hover:bg-green-500/10"
+                      >
+                        {liftingQ === entry.userId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Unlock className="h-3 w-3" />}
+                        Lever
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Vocaux ────────────────────────────────────────────────────────── */}
+        <TabsContent value="voicelog" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎙️ Surveillance Vocaux ({voiceLog.length})</CardTitle>
+              <CardDescription>Événements vocaux en temps réel (max 500 par serveur, en mémoire). Se réinitialise au redémarrage du bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={voiceSearch} onChange={(e) => setVoiceSearch(e.target.value)} placeholder="Filtrer par tag, userId ou salon…" className="text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchVoiceLog} disabled={voiceLogLoading} className="gap-1.5 shrink-0">
+                  {voiceLogLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={clearVoiceLogAction} className="gap-1.5 shrink-0">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+              {voiceLogLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : voiceLog.filter((e) => !voiceSearch || e.userTag.toLowerCase().includes(voiceSearch.toLowerCase()) || e.userId.includes(voiceSearch) || (e.channelName ?? "").toLowerCase().includes(voiceSearch.toLowerCase())).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun événement vocal enregistré.</p>
+              ) : (
+                <div className="space-y-0.5 max-h-[40rem] overflow-y-auto font-mono text-xs">
+                  {voiceLog
+                    .filter((e) => !voiceSearch || e.userTag.toLowerCase().includes(voiceSearch.toLowerCase()) || e.userId.includes(voiceSearch) || (e.channelName ?? "").toLowerCase().includes(voiceSearch.toLowerCase()))
+                    .map((e, i) => {
+                      const typeColors: Record<string, string> = {
+                        join: "text-green-400", leave: "text-red-400", move: "text-blue-400",
+                        mute: "text-yellow-400", unmute: "text-green-300",
+                        sourd: "text-orange-400", "non-sourd": "text-green-300",
+                        "mute-serveur": "text-red-500", "unmute-serveur": "text-green-400",
+                        "sourd-serveur": "text-red-500", "non-sourd-serveur": "text-green-400",
+                        "stream-début": "text-purple-400", "stream-fin": "text-purple-300",
+                        "caméra": "text-cyan-400",
+                      };
+                      const typeIcons: Record<string, string> = {
+                        join: "🟢", leave: "🔴", move: "🔄",
+                        mute: "🔇", unmute: "🔊", sourd: "🎧", "non-sourd": "🎙️",
+                        "mute-serveur": "🚫", "unmute-serveur": "✅",
+                        "sourd-serveur": "🚫", "non-sourd-serveur": "✅",
+                        "stream-début": "📡", "stream-fin": "📴", caméra: "📷",
+                      };
+                      return (
+                        <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-muted/40">
+                          <span className="text-muted-foreground shrink-0 w-32">{new Date(e.timestamp).toLocaleTimeString("fr-FR")}</span>
+                          <span className={`shrink-0 w-28 ${typeColors[e.type] ?? "text-foreground"}`}>
+                            {typeIcons[e.type] ?? "•"} {e.type}
+                          </span>
+                          <span className="text-foreground font-semibold shrink-0 max-w-[140px] truncate">{e.userTag}</span>
+                          <span className="text-muted-foreground">
+                            {e.type === "move"
+                              ? `${e.fromChannelName ?? e.fromChannelId} → ${e.channelName ?? e.channelId}`
+                              : `# ${e.channelName ?? e.channelId}`}
+                          </span>
+                        </div>
+                      );
+                    })}
                 </div>
               )}
             </CardContent>

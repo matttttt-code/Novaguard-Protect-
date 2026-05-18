@@ -21,6 +21,9 @@ import { addActionLog, getActionLog } from "../bot/owner-action-log.js";
 import { getAllNotesForGuild, getNotes, deleteNote, clearNotes } from "../bot/notes-store.js";
 import { getAllWarningsForGuild } from "../bot/warnings-store.js";
 import { getInviteBlacklist, removeInviteBlacklist } from "../bot/invite-blacklist-store.js";
+import { getQuarantineList, removeQuarantine, QuarantineEntry } from "../bot/quarantine-store.js";
+import { resetStaffWindow } from "../bot/staff-ratelimit.js";
+import { getVoiceLog, clearVoiceLog } from "../bot/voice-monitor.js";
 
 const router = Router();
 
@@ -1092,6 +1095,43 @@ router.delete("/owner/guilds/:guildId/invite-blacklist/:userId", (req, res) => {
   const { guildId, userId } = req.params as Record<string, string>;
   const ok = removeInviteBlacklist(guildId, userId);
   res.json({ ok });
+});
+
+// ── GET /api/owner/guilds/:guildId/quarantine ─────────────────────────────────
+router.get("/owner/guilds/:guildId/quarantine", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getQuarantineList(guildId));
+});
+
+// ── DELETE /api/owner/guilds/:guildId/quarantine/:userId (lever la quarantaine)
+router.delete("/owner/guilds/:guildId/quarantine/:userId", async (req, res) => {
+  const { guildId, userId } = req.params as Record<string, string>;
+  const client = getClient();
+  const removed = removeQuarantine(guildId, userId);
+  resetStaffWindow(guildId, userId);
+  if (client?.isReady()) {
+    try {
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      const member = guild ? await guild.members.fetch(userId).catch(() => null) : null;
+      if (member?.isCommunicationDisabled()) {
+        await member.disableCommunicationUntil(null, "Quarantaine levée depuis le panel owner");
+      }
+    } catch { /* ignore */ }
+  }
+  res.json({ ok: removed });
+});
+
+// ── GET /api/owner/guilds/:guildId/voice-log ──────────────────────────────────
+router.get("/owner/guilds/:guildId/voice-log", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getVoiceLog(guildId));
+});
+
+// ── DELETE /api/owner/guilds/:guildId/voice-log ───────────────────────────────
+router.delete("/owner/guilds/:guildId/voice-log", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  clearVoiceLog(guildId);
+  res.json({ ok: true });
 });
 
 // ── Error Test (alertes DM) ───────────────────────────────────────────────────
