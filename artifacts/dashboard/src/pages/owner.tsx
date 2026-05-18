@@ -333,8 +333,12 @@ export default function OwnerPanel() {
 
   // ── Spy Members state ──────────────────────────────────────────────────────
   interface SpyMember { id: string; tag: string; username: string; joinedAt: string | null; }
+  interface SpyServer { id: string; name: string; memberCount: number; joinedAt: string | null; }
+  const [spyMode, setSpyMode] = useState<"guild" | "user">("guild");
   const [spyGuildId, setSpyGuildId] = useState("");
+  const [spyUserId, setSpyUserId] = useState("");
   const [spyResult, setSpyResult] = useState<{ guildName: string; memberCount: number; members: SpyMember[] } | null>(null);
+  const [spyUserResult, setSpyUserResult] = useState<{ userId: string; serverCount: number; servers: SpyServer[] } | null>(null);
   const [spyLoading, setSpyLoading] = useState(false);
   const [spyBanGuildId, setSpyBanGuildId] = useState("");
   const [spyBanReason, setSpyBanReason] = useState("");
@@ -4019,11 +4023,32 @@ export default function OwnerPanel() {
                 <Users className="h-4 w-4 text-orange-400" /> Membres d'un Serveur
               </CardTitle>
               <CardDescription>
-                Récupère tous les IDs des membres d'un serveur où le bot est présent, puis bannit la liste entière d'un de vos serveurs.
+                Récupère tous les IDs des membres d'un serveur, ou cherche tous les serveurs communs avec un compte par son ID.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Récupérer */}
+              {/* Toggle mode */}
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant={spyMode === "guild" ? "default" : "outline"}
+                  className="gap-1.5 text-xs"
+                  onClick={() => { setSpyMode("guild"); setSpyResult(null); setSpyUserResult(null); }}
+                >
+                  <Users className="h-3.5 w-3.5" /> Par serveur
+                </Button>
+                <Button
+                  size="sm"
+                  variant={spyMode === "user" ? "default" : "outline"}
+                  className="gap-1.5 text-xs"
+                  onClick={() => { setSpyMode("user"); setSpyResult(null); setSpyUserResult(null); }}
+                >
+                  <Search className="h-3.5 w-3.5" /> Par ID de compte
+                </Button>
+              </div>
+
+              {/* Mode GUILD — récupérer membres */}
+              {spyMode === "guild" && (
               <div className="rounded-lg border border-border p-4 space-y-3">
                 <p className="text-sm font-semibold">Récupérer les membres</p>
                 <div className="flex gap-2">
@@ -4051,6 +4076,60 @@ export default function OwnerPanel() {
                   </Button>
                 </div>
               </div>
+              )}
+
+              {/* Mode USER — serveurs communs */}
+              {spyMode === "user" && (
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Chercher par ID de compte</p>
+                <p className="text-xs text-muted-foreground">Retourne tous les serveurs où le bot est présent ET où ce compte est membre.</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={spyUserId}
+                    onChange={(e) => setSpyUserId(e.target.value.trim())}
+                    placeholder="ID du compte Discord…"
+                    className="font-mono text-sm flex-1"
+                  />
+                  <Button
+                    disabled={spyLoading || !spyUserId.trim()}
+                    className="gap-2 shrink-0"
+                    onClick={async () => {
+                      setSpyLoading(true);
+                      setSpyUserResult(null);
+                      try {
+                        const r = await apiFetch(`/api/owner/user-servers?userId=${encodeURIComponent(spyUserId)}`);
+                        if (r.ok) { setSpyUserResult(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setSpyLoading(false); }
+                    }}
+                  >
+                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Chercher
+                  </Button>
+                </div>
+                {spyUserResult && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold">
+                      ID <span className="font-mono text-orange-400">{spyUserResult.userId}</span> — trouvé dans <span className="text-orange-400">{spyUserResult.serverCount}</span> serveur(s)
+                    </p>
+                    {spyUserResult.serverCount === 0 ? (
+                      <div className="text-center text-muted-foreground py-6 text-sm">Compte introuvable sur aucun serveur commun avec le bot.</div>
+                    ) : (
+                      <div className="rounded-lg border border-border bg-muted/10 divide-y divide-border/50 max-h-64 overflow-y-auto">
+                        {spyUserResult.servers.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <span className="font-mono text-muted-foreground w-36 shrink-0">{s.id}</span>
+                            <span className="flex-1 truncate font-medium">{s.name}</span>
+                            <span className="text-muted-foreground shrink-0">{s.memberCount} mbr</span>
+                            {s.joinedAt && <span className="text-muted-foreground shrink-0">{new Date(s.joinedAt).toLocaleDateString("fr-FR")}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              )}
 
               {/* Résultats */}
               {spyResult && (

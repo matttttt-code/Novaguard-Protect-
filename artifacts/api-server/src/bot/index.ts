@@ -59,6 +59,7 @@ import {
   generateChallenge, setChallengeMessageId,
 } from "./captcha-store.js";
 import { buildDashboardEmbed, buildDashboardRows } from "./commands/dashboard.js";
+import { buildTranscriptContent, saveTranscriptToDB } from "./transcript-db.js";
 import { registerGeneralLog } from "./general-log.js";
 import { setClient } from "./client-store.js";
 import { setOwnerIds } from "./owner-store.js";
@@ -1985,6 +1986,25 @@ async function handleTicketClose(interaction: ButtonInteraction): Promise<void> 
   const isOwner = ticket?.userId === user.id;
   if (!isStaff && !isOwner) { await interaction.reply({ content: "❌ Seul le staff ou le créateur du ticket peut le fermer.", ephemeral: true }); return; }
   await interaction.reply({ content: "🔒 Fermeture du ticket...", ephemeral: true });
+  // Sauvegarde le transcript avant suppression du salon
+  try {
+    const ticketData = ticket ?? {
+      channelId: channel.id,
+      ticketNumber: Number(channel.name.replace(/\D/g, "").slice(-4)) || 0,
+      userId: "unknown",
+      username: "Inconnu",
+      guildId: guild.id,
+      createdAt: new Date(),
+      claimedBy: null,
+      claimedById: null,
+    };
+    const { content, count } = await buildTranscriptContent(channel);
+    await saveTranscriptToDB({
+      ticket: ticketData, guildName: guild.name, channelName: channel.name,
+      content, messageCount: count, closedBy: user.tag, closedById: user.id,
+      reason: "Fermé via bouton Discord",
+    });
+  } catch { /* non-bloquant */ }
   const embed = new EmbedBuilder().setColor(0xef4444).setTitle("🔒 Ticket fermé")
     .addFields({ name: "Fermé par", value: user.tag, inline: true }, ...(ticket ? [{ name: "Créateur", value: `<@${ticket.userId}>`, inline: true }] : []))
     .setFooter({ text: "Ce salon sera supprimé dans 5 secondes." }).setTimestamp();

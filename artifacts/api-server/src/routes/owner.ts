@@ -1772,6 +1772,23 @@ router.get("/owner/server-members", async (req, res) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get("/owner/user-servers", async (req, res) => {
+  const { userId } = req.query as { userId?: string };
+  if (!userId?.trim()) { res.status(400).json({ error: "userId requis" }); return; }
+  const client = getClient();
+  if (!client) { res.status(503).json({ error: "Bot non connecté" }); return; }
+  try {
+    const results: { id: string; name: string; memberCount: number; joinedAt: string | null }[] = [];
+    for (const [, guild] of client.guilds.cache) {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (member) {
+        results.push({ id: guild.id, name: guild.name, memberCount: guild.memberCount, joinedAt: member.joinedAt?.toISOString() ?? null });
+      }
+    }
+    res.json({ userId, serverCount: results.length, servers: results });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/owner/guilds/:guildId/ban-list", async (req, res) => {
   const { guildId } = req.params as { guildId: string };
   const { userIds, reason } = (req.body ?? {}) as { userIds?: string[]; reason?: string };
