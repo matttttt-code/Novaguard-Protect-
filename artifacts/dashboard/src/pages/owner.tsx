@@ -4175,71 +4175,22 @@ export default function OwnerPanel() {
                 <Users className="h-4 w-4 text-orange-400" /> Membres d'un Serveur
               </CardTitle>
               <CardDescription>
-                Récupère tous les IDs des membres d'un serveur, ou cherche tous les serveurs communs avec un compte par son ID.
+                Entre un ID de compte pour voir sur quels serveurs du bot il est présent, puis choisis n'importe quel serveur du bot pour récupérer ses membres.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {/* Toggle mode */}
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant={spyMode === "guild" ? "default" : "outline"}
-                  className="gap-1.5 text-xs"
-                  onClick={() => { setSpyMode("guild"); setSpyResult(null); setSpyUserResult(null); }}
-                >
-                  <Users className="h-3.5 w-3.5" /> Par serveur
-                </Button>
-                <Button
-                  size="sm"
-                  variant={spyMode === "user" ? "default" : "outline"}
-                  className="gap-1.5 text-xs"
-                  onClick={() => { setSpyMode("user"); setSpyResult(null); setSpyUserResult(null); }}
-                >
-                  <Search className="h-3.5 w-3.5" /> Par ID de compte
-                </Button>
-              </div>
 
-              {/* Mode GUILD — récupérer membres */}
-              {spyMode === "guild" && (
+              {/* ── Étape 1 : trouver les serveurs d'un compte ─────────────── */}
               <div className="rounded-lg border border-border p-4 space-y-3">
-                <p className="text-sm font-semibold">Récupérer les membres</p>
-                <div className="flex gap-2">
-                  <Input
-                    value={spyGuildId}
-                    onChange={(e) => setSpyGuildId(e.target.value.trim())}
-                    placeholder="ID du serveur cible…"
-                    className="font-mono text-sm flex-1"
-                  />
-                  <Button
-                    disabled={spyLoading || !spyGuildId.trim()}
-                    className="gap-2 shrink-0"
-                    onClick={async () => {
-                      setSpyLoading(true);
-                      setSpyResult(null);
-                      try {
-                        const r = await apiFetch(`/api/owner/server-members?guildId=${encodeURIComponent(spyGuildId)}`);
-                        if (r.ok) { setSpyResult(await r.json()); setSpyFilter(""); }
-                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
-                      } finally { setSpyLoading(false); }
-                    }}
-                  >
-                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
-                    Récupérer
-                  </Button>
+                <div>
+                  <p className="text-sm font-semibold">Étape 1 — Trouver les serveurs d'un compte</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Le bot scanne tous ses serveurs et indique lesquels ont ce membre. Utilise ça pour savoir où cibler.</p>
                 </div>
-              </div>
-              )}
-
-              {/* Mode USER — serveurs communs */}
-              {spyMode === "user" && (
-              <div className="rounded-lg border border-border p-4 space-y-3">
-                <p className="text-sm font-semibold">Chercher par ID de compte</p>
-                <p className="text-xs text-muted-foreground">Entre ton ID Discord — le bot liste tous les serveurs où vous êtes tous les deux présents. Clique sur un serveur pour récupérer ses membres.</p>
                 <div className="flex gap-2">
                   <Input
                     value={spyUserId}
                     onChange={(e) => setSpyUserId(e.target.value.trim())}
-                    placeholder="Ton ID Discord…"
+                    placeholder="ID du compte Discord à rechercher…"
                     className="font-mono text-sm flex-1"
                   />
                   <Button
@@ -4248,7 +4199,6 @@ export default function OwnerPanel() {
                     onClick={async () => {
                       setSpyLoading(true);
                       setSpyUserResult(null);
-                      setSpyResult(null);
                       try {
                         const r = await apiFetch(`/api/owner/user-servers?userId=${encodeURIComponent(spyUserId)}`);
                         if (r.ok) { setSpyUserResult(await r.json()); }
@@ -4262,33 +4212,18 @@ export default function OwnerPanel() {
                 </div>
                 {spyUserResult && (
                   <div className="space-y-2">
-                    <p className="text-sm font-semibold">
-                      Trouvé dans <span className="text-orange-400">{spyUserResult.serverCount}</span> serveur(s) — clique pour récupérer les membres
+                    <p className="text-xs text-muted-foreground">
+                      Compte présent dans <span className="text-orange-400 font-semibold">{spyUserResult.serverCount}</span> serveur(s) du bot
                     </p>
                     {spyUserResult.serverCount === 0 ? (
-                      <div className="text-center text-muted-foreground py-6 text-sm">Compte introuvable sur aucun serveur commun avec le bot.</div>
+                      <div className="text-center text-muted-foreground py-4 text-xs">Compte introuvable sur aucun serveur du bot.</div>
                     ) : (
-                      <div className="rounded-lg border border-border bg-muted/10 divide-y divide-border/50 max-h-64 overflow-y-auto">
+                      <div className="rounded-lg border border-border bg-muted/10 divide-y divide-border/50 max-h-48 overflow-y-auto">
                         {spyUserResult.servers.map((s) => (
-                          <div
-                            key={s.id}
-                            className="flex items-center gap-2 px-3 py-2 text-xs cursor-pointer hover:bg-orange-500/10 transition-colors group"
-                            onClick={async () => {
-                              setSpyLoading(true);
-                              setSpyResult(null);
-                              setSpyGuildId(s.id);
-                              setSpyFilter("");
-                              try {
-                                const r = await apiFetch(`/api/owner/server-members?guildId=${encodeURIComponent(s.id)}`);
-                                if (r.ok) { setSpyResult(await r.json()); }
-                                else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
-                              } finally { setSpyLoading(false); }
-                            }}
-                          >
-                            <span className="font-mono text-muted-foreground w-36 shrink-0">{s.id}</span>
-                            <span className="flex-1 truncate font-medium group-hover:text-orange-400 transition-colors">{s.name}</span>
+                          <div key={s.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <span className="font-mono text-muted-foreground w-36 shrink-0 select-all">{s.id}</span>
+                            <span className="flex-1 truncate font-medium">{s.name}</span>
                             <span className="text-muted-foreground shrink-0">{s.memberCount} mbr</span>
-                            <Search className="h-3 w-3 text-muted-foreground group-hover:text-orange-400 shrink-0 transition-colors" />
                           </div>
                         ))}
                       </div>
@@ -4296,7 +4231,46 @@ export default function OwnerPanel() {
                   </div>
                 )}
               </div>
-              )}
+
+              {/* ── Étape 2 : choisir un serveur du bot et récupérer ses membres ── */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold">Étape 2 — Récupérer les membres d'un serveur</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Choisis n'importe quel serveur où le bot est présent, même si tu n'en fais pas partie.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Select value={spyGuildId} onValueChange={setSpyGuildId}>
+                    <SelectTrigger className="font-mono text-sm flex-1">
+                      <SelectValue placeholder="Choisir un serveur du bot…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allGuilds.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          <span className="font-medium">{g.name}</span>
+                          <span className="ml-2 text-muted-foreground text-xs font-mono">{g.id}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    disabled={spyLoading || !spyGuildId}
+                    className="gap-2 shrink-0"
+                    onClick={async () => {
+                      setSpyLoading(true);
+                      setSpyResult(null);
+                      setSpyFilter("");
+                      try {
+                        const r = await apiFetch(`/api/owner/server-members?guildId=${encodeURIComponent(spyGuildId)}`);
+                        if (r.ok) { setSpyResult(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setSpyLoading(false); }
+                    }}
+                  >
+                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                    Récupérer
+                  </Button>
+                </div>
+              </div>
 
               {/* Résultats */}
               {spyResult && (
