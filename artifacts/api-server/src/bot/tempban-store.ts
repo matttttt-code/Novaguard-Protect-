@@ -68,6 +68,10 @@ export function countAllActiveTempBans(): number {
   return store.size;
 }
 
+export function getAllTempBans(): TempBan[] {
+  return [...store.values()];
+}
+
 export function startTempBanScheduler(client: Client): void {
   const CHECK_INTERVAL = 30_000;
 

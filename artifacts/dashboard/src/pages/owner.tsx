@@ -122,12 +122,12 @@ const ALL_COMMANDS = [
 
 // ── Catégories de navigation ──────────────────────────────────────────────────
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
-  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence"] },
-  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","bl-serveur","bl-tag","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance"] },
-  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile"] },
+  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence","global-dashboard","sondage"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","bl-serveur","bl-tag","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance","global-tempbans","anti-spam"] },
+  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile","global-history"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
-  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl"] },
-  logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog"] },
+  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl","auto-role"] },
+  logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog","cmd-stats"] },
 };
 function tabCategory(tab: string): string {
   for (const [key, { tabs }] of Object.entries(CATEGORY_TABS)) if (tabs.includes(tab)) return key;
@@ -517,6 +517,43 @@ export default function OwnerPanel() {
   const [botReplyLogs, setBotReplyLogs] = useState<BotReplyLog[]>([]);
   const [botReplyLoading, setBotReplyLoading] = useState(false);
   const [botReplyFilter, setBotReplyFilter] = useState<"all" | "error" | "warn" | "info">("all");
+
+  // ── Sondage ───────────────────────────────────────────────────────────────
+  const [pollChannelId, setPollChannelId] = useState("");
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", "", "", ""]);
+  const [pollSending, setPollSending] = useState(false);
+
+  // ── Auto-rôle ─────────────────────────────────────────────────────────────
+  const [autoRoleCfg, setAutoRoleCfg] = useState<{ autoRoleId: string | null } | null>(null);
+  const [autoRoleLoading, setAutoRoleLoading] = useState(false);
+  const [autoRoleSaving, setAutoRoleSaving] = useState(false);
+  const [autoRoleDraft, setAutoRoleDraft] = useState("");
+
+  // ── Anti-spam ─────────────────────────────────────────────────────────────
+  type AntiSpamCfg = { antiSpamEnabled: boolean; antiSpamMessages: number; antiSpamWindowSecs: number; antiSpamAction: "timeout"|"kick"|"ban"; antiSpamTimeoutMins: number };
+  const [antiSpamCfg, setAntiSpamCfg] = useState<AntiSpamCfg | null>(null);
+  const [antiSpamLoading, setAntiSpamLoading] = useState(false);
+  const [antiSpamSaving, setAntiSpamSaving] = useState(false);
+
+  // ── Global Tempbans ───────────────────────────────────────────────────────
+  const [globalTempbans, setGlobalTempbans] = useState<TempBanEntry[]>([]);
+  const [globalTbLoading, setGlobalTbLoading] = useState(false);
+
+  // ── Global History ────────────────────────────────────────────────────────
+  type GlobalHistoryData = { userId: string; discordUser: { tag: string; avatarURL: string } | null; warns: { guildId: string; userId: string; warnings: { caseId: number; reason: string; moderatorTag: string; timestamp: string }[] }[]; notes: { guildId: string; userId: string; notes: { id: number; content: string; moderator: string; timestamp: string }[] }[]; tempban: TempBanEntry | null };
+  const [historyUserId, setHistoryUserId] = useState("");
+  const [historyData, setHistoryData] = useState<GlobalHistoryData | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ── Global Dashboard ──────────────────────────────────────────────────────
+  type GlobalDashboardData = { guildCount: number; totalMembers: number; totalTempBans: number; totalWarns: number; totalNotes: number; top5Cmds: { name: string; count: number }[]; guilds: { id: string; name: string; memberCount: number; iconURL: string | null; warns: number; tempbans: number; maintenanceActive: boolean; logConfigured: boolean }[] };
+  const [globalDashboard, setGlobalDashboard] = useState<GlobalDashboardData | null>(null);
+  const [globalDashboardLoading, setGlobalDashboardLoading] = useState(false);
+
+  // ── Stats commandes ────────────────────────────────────────────────────────
+  const [cmdStats, setCmdStats] = useState<{ name: string; count: number }[]>([]);
+  const [cmdStatsLoading, setCmdStatsLoading] = useState(false);
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -1472,6 +1509,105 @@ export default function OwnerPanel() {
     toast({ title: "Journal vocal effacé ✓" });
   }
 
+  // ── Fetch: Auto-rôle ─────────────────────────────────────────────────────
+  const fetchAutoRole = useCallback(async () => {
+    if (!guildId) return;
+    setAutoRoleLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/auto-role`);
+      if (r.ok) { const d = await r.json(); setAutoRoleCfg(d); setAutoRoleDraft(d.autoRoleId ?? ""); }
+    } finally { setAutoRoleLoading(false); }
+  }, [guildId]);
+
+  async function saveAutoRole() {
+    setAutoRoleSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/auto-role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoRoleId: autoRoleDraft || null }) });
+      if (r.ok) { const d = await r.json(); setAutoRoleCfg(d); toast({ title: "Auto-rôle sauvegardé ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setAutoRoleSaving(false); }
+  }
+
+  // ── Fetch: Anti-spam ─────────────────────────────────────────────────────
+  const fetchAntiSpam = useCallback(async () => {
+    if (!guildId) return;
+    setAntiSpamLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-spam`);
+      if (r.ok) setAntiSpamCfg(await r.json());
+    } finally { setAntiSpamLoading(false); }
+  }, [guildId]);
+
+  async function saveAntiSpam() {
+    if (!antiSpamCfg) return;
+    setAntiSpamSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-spam`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(antiSpamCfg) });
+      if (r.ok) { setAntiSpamCfg(await r.json()); toast({ title: "Anti-spam sauvegardé ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setAntiSpamSaving(false); }
+  }
+
+  // ── Fetch: Sondage ────────────────────────────────────────────────────────
+  async function sendPoll() {
+    if (!pollChannelId || !pollQuestion || pollOptions.filter(Boolean).length < 2) {
+      toast({ title: "Renseignez le salon, la question et au moins 2 options.", variant: "destructive" }); return;
+    }
+    setPollSending(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/poll`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channelId: pollChannelId, question: pollQuestion, options: pollOptions.filter(Boolean) }) });
+      if (r.ok) { toast({ title: "Sondage envoyé ✓" }); setPollQuestion(""); setPollOptions(["","","",""]); }
+      else { const d = await r.json().catch(() => ({})); toast({ title: d.error ?? "Erreur", variant: "destructive" }); }
+    } finally { setPollSending(false); }
+  }
+
+  // ── Fetch: Global Tempbans ────────────────────────────────────────────────
+  const fetchGlobalTempbans = useCallback(async () => {
+    setGlobalTbLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/tempbans`);
+      if (r.ok) setGlobalTempbans(await r.json());
+    } finally { setGlobalTbLoading(false); }
+  }, []);
+
+  // ── Fetch: Global History ─────────────────────────────────────────────────
+  async function fetchHistory() {
+    if (!historyUserId.trim()) return;
+    setHistoryLoading(true);
+    setHistoryData(null);
+    try {
+      const r = await apiFetch(`/api/owner/global/member-history/${historyUserId.trim()}`);
+      if (r.ok) setHistoryData(await r.json());
+      else toast({ title: "Membre introuvable", variant: "destructive" });
+    } finally { setHistoryLoading(false); }
+  }
+
+  // ── Fetch: Global Dashboard ───────────────────────────────────────────────
+  const fetchGlobalDashboard = useCallback(async () => {
+    setGlobalDashboardLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/dashboard`);
+      if (r.ok) setGlobalDashboard(await r.json());
+    } finally { setGlobalDashboardLoading(false); }
+  }, []);
+
+  // ── Fetch: Stats commandes ────────────────────────────────────────────────
+  const fetchCmdStats = useCallback(async () => {
+    if (!guildId) return;
+    setCmdStatsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/cmd-stats`);
+      if (r.ok) setCmdStats(await r.json());
+    } finally { setCmdStatsLoading(false); }
+  }, [guildId]);
+
+  async function resetCmdStats() {
+    if (!confirm("Réinitialiser les statistiques de commandes ?")) return;
+    await apiFetch(`/api/owner/guilds/${guildId}/cmd-stats`, { method: "DELETE" });
+    setCmdStats([]);
+    toast({ title: "Statistiques réinitialisées ✓" });
+  }
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -1607,6 +1743,8 @@ export default function OwnerPanel() {
             <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
             <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
             <TabsTrigger value="voicepresence" className="gap-1.5 text-xs" onClick={async () => { const [r1, r2] = await Promise.all([apiFetch(`/api/owner/guilds/${guildId}/voice-presence`), apiFetch(`/api/owner/guilds/${guildId}/voice-autojoin`)]); if (r1.ok) setVoicePresence(await r1.json()); if (r2.ok) { const d = await r2.json(); setVpAutoJoin(d.enabled); } }}><Headphones className="h-3.5 w-3.5" />Présence Vocale</TabsTrigger>
+            <TabsTrigger value="global-dashboard" className="gap-1.5 text-xs" onClick={fetchGlobalDashboard}><Globe className="h-3.5 w-3.5" />Tableau Global</TabsTrigger>
+            <TabsTrigger value="sondage" className="gap-1.5 text-xs"><MessageSquareWarning className="h-3.5 w-3.5" />Sondage</TabsTrigger>
           </>}
           {/* Sécurité */}
           {activeCategory === "securite" && <>
@@ -1626,6 +1764,8 @@ export default function OwnerPanel() {
             <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
             <TabsTrigger value="warns" className="gap-1.5 text-xs" onClick={() => setWarnsData(null)}><AlertCircle className="h-3.5 w-3.5" />Warns</TabsTrigger>
             <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
+            <TabsTrigger value="global-tempbans" className="gap-1.5 text-xs" onClick={fetchGlobalTempbans}><Ban className="h-3.5 w-3.5" />Tempbans Globaux</TabsTrigger>
+            <TabsTrigger value="anti-spam" className="gap-1.5 text-xs" onClick={fetchAntiSpam}><Zap className="h-3.5 w-3.5" />Anti-Spam</TabsTrigger>
           </>}
           {/* Modération */}
           {activeCategory === "moderation" && <>
@@ -1633,6 +1773,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
             <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
             <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
+            <TabsTrigger value="global-history" className="gap-1.5 text-xs" onClick={() => { setHistoryData(null); setHistoryUserId(""); }}><Search className="h-3.5 w-3.5" />Historique Global</TabsTrigger>
           </>}
           {/* Support */}
           {activeCategory === "support" && <>
@@ -1650,11 +1791,13 @@ export default function OwnerPanel() {
             <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={fetchCustomCmds}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
             <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
             <TabsTrigger value="server-bl" className="gap-1.5 text-xs" onClick={async () => { setServerBlLoading(true); const r = await apiFetch("/api/owner/server-blacklist"); if (r.ok) setServerBl(await r.json()); setServerBlLoading(false); }}><Ban className="h-3.5 w-3.5" />Serveurs BL</TabsTrigger>
+            <TabsTrigger value="auto-role" className="gap-1.5 text-xs" onClick={fetchAutoRole}><UserCheck className="h-3.5 w-3.5" />Auto-Rôle</TabsTrigger>
           </>}
           {/* Logs */}
           {activeCategory === "logs" && <>
             <TabsTrigger value="bot-reply-logs" className="gap-1.5 text-xs" onClick={fetchBotReplyLogs}><MessageSquareWarning className="h-3.5 w-3.5" />Logs Bot</TabsTrigger>
             <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
+            <TabsTrigger value="cmd-stats" className="gap-1.5 text-xs" onClick={fetchCmdStats}><Activity className="h-3.5 w-3.5" />Stats Cmds</TabsTrigger>
           </>}
         </TabsList>
 
@@ -5460,6 +5603,357 @@ export default function OwnerPanel() {
                   </div>
                 );
               })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Sondage ───────────────────────────────────────────────────────── */}
+        <TabsContent value="sondage" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📊 Créer un Sondage</CardTitle>
+              <CardDescription>Publie un sondage avec réactions dans un salon textuel.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">ID du salon</label>
+                <Input value={pollChannelId} onChange={e => setPollChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Question</label>
+                <Input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Votre question…" className="text-sm" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Options (2 à 4)</label>
+                {pollOptions.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-lg w-6 text-center shrink-0">{["🇦","🇧","🇨","🇩"][i]}</span>
+                    <Input value={opt} onChange={e => { const o=[...pollOptions]; o[i]=e.target.value; setPollOptions(o); }} placeholder={`Option ${i+1}${i < 2 ? " (requis)" : " (optionnel)"}`} className="text-sm" />
+                  </div>
+                ))}
+              </div>
+              <Button onClick={sendPoll} disabled={pollSending || !pollChannelId || !pollQuestion || pollOptions.filter(Boolean).length < 2} className="w-full gap-2 font-mono uppercase tracking-widest">
+                {pollSending ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer le sondage</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Auto-Rôle ─────────────────────────────────────────────────────── */}
+        <TabsContent value="auto-role" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎖️ Auto-Rôle à l'arrivée</CardTitle>
+              <CardDescription>Attribue automatiquement un rôle à chaque nouveau membre qui rejoint le serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {autoRoleLoading ? <Skeleton className="h-20 w-full" /> : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">ID du rôle (vide = désactivé)</label>
+                    <Input value={autoRoleDraft} onChange={e => setAutoRoleDraft(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  {autoRoleCfg?.autoRoleId && (
+                    <div className="flex items-center gap-2 p-3 rounded-md bg-green-500/10 border border-green-500/30">
+                      <ShieldCheck className="h-4 w-4 text-green-500 shrink-0" />
+                      <span className="text-sm">Auto-rôle actif : <code className="font-mono text-green-600 dark:text-green-400">{autoRoleCfg.autoRoleId}</code></span>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button onClick={saveAutoRole} disabled={autoRoleSaving} className="gap-2 font-mono uppercase tracking-widest">
+                      {autoRoleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                      Sauvegarder
+                    </Button>
+                    {autoRoleCfg?.autoRoleId && (
+                      <Button variant="outline" onClick={() => { setAutoRoleDraft(""); }} className="gap-2 text-destructive hover:text-destructive">
+                        <X className="h-4 w-4" /> Supprimer
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+              {!autoRoleCfg && !autoRoleLoading && (
+                <Button variant="outline" onClick={fetchAutoRole} className="gap-2"><RefreshCw className="h-4 w-4" />Charger</Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Anti-Spam ─────────────────────────────────────────────────────── */}
+        <TabsContent value="anti-spam" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⚡ Anti-Spam</CardTitle>
+              <CardDescription>Détecte et sanctionne automatiquement les membres qui spamment.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {antiSpamLoading ? <Skeleton className="h-48 w-full" /> : antiSpamCfg ? (
+                <>
+                  <div className="flex items-center justify-between p-3 rounded-md border">
+                    <div>
+                      <p className="font-medium text-sm">Anti-Spam activé</p>
+                      <p className="text-xs text-muted-foreground">Active la détection de spam en temps réel.</p>
+                    </div>
+                    <button
+                      onClick={() => setAntiSpamCfg({ ...antiSpamCfg, antiSpamEnabled: !antiSpamCfg.antiSpamEnabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${antiSpamCfg.antiSpamEnabled ? "bg-green-500" : "bg-muted"}`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${antiSpamCfg.antiSpamEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Messages max</label>
+                      <Input type="number" min={2} max={50} value={antiSpamCfg.antiSpamMessages} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamMessages: parseInt(e.target.value)||5 })} className="font-mono text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Fenêtre (secondes)</label>
+                      <Input type="number" min={1} max={300} value={antiSpamCfg.antiSpamWindowSecs} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamWindowSecs: parseInt(e.target.value)||5 })} className="font-mono text-sm" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Action</label>
+                    <div className="flex gap-2">
+                      {(["timeout","kick","ban"] as const).map(a => (
+                        <button key={a} onClick={() => setAntiSpamCfg({ ...antiSpamCfg, antiSpamAction: a })}
+                          className={`flex-1 py-2 rounded-md text-sm font-medium border transition-colors ${antiSpamCfg.antiSpamAction === a ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                          {a === "timeout" ? "⏱ Timeout" : a === "kick" ? "👟 Kick" : "🔨 Ban"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {antiSpamCfg.antiSpamAction === "timeout" && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Durée timeout (minutes)</label>
+                      <Input type="number" min={1} max={10080} value={antiSpamCfg.antiSpamTimeoutMins} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamTimeoutMins: parseInt(e.target.value)||10 })} className="font-mono text-sm" />
+                    </div>
+                  )}
+                  <Button onClick={saveAntiSpam} disabled={antiSpamSaving} className="w-full gap-2 font-mono uppercase tracking-widest">
+                    {antiSpamSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                    Sauvegarder
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={fetchAntiSpam} className="gap-2"><RefreshCw className="h-4 w-4" />Charger la configuration</Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Global Tempbans ───────────────────────────────────────────────── */}
+        <TabsContent value="global-tempbans" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">⏳ Tempbans Globaux</CardTitle>
+                <CardDescription>Tous les bans temporaires actifs, tous serveurs confondus.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchGlobalTempbans} disabled={globalTbLoading} className="gap-1.5 shrink-0">
+                {globalTbLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {globalTbLoading ? <Skeleton className="h-48 w-full" /> : globalTempbans.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun tempban actif.</p>
+              ) : (
+                <div className="space-y-2">
+                  {globalTempbans.map(tb => (
+                    <div key={`${tb.guildId}-${tb.userId}`} className="flex items-center justify-between p-3 rounded-md border bg-card">
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm truncate">{tb.userId}</p>
+                        <p className="text-xs text-muted-foreground">Serveur : <code className="font-mono">{tb.guildId}</code></p>
+                        <p className="text-xs text-muted-foreground">Expire : {tb.expiresAt ? new Date(tb.expiresAt).toLocaleString("fr-FR") : "—"}</p>
+                        {tb.reason && <p className="text-xs text-muted-foreground truncate">Raison : {tb.reason}</p>}
+                      </div>
+                      <Ban className="h-4 w-4 text-destructive shrink-0 ml-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Historique Global ─────────────────────────────────────────────── */}
+        <TabsContent value="global-history" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔍 Historique Global d'un Utilisateur</CardTitle>
+              <CardDescription>Consultez les avertissements, notes et tempbans d'un membre sur tous les serveurs.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={historyUserId} onChange={e => setHistoryUserId(e.target.value)} placeholder="ID Discord (ex: 123456789012345678)" className="font-mono text-sm" onKeyDown={e => e.key === "Enter" && fetchHistory()} />
+                <Button onClick={fetchHistory} disabled={historyLoading || !historyUserId.trim()} className="gap-2 shrink-0">
+                  {historyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Chercher
+                </Button>
+              </div>
+              {historyData && (() => {
+                const totalWarns = historyData.warns.reduce((s, g) => s + g.warnings.length, 0);
+                const totalNotes = historyData.notes.reduce((s, g) => s + g.notes.length, 0);
+                return (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 p-3 rounded-md border bg-card">
+                      {historyData.discordUser?.avatarURL && <img src={historyData.discordUser.avatarURL} className="h-10 w-10 rounded-full" />}
+                      <div>
+                        <p className="font-semibold text-sm">{historyData.discordUser?.tag ?? "Utilisateur inconnu"}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{historyData.userId}</p>
+                        <div className="flex gap-3 mt-1">
+                          <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">{totalWarns} warn(s)</span>
+                          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">{totalNotes} note(s)</span>
+                          {historyData.tempban && <span className="text-xs text-destructive font-medium">Tempban actif</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {historyData.warns.filter(g => g.warnings.length > 0).map(g => (
+                      <div key={g.guildId} className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Warns — <code className="font-mono">{g.guildId}</code></p>
+                        {g.warnings.map(w => (
+                          <div key={w.caseId} className="p-2.5 rounded border bg-orange-500/5 border-orange-300/30">
+                            <p className="text-sm">{w.reason}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Par {w.moderatorTag} — {new Date(w.timestamp).toLocaleString("fr-FR")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {historyData.notes.filter(g => g.notes.length > 0).map(g => (
+                      <div key={g.guildId} className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes — <code className="font-mono">{g.guildId}</code></p>
+                        {g.notes.map(n => (
+                          <div key={n.id} className="p-2.5 rounded border bg-blue-500/5 border-blue-300/30">
+                            <p className="text-sm">{n.content}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Par {n.moderator} — {new Date(n.timestamp).toLocaleString("fr-FR")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {historyData.tempban && (
+                      <div className="p-3 rounded-md border border-destructive/30 bg-destructive/5">
+                        <p className="text-sm font-semibold text-destructive">Tempban actif</p>
+                        <p className="text-xs text-muted-foreground">Serveur : {historyData.tempban.guildId}</p>
+                        {historyData.tempban.expiresAt && <p className="text-xs text-muted-foreground">Expire : {new Date(historyData.tempban.expiresAt).toLocaleString("fr-FR")}</p>}
+                        {historyData.tempban.reason && <p className="text-xs text-muted-foreground">Raison : {historyData.tempban.reason}</p>}
+                      </div>
+                    )}
+                    {totalWarns === 0 && totalNotes === 0 && !historyData.tempban && (
+                      <p className="text-sm text-muted-foreground text-center py-4">Aucun antécédent trouvé pour cet utilisateur.</p>
+                    )}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Global Dashboard ──────────────────────────────────────────────── */}
+        <TabsContent value="global-dashboard" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🌐 Tableau de Bord Global</CardTitle>
+                <CardDescription>Vue d'ensemble de tous les serveurs gérés par le bot.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchGlobalDashboard} disabled={globalDashboardLoading} className="gap-1.5 shrink-0">
+                {globalDashboardLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {globalDashboardLoading ? <Skeleton className="h-64 w-full" /> : !globalDashboard ? (
+                <Button variant="outline" onClick={fetchGlobalDashboard} className="gap-2"><RefreshCw className="h-4 w-4" />Charger</Button>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[
+                      { label: "Serveurs", value: globalDashboard.guildCount, icon: "🏠" },
+                      { label: "Membres total", value: globalDashboard.totalMembers.toLocaleString("fr-FR"), icon: "👥" },
+                      { label: "Tempbans actifs", value: globalDashboard.totalTempBans, icon: "⏳" },
+                      { label: "Avertissements", value: globalDashboard.totalWarns, icon: "⚠️" },
+                      { label: "Notes", value: globalDashboard.totalNotes, icon: "📝" },
+                    ].map(({ label, value, icon }) => (
+                      <div key={label} className="p-3 rounded-lg border bg-card text-center">
+                        <div className="text-xl mb-1">{icon}</div>
+                        <div className="text-lg font-bold font-mono">{value}</div>
+                        <div className="text-xs text-muted-foreground">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {globalDashboard.top5Cmds.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Top 5 commandes</p>
+                      {globalDashboard.top5Cmds.map(({ name, count }) => (
+                        <div key={name} className="flex items-center gap-3">
+                          <code className="font-mono text-sm text-primary w-32 truncate">{name}</code>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, (count / (globalDashboard.top5Cmds[0]?.count || 1)) * 100)}%` }} />
+                          </div>
+                          <span className="font-mono text-xs text-muted-foreground w-8 text-right">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Serveurs</p>
+                    {globalDashboard.guilds.map(g => (
+                      <div key={g.id} className="flex items-center gap-3 p-3 rounded-md border bg-card">
+                        {g.iconURL ? <img src={g.iconURL} className="h-8 w-8 rounded-full shrink-0" /> : <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 text-xs font-bold">{g.name[0]}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{g.name}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{g.id}</p>
+                          <div className="flex gap-2 mt-0.5 flex-wrap">
+                            <span className="text-xs text-muted-foreground">{g.memberCount} membres</span>
+                            {g.warns > 0 && <span className="text-xs text-orange-500">{g.warns} warns</span>}
+                            {g.tempbans > 0 && <span className="text-xs text-destructive">{g.tempbans} tempbans</span>}
+                            {g.maintenanceActive && <span className="text-xs bg-orange-500/20 text-orange-600 dark:text-orange-400 px-1.5 rounded">maintenance</span>}
+                            {!g.logConfigured && <span className="text-xs bg-destructive/10 text-destructive px-1.5 rounded">sans logs</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Stats Commandes ───────────────────────────────────────────────── */}
+        <TabsContent value="cmd-stats" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">📈 Statistiques des Commandes</CardTitle>
+                <CardDescription>Utilisation des commandes sur ce serveur.</CardDescription>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={fetchCmdStats} disabled={cmdStatsLoading} className="gap-1.5">
+                  {cmdStatsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={resetCmdStats} className="gap-1.5">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {cmdStatsLoading ? <Skeleton className="h-48 w-full" /> : cmdStats.length === 0 ? (
+                <div className="text-center py-8">
+                  <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune statistique disponible.</p>
+                  <Button variant="outline" size="sm" onClick={fetchCmdStats} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {cmdStats.map(({ name, count }, i) => (
+                    <div key={name} className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">#{i+1}</span>
+                      <code className="font-mono text-sm text-primary w-40 truncate">{name}</code>
+                      <div className="flex-1 bg-muted rounded-full h-2">
+                        <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / (cmdStats[0]?.count || 1)) * 100)}%` }} />
+                      </div>
+                      <span className="font-mono text-xs font-semibold w-12 text-right shrink-0">{count.toLocaleString("fr-FR")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

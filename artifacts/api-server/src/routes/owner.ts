@@ -26,10 +26,14 @@ import { resetStaffWindow } from "../bot/staff-ratelimit.js";
 import { getVoiceLog, clearVoiceLog } from "../bot/voice-monitor.js";
 import { getBotRepliesForGuild } from "../bot/event-log-store.js";
 import { getBotStatusEvents } from "../bot/bot-status-store.js";
-import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan } from "../bot/tempban-store.js";
+import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan, getAllTempBans } from "../bot/tempban-store.js";
 import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
 import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
 import { getGlobalWordBlacklist, addGlobalWord, removeGlobalWord } from "../bot/global-word-blacklist-store.js";
+import { getConfig as _cfg, setAutoRole, getAutoRole, setAntiSpamConfig, getAntiSpamConfig } from "../bot/guild-config-store.js";
+import { getAllWarnings } from "../bot/warnings-store.js";
+import { getAllNotes } from "../bot/notes-store.js";
+import { getCommandStats, getAllCommandStats, resetCommandStats } from "../bot/command-stats-store.js";
 
 const router = Router();
 
@@ -2126,6 +2130,156 @@ router.post("/owner/guilds/:guildId/voice-presence/join-me", async (req, res) =>
       res.status(500).json({ error: e.message });
     }
   }
+});
+
+// ── GET /api/owner/guilds/:guildId/auto-role ──────────────────────────────────
+router.get("/owner/guilds/:guildId/auto-role", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ autoRoleId: getAutoRole(guildId) });
+});
+
+// ── PATCH /api/owner/guilds/:guildId/auto-role ────────────────────────────────
+router.patch("/owner/guilds/:guildId/auto-role", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { autoRoleId } = req.body as { autoRoleId?: string | null };
+  setAutoRole(guildId, autoRoleId ?? null);
+  res.json({ ok: true, autoRoleId: getAutoRole(guildId) });
+});
+
+// ── GET /api/owner/guilds/:guildId/anti-spam ──────────────────────────────────
+router.get("/owner/guilds/:guildId/anti-spam", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getAntiSpamConfig(guildId));
+});
+
+// ── PATCH /api/owner/guilds/:guildId/anti-spam ────────────────────────────────
+router.patch("/owner/guilds/:guildId/anti-spam", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const body = req.body as Partial<{ antiSpamEnabled: boolean; antiSpamMessages: number; antiSpamWindowSecs: number; antiSpamAction: "timeout"|"kick"|"ban"; antiSpamTimeoutMins: number }>;
+  setAntiSpamConfig(guildId, body);
+  res.json(getAntiSpamConfig(guildId));
+});
+
+// ── POST /api/owner/guilds/:guildId/poll ──────────────────────────────────────
+router.post("/owner/guilds/:guildId/poll", async (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { channelId, question, options } = req.body as { channelId: string; question: string; options?: string[] };
+  if (!channelId || !question?.trim()) { res.status(400).json({ error: "channelId et question requis" }); return; }
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+  try {
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) { res.status(404).json({ error: "Serveur introuvable" }); return; }
+    const channel = guild.channels.cache.get(channelId) as TextChannel | null;
+    if (!channel?.isTextBased()) { res.status(404).json({ error: "Salon introuvable" }); return; }
+
+    const hasOptions = Array.isArray(options) && options.filter(o => o.trim()).length >= 2;
+    const embed = new EmbedBuilder()
+      .setColor(0x5865f2)
+      .setTitle(`📊 ${question.trim()}`)
+      .setTimestamp();
+
+    const EMOJIS = ["🇦","🇧","🇨","🇩","🇪","🇫","🇬","🇭","🇮","🇯"];
+    if (hasOptions) {
+      const opts = options!.filter(o => o.trim()).slice(0, 10);
+      embed.setDescription(opts.map((o, i) => `${EMOJIS[i]} ${o.trim()}`).join("\n"));
+      const msg = await channel.send({ embeds: [embed] });
+      for (let i = 0; i < opts.length; i++) await msg.react(EMOJIS[i]!).catch(() => null);
+      res.json({ ok: true, messageId: msg.id });
+    } else {
+      embed.setDescription("Réponds avec 👍 ou 👎");
+      const msg = await channel.send({ embeds: [embed] });
+      await msg.react("👍").catch(() => null);
+      await msg.react("👎").catch(() => null);
+      res.json({ ok: true, messageId: msg.id });
+    }
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ── GET /api/owner/global/tempbans ────────────────────────────────────────────
+router.get("/owner/global/tempbans", (req, res) => {
+  res.json(getAllTempBans());
+});
+
+// ── GET /api/owner/global/member-history/:userId ──────────────────────────────
+router.get("/owner/global/member-history/:userId", async (req, res) => {
+  const { userId } = req.params as { userId: string };
+  const client = getClient();
+
+  const warns = getAllWarnings().filter(w => w.userId === userId);
+  const notes = getAllNotes().filter(n => n.userId === userId);
+  const tempban = getAllTempBans().find(b => b.userId === userId) ?? null;
+
+  let discordUser: { tag: string; avatarURL: string } | null = null;
+  if (client?.isReady()) {
+    try {
+      const u = await client.users.fetch(userId).catch(() => null);
+      if (u) discordUser = { tag: u.tag, avatarURL: u.displayAvatarURL() };
+    } catch { /* ignore */ }
+  }
+
+  res.json({ userId, discordUser, warns, notes, tempban });
+});
+
+// ── GET /api/owner/global/dashboard ───────────────────────────────────────────
+router.get("/owner/global/dashboard", async (req, res) => {
+  const client = getClient();
+  if (!client?.isReady()) { res.status(503).json({ error: "Bot non prêt" }); return; }
+
+  const guilds = [...client.guilds.cache.values()];
+  const totalMembers = guilds.reduce((s, g) => s + g.memberCount, 0);
+  const totalTempBans = getAllTempBans().length;
+  const totalWarns = getAllWarnings().reduce((s, w) => s + w.warnings.length, 0);
+  const totalNotes = getAllNotes().reduce((s, n) => s + n.notes.length, 0);
+  const cmdStats = getAllCommandStats();
+  const topCmds: Record<string, number> = {};
+  for (const guildStats of Object.values(cmdStats)) {
+    for (const [cmd, count] of Object.entries(guildStats)) {
+      topCmds[cmd] = (topCmds[cmd] ?? 0) + count;
+    }
+  }
+  const top5Cmds = Object.entries(topCmds).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([name, count]) => ({ name, count }));
+
+  const guildSummaries = await Promise.all(guilds.map(async (g) => {
+    const warns = getAllWarnings().filter(w => w.guildId === g.id).reduce((s, w) => s + w.warnings.length, 0);
+    const tempbans = getAllTempBans().filter(b => b.guildId === g.id).length;
+    const cfg = _cfg(g.id);
+    return {
+      id: g.id,
+      name: g.name,
+      memberCount: g.memberCount,
+      iconURL: g.iconURL(),
+      warns,
+      tempbans,
+      maintenanceActive: (await import("../bot/maintenance-store.js")).isMaintenanceMode(g.id),
+      logConfigured: !!cfg.logChannelId,
+    };
+  }));
+
+  res.json({
+    guildCount: guilds.length,
+    totalMembers,
+    totalTempBans,
+    totalWarns,
+    totalNotes,
+    top5Cmds,
+    guilds: guildSummaries,
+  });
+});
+
+// ── GET /api/owner/guilds/:guildId/cmd-stats ──────────────────────────────────
+router.get("/owner/guilds/:guildId/cmd-stats", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const stats = getCommandStats(guildId);
+  const sorted = Object.entries(stats).sort((a, b) => b[1] - a[1]).map(([name, count]) => ({ name, count }));
+  res.json(sorted);
+});
+
+// ── DELETE /api/owner/guilds/:guildId/cmd-stats ───────────────────────────────
+router.delete("/owner/guilds/:guildId/cmd-stats", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  resetCommandStats(guildId);
+  res.json({ ok: true });
 });
 
 export default router;

@@ -51,7 +51,10 @@ import {
   getSuspectKeywords,
   getBlServers,
   getBlTags,
+  getAutoRole,
+  getAntiSpamConfig,
 } from "./guild-config-store.js";
+import { trackCommand } from "./command-stats-store.js";
 import { logCommandExec, logBotError } from "./event-log-store.js";
 import { getPendingLevel3, removePendingLevel3, markOwnerApproved } from "./security-pending-store.js";
 import { getPendingRaid2, removePendingRaid2 } from "./raid2-pending-store.js";
@@ -94,6 +97,8 @@ import { recordStaffCommand, RATE_WINDOW_SECONDS } from "./staff-ratelimit.js";
 import { registerVoiceMonitor } from "./voice-monitor.js";
 import { isMaintenanceMode, getMaintenanceMessage } from "./maintenance-store.js";
 import { isGloballyBlacklistedWord } from "./global-word-blacklist-store.js";
+
+const spamMap = new Map<string, number[]>();
 
 function isValidId(s: string): boolean {
   return /^\d{17,20}$/.test(s.trim());
@@ -283,6 +288,7 @@ export function startBot(): void {
     try {
       await command.execute(interaction);
       logCommandExec(interaction.guild?.id ?? null, interaction.commandName, "slash", interaction.user.tag, interaction.user.id, true);
+      if (interaction.guild?.id) trackCommand(interaction.guild.id, interaction.commandName);
     } catch (err) {
       const errCode = generateErrorCode();
       logger.error({ err, errCode, command: interaction.commandName }, "Erreur lors de l'exécution d'une commande");
@@ -317,6 +323,42 @@ export function startBot(): void {
       if (cfg.captchaChannelId && message.channelId === cfg.captchaChannelId && message.guildId === challenge.guildId) {
         await handleCaptchaChannelMessage(client, message, captchaTimeouts);
         return;
+      }
+    }
+
+    // === ANTI-SPAM (guild uniquement) ===
+    if (!message.channel.isDMBased() && message.guildId && message.member) {
+      const guildId = message.guildId;
+      const spamCfg = getAntiSpamConfig(guildId);
+      if (spamCfg.antiSpamEnabled) {
+        const key = `${guildId}:${message.author.id}`;
+        const now = Date.now();
+        const window = spamCfg.antiSpamWindowSecs * 1000;
+        const timestamps = (spamMap.get(key) ?? []).filter(t => now - t < window);
+        timestamps.push(now);
+        spamMap.set(key, timestamps);
+        if (timestamps.length >= spamCfg.antiSpamMessages) {
+          spamMap.delete(key);
+          const reason = `Anti-Spam : ${timestamps.length} messages en ${spamCfg.antiSpamWindowSecs}s`;
+          try {
+            switch (spamCfg.antiSpamAction) {
+              case "timeout":
+                await message.member.disableCommunicationUntil(new Date(Date.now() + spamCfg.antiSpamTimeoutMins * 60_000), reason).catch(() => null);
+                break;
+              case "kick":
+                await message.member.kick(reason).catch(() => null);
+                break;
+              case "ban":
+                await message.member.ban({ reason }).catch(() => null);
+                break;
+            }
+            await sendLog(client, logEmbed(0xf59e0b, "⚡ Anti-Spam déclenché", [
+              { name: "Membre", value: `${message.author.tag} (\`${message.author.id}\`)`, inline: true },
+              { name: "Action", value: spamCfg.antiSpamAction, inline: true },
+              { name: "Détail", value: reason },
+            ], { tag: client.user!.tag, id: client.user!.id }), { guildId });
+          } catch { /* ignore */ }
+        }
       }
     }
 
@@ -635,6 +677,15 @@ export function startBot(): void {
     // ── Join log normal ──
     await sendJoinLog(client, member.user, member.guild, guildId, isSuspect, accountAgeHours, accountAgeDays, createdTs);
     await sendWelcomeMessage(client, member, guildId, cfg);
+
+    // ── Auto-rôle ──
+    const autoRoleId = getAutoRole(guildId);
+    if (autoRoleId) {
+      try {
+        const freshMember = await member.guild.members.fetch(member.id).catch(() => null);
+        if (freshMember) await freshMember.roles.add(autoRoleId, "Auto-rôle à l'arrivée").catch(() => null);
+      } catch { /* ignore */ }
+    }
 
     // ── Blacklist Tag — ban automatique si tag/username/globalName en liste noire ──
     {

@@ -47,6 +47,12 @@ export interface GuildConfig {
   suspectKeywords: string[];
   blServers: string[];
   blTags: string[];
+  autoRoleId: string | null;
+  antiSpamEnabled: boolean;
+  antiSpamMessages: number;
+  antiSpamWindowSecs: number;
+  antiSpamAction: "timeout" | "kick" | "ban";
+  antiSpamTimeoutMins: number;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -99,7 +105,21 @@ function defaults(): GuildConfig {
     suspectKeywords: [],
     blServers: [],
     blTags: [],
+    autoRoleId: null,
+    antiSpamEnabled: false,
+    antiSpamMessages: 5,
+    antiSpamWindowSecs: 5,
+    antiSpamAction: "timeout",
+    antiSpamTimeoutMins: 10,
   };
+}
+
+export function setAutoRole(guildId: string, roleId: string | null): void { set(guildId, { autoRoleId: roleId }); }
+export function getAutoRole(guildId: string): string | null { return getConfig(guildId).autoRoleId ?? null; }
+export function setAntiSpamConfig(guildId: string, patch: Partial<Pick<GuildConfig, "antiSpamEnabled"|"antiSpamMessages"|"antiSpamWindowSecs"|"antiSpamAction"|"antiSpamTimeoutMins">>): void { set(guildId, patch); }
+export function getAntiSpamConfig(guildId: string): Pick<GuildConfig, "antiSpamEnabled"|"antiSpamMessages"|"antiSpamWindowSecs"|"antiSpamAction"|"antiSpamTimeoutMins"> {
+  const c = getConfig(guildId);
+  return { antiSpamEnabled: c.antiSpamEnabled, antiSpamMessages: c.antiSpamMessages, antiSpamWindowSecs: c.antiSpamWindowSecs, antiSpamAction: c.antiSpamAction, antiSpamTimeoutMins: c.antiSpamTimeoutMins };
 }
 
 const DATA_DIR = join(process.cwd(), "data");

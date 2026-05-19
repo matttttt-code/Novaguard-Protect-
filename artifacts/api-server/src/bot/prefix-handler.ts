@@ -7,6 +7,7 @@ import { recordStaffCommand, RATE_THRESHOLD, RATE_WINDOW_SECONDS } from "./staff
 import { sendLogDM } from "./dm-notify.js";
 import { isMaintenanceMode, getMaintenanceMessage } from "./maintenance-store.js";
 import { getCustomCommand } from "./custom-commands-store.js";
+import { trackCommand } from "./command-stats-store.js";
 
 export const PREFIX = "&";
 
@@ -76,6 +77,7 @@ export function registerPrefixHandler(
     try {
       await command.execute(message, args);
       logCommandExec(guildId, commandName, "prefix", message.author.tag, message.author.id, true);
+      if (guildId) trackCommand(guildId, commandName);
     } catch (err) {
       const errCode = generateErrorCode();
       logger.error({ err, errCode, command: commandName }, "Erreur commande préfixe");

@@ -71,6 +71,16 @@ export function getAllNotesForGuild(guildId: string): { userId: string; notes: N
     .map(([userId, notes]) => ({ userId, notes }));
 }
 
+export function getAllNotes(): { guildId: string; userId: string; notes: Note[] }[] {
+  const result: { guildId: string; userId: string; notes: Note[] }[] = [];
+  for (const [guildId, users] of Object.entries(data)) {
+    for (const [userId, notes] of Object.entries(users)) {
+      if (notes.length > 0) result.push({ guildId, userId, notes });
+    }
+  }
+  return result;
+}
+
 export function clearNotes(guildId: string, userId: string): number {
   const notes = data[guildId]?.[userId] ?? [];
   const count = notes.length;
