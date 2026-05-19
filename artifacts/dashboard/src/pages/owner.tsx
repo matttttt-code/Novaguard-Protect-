@@ -124,7 +124,7 @@ const ALL_COMMANDS = [
 const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
   general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence","global-dashboard","sondage"] },
   securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","bl-serveur","bl-tag","captchalogs","automod","quarantine","suspectaccounts","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance","global-tempbans","anti-spam"] },
-  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile","global-history"] },
+  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile","global-history","invite-lookup"] },
   support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands"] },
   config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl","auto-role"] },
   logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog","cmd-stats"] },
@@ -554,6 +554,13 @@ export default function OwnerPanel() {
   // ── Stats commandes ────────────────────────────────────────────────────────
   const [cmdStats, setCmdStats] = useState<{ name: string; count: number }[]>([]);
   const [cmdStatsLoading, setCmdStatsLoading] = useState(false);
+
+  // ── Invite Lookup ─────────────────────────────────────────────────────────
+  type InviteLookupGuildResult = { guildId: string; guildName: string; inviterId: string; inviteCode: string; inviterStats: { invited: number; left: number } };
+  type InviteLookupResult = { memberId: string; results: InviteLookupGuildResult[] } | null;
+  const [inviteLookupId, setInviteLookupId] = useState("");
+  const [inviteLookupResult, setInviteLookupResult] = useState<InviteLookupResult>(null);
+  const [inviteLookupLoading, setInviteLookupLoading] = useState(false);
 
   // ── Fetch helpers ──────────────────────────────────────────────────────────
   const fetchChannels = useCallback(async () => {
@@ -1591,6 +1598,19 @@ export default function OwnerPanel() {
     } finally { setGlobalDashboardLoading(false); }
   }, []);
 
+  // ── Fetch: Invite Lookup ──────────────────────────────────────────────────
+  async function fetchInviteLookup() {
+    const id = inviteLookupId.trim();
+    if (!id) return;
+    setInviteLookupLoading(true);
+    setInviteLookupResult(null);
+    try {
+      const r = await apiFetch(`/api/owner/global/invite-lookup/${id}`);
+      if (r.ok) setInviteLookupResult(await r.json());
+      else toast({ title: "Erreur lors de la recherche", variant: "destructive" });
+    } finally { setInviteLookupLoading(false); }
+  }
+
   // ── Fetch: Stats commandes ────────────────────────────────────────────────
   const fetchCmdStats = useCallback(async () => {
     if (!guildId) return;
@@ -1774,6 +1794,7 @@ export default function OwnerPanel() {
             <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
             <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
             <TabsTrigger value="global-history" className="gap-1.5 text-xs" onClick={() => { setHistoryData(null); setHistoryUserId(""); }}><Search className="h-3.5 w-3.5" />Historique Global</TabsTrigger>
+            <TabsTrigger value="invite-lookup" className="gap-1.5 text-xs" onClick={() => { setInviteLookupResult(null); setInviteLookupId(""); }}><Users className="h-3.5 w-3.5" />Invitations</TabsTrigger>
           </>}
           {/* Support */}
           {activeCategory === "support" && <>
@@ -5911,6 +5932,110 @@ export default function OwnerPanel() {
                     ))}
                   </div>
                 </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invite Lookup ─────────────────────────────────────────────────── */}
+        <TabsContent value="invite-lookup" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔗 Qui a invité ce membre ?</CardTitle>
+              <CardDescription>Retrouve qui a invité un utilisateur et via quel code, sur tous les serveurs.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={inviteLookupId}
+                  onChange={e => setInviteLookupId(e.target.value)}
+                  placeholder="ID Discord du membre (ex: 123456789012345678)"
+                  className="font-mono text-sm"
+                  onKeyDown={e => e.key === "Enter" && fetchInviteLookup()}
+                />
+                <Button onClick={fetchInviteLookup} disabled={inviteLookupLoading || !inviteLookupId.trim()} className="gap-2 shrink-0">
+                  {inviteLookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Chercher
+                </Button>
+              </div>
+
+              {inviteLookupResult && (
+                inviteLookupResult.results.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <Users className="h-8 w-8 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Aucune invitation trouvée pour <code className="font-mono">{inviteLookupResult.memberId}</code>.</p>
+                    <p className="text-xs text-muted-foreground">Le membre a peut-être rejoint via un lien vanity, OAuth, ou avant l'activation du tracker.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {inviteLookupResult.results.length} résultat(s) pour <span className="text-foreground">{inviteLookupResult.memberId}</span>
+                    </p>
+                    {inviteLookupResult.results.map(r => {
+                      const active = Math.max(0, r.inviterStats.invited - r.inviterStats.left);
+                      return (
+                        <div key={r.guildId} className="p-4 rounded-lg border bg-card space-y-3">
+                          {/* Serveur */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground border-b border-border/50 pb-2">
+                            <span className="text-base">🏠</span>
+                            <span className="font-semibold text-foreground">{r.guildName}</span>
+                            <code className="font-mono ml-auto">{r.guildId}</code>
+                          </div>
+
+                          {/* Inviteur */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Invité par</p>
+                              <div className="flex items-center gap-2">
+                                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                  <Users className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <div>
+                                  <p className="font-mono text-sm font-semibold">{r.inviterId}</p>
+                                  <a
+                                    href={`https://discord.com/users/${r.inviterId}`}
+                                    target="_blank" rel="noreferrer"
+                                    className="text-[10px] text-primary hover:underline"
+                                  >
+                                    Voir le profil →
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Code d'invitation</p>
+                              <div className="flex items-center gap-2">
+                                <code className="font-mono text-sm bg-muted px-2 py-1 rounded">{r.inviteCode}</code>
+                                <a
+                                  href={`https://discord.gg/${r.inviteCode}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="text-[10px] text-primary hover:underline"
+                                >
+                                  discord.gg/{r.inviteCode}
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Stats de l'inviteur */}
+                          <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/50">
+                            {[
+                              { label: "Total invités", value: r.inviterStats.invited, color: "text-blue-500" },
+                              { label: "Actifs", value: active, color: active > 0 ? "text-green-500" : "text-muted-foreground" },
+                              { label: "Partis", value: r.inviterStats.left, color: r.inviterStats.left > 0 ? "text-red-500" : "text-muted-foreground" },
+                            ].map(({ label, value, color }) => (
+                              <div key={label} className="text-center p-2 rounded-md bg-muted/40">
+                                <p className={`text-lg font-bold font-mono ${color}`}>{value}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
               )}
             </CardContent>
           </Card>

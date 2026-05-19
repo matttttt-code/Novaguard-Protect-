@@ -2282,4 +2282,56 @@ router.delete("/owner/guilds/:guildId/cmd-stats", (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Invite lookup ─────────────────────────────────────────────────────────────
+import { getMemberInviter, getInviteStats } from "../bot/invite-tracker.js";
+
+// GET /api/owner/guilds/:guildId/invite-lookup/:memberId
+router.get("/owner/guilds/:guildId/invite-lookup/:memberId", (req, res) => {
+  const { guildId, memberId } = req.params as { guildId: string; memberId: string };
+  const entry = getMemberInviter(guildId, memberId);
+  if (!entry) {
+    res.json({ found: false, memberId, guildId });
+    return;
+  }
+  const stats = getInviteStats(guildId, entry.inviterId);
+  res.json({
+    found: true,
+    memberId,
+    guildId,
+    inviterId: entry.inviterId,
+    inviteCode: entry.code,
+    inviterStats: stats,
+  });
+});
+
+// GET /api/owner/global/invite-lookup/:memberId
+router.get("/owner/global/invite-lookup/:memberId", (req, res) => {
+  const { memberId } = req.params as { memberId: string };
+  const client = getClient();
+  if (!client) { res.json({ memberId, results: [] }); return; }
+  const results: {
+    guildId: string;
+    guildName: string;
+    inviterId: string;
+    inviteCode: string;
+    inviterStats: { invited: number; left: number };
+  }[] = [];
+
+  for (const [guildId] of client.guilds.cache) {
+    const entry = getMemberInviter(guildId, memberId);
+    if (!entry) continue;
+    const stats = getInviteStats(guildId, entry.inviterId);
+    const guild = client.guilds.cache.get(guildId);
+    results.push({
+      guildId,
+      guildName: guild?.name ?? guildId,
+      inviterId: entry.inviterId,
+      inviteCode: entry.code,
+      inviterStats: stats,
+    });
+  }
+
+  res.json({ memberId, results });
+});
+
 export default router;
