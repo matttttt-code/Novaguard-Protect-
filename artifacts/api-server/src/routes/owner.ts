@@ -1148,12 +1148,34 @@ router.get("/owner/guilds/:guildId/maintenance", (req, res) => {
 });
 
 // ── PATCH /api/owner/guilds/:guildId/maintenance ──────────────────────────────
-router.patch("/owner/guilds/:guildId/maintenance", (req, res) => {
+router.patch("/owner/guilds/:guildId/maintenance", async (req, res) => {
   const { guildId } = req.params as { guildId: string };
   const { active, message } = req.body as { active?: boolean; message?: string };
   if (typeof active !== "boolean") { res.status(400).json({ error: "active (boolean) requis" }); return; }
   setMaintenance(guildId, active, message);
-  res.json(getMaintenanceState(guildId));
+  const state = getMaintenanceState(guildId);
+  res.json(state);
+
+  // Envoyer un embed dans le salon des logs
+  try {
+    const client = getClient();
+    if (!client?.isReady()) return;
+    const guild = await client.guilds.fetch(guildId).catch(() => null);
+    if (!guild) return;
+    const cfg = getConfig(guildId);
+    const logChannelId = cfg.logChannelId;
+    if (!logChannelId) return;
+    const channel = guild.channels.cache.get(logChannelId) as TextChannel | null;
+    if (!channel?.isTextBased()) return;
+
+    const embed = new EmbedBuilder()
+      .setColor(active ? 0xf59e0b : 0x22c55e)
+      .setTitle(active ? "🔧 Mode Maintenance Activé" : "✅ Mode Maintenance Désactivé")
+      .setDescription(active ? (state.message || "Le bot est en maintenance.") : "Le bot est de retour en ligne.")
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+  } catch { /* silencieux */ }
 });
 
 // ── POST /api/owner/guilds/:guildId/mass-action ───────────────────────────────
