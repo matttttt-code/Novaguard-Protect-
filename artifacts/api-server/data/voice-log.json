@@ -227,5 +227,25 @@
       "channelId": "1504520470265856030",
       "channelName": "⛔〢Privée 1"
     }
+  ],
+  "1504534006253883463": [
+    {
+      "timestamp": "2026-05-20T15:30:42.888Z",
+      "guildId": "1504534006253883463",
+      "userId": "1492129021993947226",
+      "userTag": "jls_94.",
+      "type": "leave",
+      "channelId": "1505603273418084352",
+      "channelName": "『🚨』Réunion"
+    },
+    {
+      "timestamp": "2026-05-20T15:30:40.292Z",
+      "guildId": "1504534006253883463",
+      "userId": "1492129021993947226",
+      "userTag": "jls_94.",
+      "type": "join",
+      "channelId": "1505603273418084352",
+      "channelName": "『🚨』Réunion"
+    }
   ]
 }
