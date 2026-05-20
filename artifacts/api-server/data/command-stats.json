@@ -1,8 +1,10 @@
 {
   "1504463605163364573": {
-    "dashboard": 1,
+    "dashboard": 2,
     "restart": 1,
     "info": 1,
-    "errortest": 1
+    "errortest": 1,
+    "commandlist": 1,
+    "ticket": 2
   }
 }

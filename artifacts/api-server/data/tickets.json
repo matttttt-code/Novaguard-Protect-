@@ -1,6 +1,17 @@
 {
-  "tickets": [],
+  "tickets": [
+    {
+      "channelId": "1506696310391177237",
+      "ticketNumber": 10,
+      "userId": "1420307651870462125",
+      "username": "gaultier87a",
+      "guildId": "1504463605163364573",
+      "createdAt": "2026-05-20T16:33:13.655Z",
+      "claimedBy": "l._vntt",
+      "claimedById": "1046526731453997079"
+    }
+  ],
   "counters": {
-    "1504463605163364573": 9
+    "1504463605163364573": 10
   }
 }

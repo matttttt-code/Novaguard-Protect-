@@ -18,3 +18,9 @@ id = "mNLlvvZCMc8K-vakdMjNi"
 uri = "file://bot-et-dashboard.zip"
 type = "unspecified"
 title = "Bot + Dashboard complet"
+
+[[outputs]]
+id = "REnaOUGCWaxIWCq7ktf38"
+uri = "file://dashboard-github.zip"
+type = "unspecified"
+title = "Dashboard Web (prêt pour GitHub)"

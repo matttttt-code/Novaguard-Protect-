@@ -190,7 +190,13 @@
     "blServers": [],
     "blTags": [
       "#dgsi"
-    ]
+    ],
+    "autoRoleId": null,
+    "antiSpamEnabled": true,
+    "antiSpamMessages": 5,
+    "antiSpamWindowSecs": 5,
+    "antiSpamAction": "kick",
+    "antiSpamTimeoutMins": 10
   },
   "1504534006253883463": {
     "logChannelId": "1505445296132591618",
@@ -381,7 +387,13 @@
       "#dgsi"
     ],
     "blServers": [],
-    "blTags": []
+    "blTags": [],
+    "autoRoleId": null,
+    "antiSpamEnabled": false,
+    "antiSpamMessages": 5,
+    "antiSpamWindowSecs": 5,
+    "antiSpamAction": "timeout",
+    "antiSpamTimeoutMins": 10
   },
   "1505649273251954739": {
     "logChannelId": "1505649273738629265",
@@ -570,6 +582,12 @@
     "antiEveryoneTimeoutSecs": 300,
     "suspectKeywords": [],
     "blServers": [],
-    "blTags": []
+    "blTags": [],
+    "autoRoleId": null,
+    "antiSpamEnabled": false,
+    "antiSpamMessages": 5,
+    "antiSpamWindowSecs": 5,
+    "antiSpamAction": "timeout",
+    "antiSpamTimeoutMins": 10
   }
 }
