@@ -6,3 +6,9 @@ id = "B2vCByN9SKPLrA58XTAQ2"
 uri = "file://bot-index.txt"
 type = "text"
 title = "bot/index.ts"
+
+[[outputs]]
+id = "96xGObj8PcenC0dHGdLd1"
+uri = "file://bot-complet.zip"
+type = "unspecified"
+title = "Bot complet (api-server)"
