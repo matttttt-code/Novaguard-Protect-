@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "B2vCByN9SKPLrA58XTAQ2"
+uri = "file://bot-index.txt"
+type = "text"
+title = "bot/index.ts"

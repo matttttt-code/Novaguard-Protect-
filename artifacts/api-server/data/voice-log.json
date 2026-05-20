@@ -1,6 +1,150 @@
 {
   "1504463605163364573": [
     {
+      "timestamp": "2026-05-20T07:33:15.233Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "leave",
+      "channelId": "1505317016825889032",
+      "channelName": "🥉〢Bureau Mattttt (Co-Fonda)"
+    },
+    {
+      "timestamp": "2026-05-20T07:33:14.316Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "join",
+      "channelId": "1505317016825889032",
+      "channelName": "🥉〢Bureau Mattttt (Co-Fonda)"
+    },
+    {
+      "timestamp": "2026-05-19T19:38:57.319Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "leave",
+      "channelId": "1505317016825889032",
+      "channelName": "🥉〢Bureau Mattttt (Co-Fonda)"
+    },
+    {
+      "timestamp": "2026-05-19T19:38:53.597Z",
+      "guildId": "1504463605163364573",
+      "userId": "1209963350218248203",
+      "userTag": "mattlec_",
+      "type": "join",
+      "channelId": "1505317016825889032",
+      "channelName": "🥉〢Bureau Mattttt (Co-Fonda)"
+    },
+    {
+      "timestamp": "2026-05-19T19:00:21.563Z",
+      "guildId": "1504463605163364573",
+      "userId": "1046526731453997079",
+      "userTag": "l._vntt",
+      "type": "leave",
+      "channelId": "1504519142516981790",
+      "channelName": "😴〢Vocal Chill"
+    },
+    {
+      "timestamp": "2026-05-19T18:58:20.768Z",
+      "guildId": "1504463605163364573",
+      "userId": "1046526731453997079",
+      "userTag": "l._vntt",
+      "type": "unmute",
+      "channelId": "1504519142516981790",
+      "channelName": "😴〢Vocal Chill"
+    },
+    {
+      "timestamp": "2026-05-19T18:58:20.047Z",
+      "guildId": "1504463605163364573",
+      "userId": "1046526731453997079",
+      "userTag": "l._vntt",
+      "type": "mute",
+      "channelId": "1504519142516981790",
+      "channelName": "😴〢Vocal Chill"
+    },
+    {
+      "timestamp": "2026-05-19T18:57:58.018Z",
+      "guildId": "1504463605163364573",
+      "userId": "1046526731453997079",
+      "userTag": "l._vntt",
+      "type": "join",
+      "channelId": "1504519142516981790",
+      "channelName": "😴〢Vocal Chill"
+    },
+    {
+      "timestamp": "2026-05-19T17:18:33.783Z",
+      "guildId": "1504463605163364573",
+      "userId": "1454549183523590216",
+      "userTag": "nirash_offciel",
+      "type": "join",
+      "channelId": "1504522372433313974",
+      "channelName": "🥈〢Bureau Nirash (Co-Fonda)"
+    },
+    {
+      "timestamp": "2026-05-19T17:17:42.373Z",
+      "guildId": "1504463605163364573",
+      "userId": "1410342508550029333",
+      "userTag": "prayformyrev",
+      "type": "leave",
+      "channelId": "1505652834522103938",
+      "channelName": "🏆〢 Gestionnaire"
+    },
+    {
+      "timestamp": "2026-05-19T17:16:47.473Z",
+      "guildId": "1504463605163364573",
+      "userId": "1502288628276002927",
+      "userTag": "nirash_05",
+      "type": "leave",
+      "channelId": "1505559031622795264",
+      "channelName": "⚜️〢Bureau Idra (Créateur Discord)"
+    },
+    {
+      "timestamp": "2026-05-19T17:16:29.403Z",
+      "guildId": "1504463605163364573",
+      "userId": "1502288628276002927",
+      "userTag": "nirash_05",
+      "type": "join",
+      "channelId": "1505559031622795264",
+      "channelName": "⚜️〢Bureau Idra (Créateur Discord)"
+    },
+    {
+      "timestamp": "2026-05-19T17:16:28.126Z",
+      "guildId": "1504463605163364573",
+      "userId": "1502288628276002927",
+      "userTag": "nirash_05",
+      "type": "leave",
+      "channelId": "1505559031622795264",
+      "channelName": "⚜️〢Bureau Idra (Créateur Discord)"
+    },
+    {
+      "timestamp": "2026-05-19T17:15:16.304Z",
+      "guildId": "1504463605163364573",
+      "userId": "1327569494863908877",
+      "userTag": "reiko_official",
+      "type": "leave",
+      "channelId": "1504523508128944270",
+      "channelName": "💎〢Bureau Administration"
+    },
+    {
+      "timestamp": "2026-05-19T17:15:11.111Z",
+      "guildId": "1504463605163364573",
+      "userId": "1403544715437146233",
+      "userTag": "sh1f3ter",
+      "type": "leave",
+      "channelId": "1505559031622795264",
+      "channelName": "⚜️〢Bureau Idra (Créateur Discord)"
+    },
+    {
+      "timestamp": "2026-05-19T17:15:10.219Z",
+      "guildId": "1504463605163364573",
+      "userId": "1494021511147945984",
+      "userTag": "its_youridra",
+      "type": "leave",
+      "channelId": "1505559031622795264",
+      "channelName": "⚜️〢Bureau Idra (Créateur Discord)"
+    },
+    {
       "timestamp": "2026-05-19T14:37:55.334Z",
       "guildId": "1504463605163364573",
       "userId": "1363046113246187590",
