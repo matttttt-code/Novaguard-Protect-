@@ -12,3 +12,9 @@ id = "96xGObj8PcenC0dHGdLd1"
 uri = "file://bot-complet.zip"
 type = "unspecified"
 title = "Bot complet (api-server)"
+
+[[outputs]]
+id = "mNLlvvZCMc8K-vakdMjNi"
+uri = "file://bot-et-dashboard.zip"
+type = "unspecified"
+title = "Bot + Dashboard complet"
