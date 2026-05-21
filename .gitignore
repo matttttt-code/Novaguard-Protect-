@@ -47,3 +47,12 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Fichiers temporaires / exports
+*.zip
+*.tar.gz
+bot-index.txt
+bot-index.ts
+
+# Variables d'environnement (ne jamais committer)
+.env

@@ -1,6 +1,123 @@
 {
   "1504463605163364573": [
     {
+      "timestamp": "2026-05-20T19:04:35.058Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "leave",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T19:01:55.850Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "unmute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T19:01:12.239Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "mute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:56:21.211Z",
+      "guildId": "1504463605163364573",
+      "userId": "1313438665539850242",
+      "userTag": "arisa_sz",
+      "type": "leave",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:45:02.819Z",
+      "guildId": "1504463605163364573",
+      "userId": "1313438665539850242",
+      "userTag": "arisa_sz",
+      "type": "unmute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:44:11.603Z",
+      "guildId": "1504463605163364573",
+      "userId": "1313438665539850242",
+      "userTag": "arisa_sz",
+      "type": "mute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:27:37.222Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "unmute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:27:04.830Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "mute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:26:51.847Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "unmute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:26:31.788Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "mute",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:11:16.028Z",
+      "guildId": "1504463605163364573",
+      "userId": "1313438665539850242",
+      "userTag": "arisa_sz",
+      "type": "stream-début",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:11:15.978Z",
+      "guildId": "1504463605163364573",
+      "userId": "1441403142095900807",
+      "userTag": "swann_71",
+      "type": "join",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
+      "timestamp": "2026-05-20T18:10:40.123Z",
+      "guildId": "1504463605163364573",
+      "userId": "1313438665539850242",
+      "userTag": "arisa_sz",
+      "type": "join",
+      "channelId": "1504853000265666560",
+      "channelName": "🔫〢Vocal \"Duel de Snipe\""
+    },
+    {
       "timestamp": "2026-05-20T07:33:15.233Z",
       "guildId": "1504463605163364573",
       "userId": "1209963350218248203",
