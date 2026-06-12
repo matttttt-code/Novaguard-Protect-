@@ -112,6 +112,8 @@ import { isWatched, getWatchlistLogChannel, initWatchlistStore } from "./watchli
 import { recordSeen, initLastSeenStore } from "./last-seen-store.js";
 import { recordMessage, initActivityStore } from "./activity-store.js";
 import { initVoiceTimeStore } from "./voice-time-store.js";
+import { initConnectionStore } from "./connection-store.js";
+import { registerConnectionHandler } from "./connection-commands.js";
 import { initInactivityAlertStore } from "./inactivity-alert-store.js";
 import { initFreezeStore } from "./freeze-store.js";
 import { initWatchlistActionsStore } from "./watchlist-actions-store.js";
@@ -255,6 +257,7 @@ export function startBot(): void {
     await initLastSeenStore().catch(() => null);
     await initActivityStore().catch(() => null);
     await initVoiceTimeStore().catch(() => null);
+    await initConnectionStore().catch(() => null);
     await initInactivityAlertStore().catch(() => null);
     await initFreezeStore().catch(() => null);
     await initWatchlistActionsStore().catch(() => null);
@@ -581,6 +584,7 @@ export function startBot(): void {
 
   registerAutoMod(client, true);
   registerPrefixHandler(client, prefixCommands);
+  registerConnectionHandler(client);
   registerVoiceMonitor(client);
   registerGeneralLog(client);
   registerAntiGhostPing(client);

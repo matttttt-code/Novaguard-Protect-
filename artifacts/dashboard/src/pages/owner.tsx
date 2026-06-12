@@ -263,6 +263,7 @@ const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[
   logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog","cmd-stats"] },
   ia:        { label: "IA Mod",     icon: "🤖", tabs: ["ai-mod-config","ai-trust-lookup","ai-raid-status","ai-risky","ai-commands"] },
   activite:  { label: "Activité",   icon: "📊", tabs: ["activity-ranking","activity-voice","activity-tiers"] },
+  connexions:{ label: "Connexions", icon: "🔗", tabs: ["conn-config","conn-leaderboard","conn-online"] },
 };
 function tabCategory(tab: string): string {
   for (const [key, { tabs }] of Object.entries(CATEGORY_TABS)) if (tabs.includes(tab)) return key;
@@ -785,6 +786,17 @@ export default function OwnerPanel() {
   // ── Stats commandes ────────────────────────────────────────────────────────
   const [cmdStats, setCmdStats] = useState<{ name: string; count: number }[]>([]);
   const [cmdStatsLoading, setCmdStatsLoading] = useState(false);
+
+  // ── Système Connexions (!c/!d) ────────────────────────────────────────────
+  type ConnConfig = { connectionSystemEnabled: boolean; connectionChannelId: string | null; connectionTier2RoleId: string | null; connectionTier3RoleId: string | null; connectionLogChannelId: string | null };
+  type ConnLeaderEntry = { userId: string; totalConnections: number; totalMs: number; isConnected: boolean };
+  const [connConfig, setConnConfig] = useState<ConnConfig | null>(null);
+  const [connConfigLoading, setConnConfigLoading] = useState(false);
+  const [connConfigSaving, setConnConfigSaving] = useState(false);
+  const [connLeaderboard, setConnLeaderboard] = useState<ConnLeaderEntry[]>([]);
+  const [connLeaderboardLoading, setConnLeaderboardLoading] = useState(false);
+  const [connOnline, setConnOnline] = useState<string[]>([]);
+  const [connOnlineLoading, setConnOnlineLoading] = useState(false);
 
   // ── Activité & Tiers ──────────────────────────────────────────────────────
   type MsgRankEntry = { userId: string; count: number };
@@ -2131,6 +2143,50 @@ export default function OwnerPanel() {
     } finally { setActivityTiersSaving(false); }
   }
 
+  const fetchConnConfig = useCallback(async () => {
+    if (!guildId) return;
+    setConnConfigLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/connection/config`);
+      if (r.ok) setConnConfig(await r.json());
+    } finally { setConnConfigLoading(false); }
+  }, [guildId]);
+
+  async function saveConnConfig(patch: Partial<ConnConfig>) {
+    if (!guildId) return;
+    setConnConfigSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/connection/config`, { method: "PATCH", body: JSON.stringify(patch) });
+      if (r.ok) { setConnConfig(await r.json()); toast({ title: "Configuration sauvegardée ✓" }); }
+      else toast({ title: "Erreur sauvegarde", variant: "destructive" });
+    } finally { setConnConfigSaving(false); }
+  }
+
+  const fetchConnLeaderboard = useCallback(async () => {
+    if (!guildId) return;
+    setConnLeaderboardLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/connection/leaderboard?limit=50`);
+      if (r.ok) setConnLeaderboard(await r.json());
+    } finally { setConnLeaderboardLoading(false); }
+  }, [guildId]);
+
+  const fetchConnOnline = useCallback(async () => {
+    if (!guildId) return;
+    setConnOnlineLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/connection/online`);
+      if (r.ok) { const d = await r.json() as { connected: string[] }; setConnOnline(d.connected); }
+    } finally { setConnOnlineLoading(false); }
+  }, [guildId]);
+
+  async function resetConnData() {
+    if (!guildId || !confirm("Réinitialiser toutes les données de connexion du serveur ?")) return;
+    await apiFetch(`/api/owner/guilds/${guildId}/connection/reset`, { method: "DELETE" });
+    setConnLeaderboard([]); setConnOnline([]);
+    toast({ title: "Données réinitialisées ✓" });
+  }
+
   // ── Password gate render ───────────────────────────────────────────────────
   if (!unlocked) {
     return (
@@ -2348,6 +2404,12 @@ export default function OwnerPanel() {
             <TabsTrigger value="activity-ranking" className="gap-1.5 text-xs" onClick={() => fetchMsgRanking()}><BarChart2 className="h-3.5 w-3.5" />Classement Messages</TabsTrigger>
             <TabsTrigger value="activity-voice" className="gap-1.5 text-xs" onClick={() => fetchVoiceRanking()}><Mic className="h-3.5 w-3.5" />Classement Vocal</TabsTrigger>
             <TabsTrigger value="activity-tiers" className="gap-1.5 text-xs" onClick={fetchActivityTiers}><Layers className="h-3.5 w-3.5" />Tiers d'Activité</TabsTrigger>
+          </>}
+          {/* Connexions */}
+          {activeCategory === "connexions" && <>
+            <TabsTrigger value="conn-config" className="gap-1.5 text-xs" onClick={fetchConnConfig}><Settings className="h-3.5 w-3.5" />Configuration</TabsTrigger>
+            <TabsTrigger value="conn-leaderboard" className="gap-1.5 text-xs" onClick={fetchConnLeaderboard}><BarChart2 className="h-3.5 w-3.5" />Classement</TabsTrigger>
+            <TabsTrigger value="conn-online" className="gap-1.5 text-xs" onClick={fetchConnOnline}><Wifi className="h-3.5 w-3.5" />En ligne</TabsTrigger>
           </>}
         </TabsList>
 
@@ -7898,6 +7960,207 @@ export default function OwnerPanel() {
                   )}
                 </div>
               </>)}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Connexions — Configuration ────────────────────────────────── */}
+        <TabsContent value="conn-config" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🔗 Système de Connexion (!c / !d)</CardTitle>
+                <CardDescription>Configure le système de connexion par préfixe <code>!</code> avec 3 niveaux de permissions.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchConnConfig} disabled={connConfigLoading} className="gap-1.5 shrink-0">
+                {connConfigLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {connConfigLoading && !connConfig ? <Skeleton className="h-64 w-full" /> : !connConfig ? (
+                <div className="text-center py-8">
+                  <Link2Off className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground mb-3">Configuration non chargée.</p>
+                  <Button variant="outline" size="sm" onClick={fetchConnConfig} className="gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (<>
+                {/* Activation */}
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium">Système actif</p>
+                    <p className="text-xs text-muted-foreground">Active les commandes <code>!c</code>, <code>!d</code>, <code>!me</code>, <code>!online</code>, etc.</p>
+                  </div>
+                  <Button size="sm" variant={connConfig.connectionSystemEnabled ? "default" : "outline"}
+                    onClick={() => saveConnConfig({ connectionSystemEnabled: !connConfig.connectionSystemEnabled })}
+                    disabled={connConfigSaving}>
+                    {connConfig.connectionSystemEnabled ? <Power className="h-4 w-4 mr-1.5" /> : <PowerOff className="h-4 w-4 mr-1.5" />}
+                    {connConfig.connectionSystemEnabled ? "Activé" : "Désactivé"}
+                  </Button>
+                </div>
+
+                {/* Salon */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Salon dédié (optionnel)</label>
+                  <p className="text-xs text-muted-foreground">Si défini, les commandes <code>!</code> ne fonctionneront que dans ce salon.</p>
+                  <div className="flex gap-2">
+                    <Input value={connConfig.connectionChannelId ?? ""}
+                      onChange={(e) => setConnConfig({ ...connConfig, connectionChannelId: e.target.value || null })}
+                      placeholder="ID du salon (laisser vide = tous les salons)" className="font-mono text-sm" />
+                    <Button size="sm" onClick={() => saveConnConfig({ connectionChannelId: connConfig.connectionChannelId })} disabled={connConfigSaving} className="gap-1.5 shrink-0">
+                      <Save className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Tiers rôles */}
+                <div className="space-y-4">
+                  <p className="text-sm font-semibold">Rôles par Tier</p>
+
+                  <div className="p-3 border rounded-lg space-y-2 bg-muted/20">
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-[10px] bg-green-500/20 text-green-700 border-green-200">Tier 1</Badge>
+                      <span className="text-xs text-muted-foreground">Tous les membres — <code>!c</code>, <code>!d</code>, <code>!me</code>, <code>!online</code>, <code>!ping</code>, <code>!info</code>, <code>!suggestion</code></span>
+                    </div>
+                    <p className="text-xs text-muted-foreground pl-1">Aucun rôle requis — tout le monde peut utiliser ces commandes.</p>
+                  </div>
+
+                  <div className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-[10px] bg-blue-500/20 text-blue-700 border-blue-200">Tier 2</Badge>
+                      <span className="text-xs text-muted-foreground">Administration — <code>!check</code>, <code>!view</code></span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input value={connConfig.connectionTier2RoleId ?? ""}
+                        onChange={(e) => setConnConfig({ ...connConfig, connectionTier2RoleId: e.target.value || null })}
+                        placeholder="ID du rôle Tier 2 (ex: @EQUIPE D'ADMINISTRATION)" className="font-mono text-sm" />
+                      <Button size="sm" onClick={() => saveConnConfig({ connectionTier2RoleId: connConfig.connectionTier2RoleId })} disabled={connConfigSaving} className="gap-1.5 shrink-0">
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 border rounded-lg space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Badge className="text-[10px] bg-orange-500/20 text-orange-700 border-orange-200">Tier 3</Badge>
+                      <span className="text-xs text-muted-foreground">Gérant — <code>!co</code>, <code>!deco</code>, <code>!delete</code>, <code>!reset</code>, <code>!add</code>, <code>!rewind</code>, <code>!remove</code></span>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input value={connConfig.connectionTier3RoleId ?? ""}
+                        onChange={(e) => setConnConfig({ ...connConfig, connectionTier3RoleId: e.target.value || null })}
+                        placeholder="ID du rôle Tier 3 (ex: @Gérant)" className="font-mono text-sm" />
+                      <Button size="sm" onClick={() => saveConnConfig({ connectionTier3RoleId: connConfig.connectionTier3RoleId })} disabled={connConfigSaving} className="gap-1.5 shrink-0">
+                        <Save className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Référence des commandes */}
+                <div className="border rounded-lg overflow-hidden">
+                  <div className="px-3 py-2 bg-muted/30 border-b">
+                    <p className="text-xs font-semibold font-mono uppercase">📋 Référence des Commandes</p>
+                  </div>
+                  <div className="p-3 space-y-3">
+                    {[
+                      { tier: "Tier 1", color: "text-green-600", cmds: ["!c — Démarrer une connexion", "!d — Terminer une connexion", "!me — Voir ses statistiques", "!online — Membres connectés", "!ping — Tester la latence", "!info — Infos du bot", "!suggestion [texte]"] },
+                      { tier: "Tier 2", color: "text-blue-600", cmds: ["!check [@mention/pseudo/id] — Voir infos d'un membre", "!view — Voir le classement"] },
+                      { tier: "Tier 3", color: "text-orange-600", cmds: ["!co [@mention/pseudo/id] — Connecter quelqu'un", "!deco [@mention/pseudo/id] — Déconnecter quelqu'un", "!delete [@mention/pseudo/id] — Supprimer un membre", "!reset — Réinitialiser le serveur", "!add [N] [@mention/pseudo/id] — Ajouter des connexions", "!remove [N] [@mention/pseudo/id] — Retirer des connexions", "!rewind [JJ/MM-HH:MM] [JJ/MM-HH:MM] — Rewind sur période", "!support [texte] — Signalement équipe dev"] },
+                    ].map(({ tier, color, cmds }) => (
+                      <div key={tier}>
+                        <p className={`text-xs font-bold mb-1 ${color}`}>{tier}</p>
+                        <div className="space-y-0.5 pl-2">
+                          {cmds.map((c) => <p key={c} className="text-xs font-mono text-muted-foreground"><code>{c}</code></p>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </>)}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Connexions — Classement ───────────────────────────────────── */}
+        <TabsContent value="conn-leaderboard" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🏆 Classement Connexions</CardTitle>
+                <CardDescription>Top membres par nombre de sessions <code>!c</code> / <code>!d</code>.</CardDescription>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={fetchConnLeaderboard} disabled={connLeaderboardLoading} className="gap-1.5">
+                  {connLeaderboardLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={resetConnData} className="gap-1.5">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {connLeaderboardLoading ? <Skeleton className="h-48 w-full" /> : connLeaderboard.length === 0 ? (
+                <div className="text-center py-8">
+                  <BarChart2 className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune donnée. Les connexions <code>!c</code>/<code>!d</code> apparaîtront ici.</p>
+                  <Button variant="outline" size="sm" onClick={fetchConnLeaderboard} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {connLeaderboard.map(({ userId, totalConnections, totalMs, isConnected }, i) => {
+                    const hrs = Math.floor(totalMs / 3_600_000);
+                    const mins = Math.floor((totalMs % 3_600_000) / 60_000);
+                    const timeLabel = hrs > 0 ? `${hrs}h${mins.toString().padStart(2, "0")}` : `${mins}min`;
+                    return (
+                      <div key={userId} className="flex items-center gap-3">
+                        <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">#{i + 1}</span>
+                        {isConnected && <span className="text-green-500 text-xs shrink-0">🟢</span>}
+                        <code className="font-mono text-sm text-primary w-44 truncate">{userId}</code>
+                        <div className="flex-1 bg-muted rounded-full h-2">
+                          <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, (totalConnections / (connLeaderboard[0]?.totalConnections || 1)) * 100)}%` }} />
+                        </div>
+                        <span className="font-mono text-xs font-semibold shrink-0 w-28 text-right">{totalConnections} sess. · {timeLabel}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Connexions — En ligne ─────────────────────────────────────── */}
+        <TabsContent value="conn-online" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🟢 Membres Connectés</CardTitle>
+                <CardDescription>Utilisateurs actuellement actifs via <code>!c</code>.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchConnOnline} disabled={connOnlineLoading} className="gap-1.5 shrink-0">
+                {connOnlineLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {connOnlineLoading ? <Skeleton className="h-32 w-full" /> : connOnline.length === 0 ? (
+                <div className="text-center py-8">
+                  <WifiOff className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucun membre connecté pour l'instant.</p>
+                  <Button variant="outline" size="sm" onClick={fetchConnOnline} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Actualiser</Button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {connOnline.map((userId, i) => (
+                    <div key={userId} className="flex items-center gap-2 p-2 border rounded-md bg-green-500/5 border-green-200/50">
+                      <span className="text-green-500 text-sm">🟢</span>
+                      <span className="text-xs font-mono text-muted-foreground shrink-0">#{i + 1}</span>
+                      <code className="font-mono text-sm text-primary truncate">{userId}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {connOnline.length > 0 && (
+                <p className="text-xs text-muted-foreground text-center mt-3">{connOnline.length} membre(s) connecté(s) en ce moment</p>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

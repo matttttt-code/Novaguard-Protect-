@@ -40,9 +40,10 @@ import { getAllTempBansForGuild, removeTempBan, hasTempBan, getTempBan, getAllTe
 import { isMaintenanceMode, getMaintenanceState, setMaintenance } from "../bot/maintenance-store.js";
 import { getCustomCommands, addCustomCommand, removeCustomCommand } from "../bot/custom-commands-store.js";
 import { getGlobalWordBlacklist, addGlobalWord, removeGlobalWord } from "../bot/global-word-blacklist-store.js";
-import { getConfig as _cfg, setAutoRole, getAutoRole, setAntiSpamConfig, getAntiSpamConfig, getActivityTiersConfig, setActivityTiersEnabled, setActivityTierPeriodDays, setActivityTiers } from "../bot/guild-config-store.js";
+import { getConfig as _cfg, setAutoRole, getAutoRole, setAntiSpamConfig, getAntiSpamConfig, getActivityTiersConfig, setActivityTiersEnabled, setActivityTierPeriodDays, setActivityTiers, getConnectionConfig, setConnectionConfig } from "../bot/guild-config-store.js";
 import { getMessageRanking, getMemberMessageStats } from "../bot/activity-store.js";
 import { getVoiceRanking, getMemberVoiceStats } from "../bot/voice-time-store.js";
+import { getLeaderboard as getConnectionLeaderboard, getMemberStats as getConnectionMemberStats, getConnectedUsers, resetGuild as resetConnectionGuild } from "../bot/connection-store.js";
 import { getAllWarnings } from "../bot/warnings-store.js";
 import { getAllNotes } from "../bot/notes-store.js";
 import { getCommandStats, getAllCommandStats, resetCommandStats } from "../bot/command-stats-store.js";
@@ -2835,6 +2836,48 @@ router.patch("/owner/assistant-config", (req, res) => {
   const { enabled } = req.body as { enabled?: boolean };
   const updated = setAssistantConfig({ ...(enabled !== undefined ? { enabled } : {}) });
   res.json(updated);
+});
+
+// ── Système de Connexion ──────────────────────────────────────────────────────
+
+router.get("/owner/guilds/:guildId/connection/config", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json(getConnectionConfig(guildId));
+});
+
+router.patch("/owner/guilds/:guildId/connection/config", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const patch = req.body as Partial<{
+    connectionSystemEnabled: boolean;
+    connectionChannelId: string | null;
+    connectionTier2RoleId: string | null;
+    connectionTier3RoleId: string | null;
+    connectionLogChannelId: string | null;
+  }>;
+  setConnectionConfig(guildId, patch);
+  res.json(getConnectionConfig(guildId));
+});
+
+router.get("/owner/guilds/:guildId/connection/leaderboard", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  const { limit } = req.query as { limit?: string };
+  res.json(getConnectionLeaderboard(guildId, limit ? Math.min(Number(limit), 200) : 50));
+});
+
+router.get("/owner/guilds/:guildId/connection/online", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  res.json({ connected: getConnectedUsers(guildId) });
+});
+
+router.get("/owner/guilds/:guildId/connection/member/:userId", (req, res) => {
+  const { guildId, userId } = req.params as { guildId: string; userId: string };
+  res.json(getConnectionMemberStats(guildId, userId));
+});
+
+router.delete("/owner/guilds/:guildId/connection/reset", (req, res) => {
+  const { guildId } = req.params as { guildId: string };
+  resetConnectionGuild(guildId);
+  res.json({ ok: true });
 });
 
 // ── Activité & Tiers ──────────────────────────────────────────────────────────

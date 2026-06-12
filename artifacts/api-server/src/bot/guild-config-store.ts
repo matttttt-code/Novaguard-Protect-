@@ -86,6 +86,12 @@ export interface GuildConfig {
   activityTiersEnabled: boolean;
   activityTierPeriodDays: number;
   activityTiers: { name: string; minMessages: number; minVoiceMinutes: number; roleId: string | null }[];
+  // ── Système de Connexion (!c / !d) ────────────────────────────────────────
+  connectionSystemEnabled: boolean;
+  connectionChannelId: string | null;
+  connectionTier2RoleId: string | null;
+  connectionTier3RoleId: string | null;
+  connectionLogChannelId: string | null;
 }
 
 export const DEFAULT_WELCOME_MSG = "👋 Bienvenue {user} sur **{server}** ! Tu es le **{count}**e membre. 🎉";
@@ -125,6 +131,11 @@ function defaults(): GuildConfig {
     activityTiersEnabled: false,
     activityTierPeriodDays: 30,
     activityTiers: [],
+    connectionSystemEnabled: false,
+    connectionChannelId: null,
+    connectionTier2RoleId: null,
+    connectionTier3RoleId: null,
+    connectionLogChannelId: null,
   };
 }
 
@@ -316,6 +327,13 @@ export function getActivityTiersConfig(guildId: string): Pick<GuildConfig, "acti
   const c = getConfig(guildId);
   return { activityTiersEnabled: c.activityTiersEnabled, activityTierPeriodDays: c.activityTierPeriodDays, activityTiers: c.activityTiers };
 }
+
+// ── Système de Connexion ──────────────────────────────────────────────────────
+export function getConnectionConfig(guildId: string): Pick<GuildConfig, "connectionSystemEnabled"|"connectionChannelId"|"connectionTier2RoleId"|"connectionTier3RoleId"|"connectionLogChannelId"> {
+  const c = getConfig(guildId);
+  return { connectionSystemEnabled: c.connectionSystemEnabled, connectionChannelId: c.connectionChannelId, connectionTier2RoleId: c.connectionTier2RoleId, connectionTier3RoleId: c.connectionTier3RoleId, connectionLogChannelId: c.connectionLogChannelId };
+}
+export function setConnectionConfig(guildId: string, patch: Partial<Pick<GuildConfig, "connectionSystemEnabled"|"connectionChannelId"|"connectionTier2RoleId"|"connectionTier3RoleId"|"connectionLogChannelId">>): void { set(guildId, patch); }
 
 export function setAntiSpamConfig(guildId: string, patch: Partial<Pick<GuildConfig, "antiSpamEnabled"|"antiSpamMessages"|"antiSpamWindowSecs"|"antiSpamAction"|"antiSpamTimeoutMins">>): void { set(guildId, patch); }
 export function getAntiSpamConfig(guildId: string): Pick<GuildConfig, "antiSpamEnabled"|"antiSpamMessages"|"antiSpamWindowSecs"|"antiSpamAction"|"antiSpamTimeoutMins"> {
