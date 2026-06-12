@@ -1,0 +1,8327 @@
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useLocation, useParams, Link } from "wouter";
+import { getToken, clearToken, decodeToken } from "@/lib/auth";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/hooks/use-toast";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  ArrowLeft, Send, Hash, Volume2, FolderOpen, Trash2, UserX, Shield, RefreshCw,
+  Plus, Settings, Settings2, Save, ShieldOff, Lock, Loader2, AlertCircle, FileText, Ban,
+  Sliders, Power, PowerOff, Eye, X, Search, FlaskConical,
+  Clock, Pencil, Unlock, Zap, Ticket, Users, Tag,
+  Wifi, WifiOff, Radio, Activity, Server, Mic, MicOff, Headphones,
+  BookOpen, Download, Copy, ScrollText, Link2Off,
+  Wrench, Globe, SearchCode, Upload, Command, Pause, MailX, Gavel, ListFilter,
+  UserCheck, ChevronRight, ChevronDown, ExternalLink, Unlink, MessageSquareWarning, ShieldAlert, ShieldCheck, Bot,
+  Play, SkipForward, Music, StopCircle, Repeat, Sparkles, Laugh, BookMarked, Bell,
+  BarChart2, Layers,
+} from "lucide-react";
+import { Label } from "@/components/ui/label";
+
+function generateAlternations(word: string): string[] {
+  const maps: Record<string, string[]> = {
+    a: ["@", "4", "à", "â", "á", "ä"],
+    e: ["3", "é", "è", "ê", "ë"],
+    i: ["1", "!", "ï", "î", "|"],
+    o: ["0", "ô", "ö", "ó"],
+    s: ["$", "5", "z"],
+    u: ["ü", "ù", "û", "ú"],
+    c: ["©", "ç", "k", "©"],
+    l: ["1", "|", "i"],
+    g: ["9", "q"],
+    b: ["8", "ß"],
+    t: ["+", "7"],
+    n: ["ñ"],
+    p: ["þ"],
+    f: ["ph"],
+    x: ["ks"],
+  };
+  const lower = word.toLowerCase();
+  const chars = lower.split("");
+  const results = new Set<string>();
+  chars.forEach((ch, i) => {
+    (maps[ch] ?? []).forEach((alt) => {
+      const v = [...chars]; v[i] = alt; results.add(v.join(""));
+    });
+    if (chars.length <= 6) {
+      (maps[ch] ?? []).forEach((alt1) => {
+        chars.forEach((ch2, j) => {
+          if (j === i) return;
+          (maps[ch2] ?? []).forEach((alt2) => {
+            const v = [...chars]; v[i] = alt1; v[j] = alt2; results.add(v.join(""));
+          });
+        });
+      });
+    }
+  });
+  results.delete(lower);
+  return [...results].sort();
+}
+
+function DeployCommandsButton() {
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<{ ok?: boolean; count?: number; error?: string } | null>(null);
+  const { toast } = useToast();
+
+  async function deploy() {
+    setLoading(true);
+    setResult(null);
+    try {
+      const r = await apiFetch("/api/owner/deploy-commands", { method: "POST" });
+      const data = await r.json() as { ok?: boolean; count?: number; error?: string };
+      setResult(data);
+      if (data.ok) toast({ title: `✅ ${data.count} commandes enregistrées auprès de Discord` });
+      else toast({ title: `Erreur: ${data.error}`, variant: "destructive" });
+    } catch (e: any) {
+      toast({ title: `Erreur réseau: ${String(e.message)}`, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3">
+      <Button onClick={() => { void deploy(); }} disabled={loading} variant="outline" className="gap-2">
+        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+        Déployer les commandes slash
+      </Button>
+      {result?.ok && <span className="text-xs text-green-600 font-mono">{result.count} commandes enregistrées ✓</span>}
+      {result?.error && <span className="text-xs text-red-500 font-mono">{result.error}</span>}
+    </div>
+  );
+}
+
+function apiFetch(path: string, opts: RequestInit = {}) {
+  const token = getToken();
+  return fetch(path, {
+    ...opts,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(opts.headers ?? {}),
+    },
+  });
+}
+
+type Channel = { id: string; name: string; type: number; parentId: string | null; position: number };
+type Member = { id: string; tag: string; displayName: string; avatarURL: string; bot: boolean; joinedAt: string | null; roles: string[] };
+type BlacklistEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; createdAt: string };
+type DisabledCommand = { id: number; guildId: string; commandName: string; disabledBy: string; createdAt: string };
+type TranscriptMeta = { id: number; guildId: string; guildName: string; channelName: string; ticketNumber: number; userId: string; userTag: string; closedBy: string; reason: string; messageCount: number; createdAt: string; closedAt: string };
+type TranscriptFull = TranscriptMeta & { content: string };
+type CaptchaLogEntry = {
+  id: number; guildId: string; guildName: string; userId: string; userTag: string;
+  event: string; details: string; createdAt: string;
+};
+
+type Role = { id: string; name: string; color: string; position: number };
+type AutomodCfg = {
+  antiInsultEnabled: boolean; antiInsultWords: string[]; antiWebhookEnabled: boolean;
+  securityLevel: 1 | 2 | 3; antilinkEnabled: boolean; antiCapsEnabled: boolean;
+  antilinkAction: "delete" | "warn" | "timeout"; antilinkTimeoutMinutes: number;
+  antilinkAllowedDomains: string[];
+};
+type ActiveTicket = {
+  channelId: string; ticketNumber: number; userId: string; username: string;
+  claimedBy: string | null; createdAt: string;
+};
+type BotStatusInfo = {
+  online: boolean; wsStatus: number; ping: number; uptime: number | null;
+  guildCount: number; userCount: number; memory: number;
+  username: string | null; tag: string | null; avatarURL: string | null;
+  presence: { status: string; activities: { name: string; type: number }[] } | null;
+};
+
+type BotSettings = {
+  guildId: string; captchaEnabled: boolean; captchaChannelId: string | null;
+  captchaRoleId: string | null; captchaVerifiedRoleId: string | null;
+  captchaTimeoutMins: number; captchaMaxAttempts: number; captchaMode: string;
+  welcomeEnabled: boolean; welcomeChannelId: string | null; welcomeMessage: string | null;
+};
+type AntiProtection = {
+  antiRaiderEnabled: boolean; antiRaiderThreshold: number; antiRaiderWindow: number; antiRaiderAction: string;
+  antiMoveEnabled: boolean; antiMuteEnabled: boolean; antiDisconnectEnabled: boolean; antiBotEnabled: boolean;
+  antiEveryoneEnabled: boolean; antiEveryoneTimeoutSecs: number;
+  antiRoleModifyEnabled: boolean;
+  antiAuditBypassPerms: boolean;
+};
+type NoteEntry = { id: number; content: string; moderator: string; moderatorId: string; timestamp: string };
+type NotesByUser = { userId: string; notes: NoteEntry[] };
+type AiModCfg = {
+  aiToxicityEnabled: boolean; aiToxicityThreshold: number;
+  aiToxicityAction: "warn" | "timeout" | "kick";
+  aiAutoPunishEnabled: boolean; aiAutoLockEnabled: boolean;
+  aiRaidPredictEnabled: boolean; aiRaidPredictJoins: number; aiRaidPredictMinAge: number;
+};
+type AiTrustResult = { score: number; level: string; reasons: string[]; behavior: { messages: number; links: number; mentions: number; toxicAttempts: number; violations: number } | null; risk: { level: string; score: number; reasons: string[] } | null } | null;
+type AiRaidStatus = { score: number; level: string; joinsPerMin: number; recentJoins: number; newAccountRatio: number; noAvatarRatio: number; avgAgeDays: number; flags: string[] } | null;
+type AiRiskyMember = { userId: string; stats: { messages: number; links: number; mentions: number; toxicAttempts: number; violations: number }; risk: { level: string; score: number; reasons: string[] } };
+type InviteBlEntry = { userId: string; userTag: string; reason: string; moderatorTag: string; moderatorId: string; timestamp: string };
+type ActionLogEntry = { timestamp: string; method: string; path: string; body: Record<string, unknown> };
+type GuildInfo = { id: string; name: string; memberCount: number; iconURL: string | null };
+type QuarantineEntry = { userId: string; userTag: string; guildId: string; reason: string; triggerCount: number; windowSeconds: number; timestamp: string };
+type VoiceEvent = { timestamp: string; guildId: string; userId: string; userTag: string; type: string; channelId: string | null; channelName: string | null; fromChannelId?: string | null; fromChannelName?: string | null };
+
+type Warning = { caseId: number; reason: string; moderatorTag: string; timestamp: string };
+type TempBanEntry = { guildId: string; userId: string; userTag: string; moderatorTag: string; reason: string; expiresAt: number };
+type TimeoutEntry = { userId: string; userTag: string; displayName: string; avatarURL: string; until: string | null };
+type Invite = { code: string; url: string; uses: number | null; maxUses: number | null; creatorTag: string | null; channelName: string | null; temporary: boolean; expiresAt: string | null; createdAt: string | null };
+type AuditEntry = { id: string; action: number; actionType: string; executorTag: string | null; executorId: string | null; targetId: string | null; reason: string | null; createdAt: string };
+type LogChannels = { logChannelId: string | null; banLogChannelId: string | null; generalLogChannelId: string | null; inviteLogChannelId: string | null; messageLogChannelId: string | null; ticketLogChannelId: string | null; supportLogChannelId: string | null };
+type EmbedField = { name: string; value: string; inline?: boolean };
+type CustomCmd = {
+  name: string; createdBy: string; createdAt: string;
+  actionType?: "text" | "embed" | "moderation" | "role";
+  response?: string;
+  embedTitle?: string; embedDescription?: string; embedColor?: number;
+  embedFields?: EmbedField[]; embedFooter?: string; embedThumbnail?: string; embedImage?: string;
+  modAction?: "kick" | "ban" | "timeout" | "warn";
+  modTarget?: "mentioned" | "author"; modDuration?: number; modReason?: string;
+  roleAction?: "add" | "remove" | "toggle"; roleId?: string; roleTarget?: "author" | "mentioned";
+};
+type GuildRole = { id: string; name: string; color: number; position: number };
+type GlobalMemberResult = { guildId: string; guildName: string; userTag: string; displayName: string; avatarURL: string; joinedAt: string | null; roles: { id: string; name: string }[]; timedOut: boolean; warnCount: number };
+type BotReplyLog = { id: string; type: string; guildId: string | null; timestamp: number; command?: string; userId?: string; userTag?: string; level?: "error" | "warn" | "info"; replyText?: string; errCode?: string; errMessage?: string };
+type BotStatusEvent = { id: string; type: string; timestamp: number; detail: string; ping?: number; errCode?: string };
+type UserCmd = { id: number; type: string; guildId: string | null; guildName: string | null; userId: string; userTag: string; data: Record<string, unknown>; createdAt: string };
+type SuspectAcc = { id: number; guildId: string; guildName: string; userId: string; userTag: string; accountAgeDays: number; hasNoAvatar: boolean; reasons: string[]; actionTaken: string; securityLevel: number; detectedAt: string; vpnSuspicion: boolean; userLocale: string | null; verified: boolean; tags: string[] };
+type MemberProfile = {
+  userId: string; userTag: string | null; displayName: string | null; avatarURL: string | null;
+  joinedAt: string | null; roles: { id: string; name: string; color: string }[];
+  timed_out_until: string | null; warns: Warning[]; notes: NoteEntry[];
+  tempban: TempBanEntry | null; quarantine: QuarantineEntry | null; voiceEvents: VoiceEvent[];
+};
+
+const HISTOIRES_DASHBOARD: { titre: string; texte: string }[] = [
+  {
+    titre: "Le détective",
+    texte: "Un détective célèbre se vante : « Je résous chaque enquête en 24h. »\nLe lendemain, sa femme lui demande : « Tu as trouvé tes clés ? »\n« …Je dois me donner encore 23h. »",
+  },
+  {
+    titre: "La boulangerie",
+    texte: "Un client entre dans une boulangerie et demande :\n« Votre pain est-il frais du jour ? »\nLe boulanger répond :\n« Monsieur, il est si frais que hier il n'existait pas encore. »",
+  },
+  {
+    titre: "Le médecin",
+    texte: "Le médecin annonce à son patient :\n« J'ai une bonne et une mauvaise nouvelle. »\n« La mauvaise d'abord. »\n« Vous n'avez plus que 24h à vivre. »\n« Et la bonne ?! »\n« J'aurais dû vous le dire hier. »",
+  },
+  {
+    titre: "L'informaticien",
+    texte: "Un informaticien se noie.\nSes collègues crient : « Appelle à l'aide ! »\nIl répond : « J'ai déjà essayé… Aucun service n'a répondu. »",
+  },
+  {
+    titre: "Le perroquet",
+    texte: "Un homme achète un perroquet au marché.\nVendeur : « Il parle français, anglais et espagnol. »\nAprès trois semaines, le perroquet n'a rien dit.\nL'homme rappelle : « Il n'a toujours pas parlé ! »\nVendeur : « Ah, j'avais oublié de vous dire — il est observateur. »",
+  },
+  {
+    titre: "Le plongeur",
+    texte: "Un plongeur remonte à la surface et dit :\n« Incroyable, une épave à 30m de fond ! »\nSon ami répond : « C'est rien, j'en ai vu une à 50m. »\nLe plongeur : « Ouais, mais la mienne avait encore ses roues. »",
+  },
+  {
+    titre: "Le chef cuisinier",
+    texte: "Un chef annonce fièrement :\n« Mon nouveau plat met 30 minutes à préparer et 3 secondes à manger. »\nClient : « Donc c'est un snack ? »\nChef : « Non, c'est de l'art éphémère. »",
+  },
+  {
+    titre: "Le philosophe",
+    texte: "Un philosophe demande à son ami :\n« Si on te donnait tout l'or du monde, qu'est-ce que tu ferais ? »\nL'ami : « Je le mettrais à la banque. »\nLe philosophe : « Et si la banque faisait faillite ? »\nL'ami : « Je l'enterrerais dans mon jardin. »\nLe philosophe : « Et si quelqu'un le trouvait ? »\nL'ami : « Bon, t'as pas une question moins chiante ? »",
+  },
+];
+
+const CHANNEL_TYPE_ICON: Record<number, React.ReactNode> = {
+  0: <Hash className="h-3.5 w-3.5" />, 2: <Volume2 className="h-3.5 w-3.5" />,
+  4: <FolderOpen className="h-3.5 w-3.5" />, 5: <Hash className="h-3.5 w-3.5" />, 15: <Hash className="h-3.5 w-3.5" />,
+};
+const VERIFICATION_LABELS = ["Aucune", "Faible", "Moyenne", "Élevée", "Très élevée"];
+
+const ALL_COMMANDS = [
+  "kick","ban","unban","softban","timeout","untimeout","voicemute","warn","warnings","clear",
+  "slowmode","lock","unlock","lockserver","nuke","role","nickname","revokeinvites","raidmode",
+  "joinlock","hoistrole","blacklist","blacklistinfo","sanctioninfo","blacklistinvite",
+  "dashboard","setlog","setbanlog","settranscript","ticketconfig","setgenlog","setinvitelog",
+  "ticketpanel","ticket","transcript","testcaptcha","checkinvite","checkinvites",
+  "userinfo","serverinfo","serverstats","infome","getid","botinfo","commandlist",
+  "rolerequest","suggestion","support","reglement",
+  "secure","secureinfo","sendsecuredm","antiinsult","antiwebhook","whitelistinvite",
+  "notify","errortest","testinviteembed","tempban","massban","note","purge",
+  "antilink","antighostping","autokick","scamlink","badname","antialt","verify-dashboard",
+].sort();
+
+// ── Catégories de navigation ──────────────────────────────────────────────────
+const CATEGORY_TABS: Record<string, { label: string; icon: string; tabs: string[] }> = {
+  general:   { label: "Général",    icon: "🏠", tabs: ["messages","channels","members","server","global-search","botstatus","tests","voicepresence","global-dashboard","sondage","assistant"] },
+  securite:  { label: "Sécurité",   icon: "🛡️", tabs: ["blacklist","bl-serveur","bl-tag","captchalogs","automod","quarantine","suspectaccounts","mod-roles","mass-action","spy-members","verif-check","invitebl","word-bl","tempbans","timeouts","warns","maintenance","global-tempbans","anti-spam","immune-list","whitelist-members"] },
+  moderation:{ label: "Modération", icon: "⚖️", tabs: ["actionlog","audit-log","notes","member-profile","global-history","invite-lookup"] },
+  support:   { label: "Support",    icon: "🎫", tabs: ["transcripts","tickets","usercommands","notif-roles"] },
+  config:    { label: "Config",     icon: "⚙️", tabs: ["botsettings","disabled","log-channels","cloneconfig","invitations","custom-cmds","config-json","server-bl","auto-role"] },
+  logs:      { label: "Logs",       icon: "📋", tabs: ["bot-reply-logs","voicelog","cmd-stats"] },
+  ia:        { label: "IA Mod",     icon: "🤖", tabs: ["ai-mod-config","ai-trust-lookup","ai-raid-status","ai-risky","ai-commands"] },
+  activite:  { label: "Activité",   icon: "📊", tabs: ["activity-ranking","activity-voice","activity-tiers"] },
+};
+function tabCategory(tab: string): string {
+  for (const [key, { tabs }] of Object.entries(CATEGORY_TABS)) if (tabs.includes(tab)) return key;
+  return "general";
+}
+
+export default function OwnerPanel() {
+  const { guildId } = useParams<{ guildId: string }>();
+  const [, setLocation] = useLocation();
+  const { toast } = useToast();
+  const user = decodeToken();
+
+  // ── Password gate ──────────────────────────────────────────────────────────
+  const [unlocked, setUnlocked] = useState<boolean>(() => sessionStorage.getItem("owner_unlocked") === "1");
+  const [pwInput, setPwInput] = useState("");
+  const [pwLoading, setPwLoading] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+
+  async function handleUnlock(e: React.FormEvent) {
+    e.preventDefault();
+    setPwLoading(true); setPwError(null);
+    try {
+      const res = await apiFetch("/api/owner/unlock", { method: "POST", body: JSON.stringify({ password: pwInput }) });
+      if (res.ok) { sessionStorage.setItem("owner_unlocked", "1"); setUnlocked(true); setPwInput(""); }
+      else { const d = await res.json() as { error?: string }; setPwError(d.error ?? "Mot de passe incorrect."); setPwInput(""); }
+    } catch { setPwError("Erreur réseau."); }
+    finally { setPwLoading(false); }
+  }
+
+  useEffect(() => { if (!getToken()) { setLocation("/"); return; } }, [setLocation]);
+
+  // ── Core state ─────────────────────────────────────────────────────────────
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [members, setMembers] = useState<Member[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [guildName, setGuildName] = useState("");
+
+  // Messages
+  const [selectedChannelId, setSelectedChannelId] = useState("");
+  const [messageContent, setMessageContent] = useState("");
+  const [sendingMsg, setSendingMsg] = useState(false);
+
+  // Channels
+  const [newChannelName, setNewChannelName] = useState("");
+  const [newChannelType, setNewChannelType] = useState<string>("text");
+  const [newChannelParent, setNewChannelParent] = useState("");
+  const [newChannelTopic, setNewChannelTopic] = useState("");
+  const [creatingChannel, setCreatingChannel] = useState(false);
+
+  // Members
+  const [actionMemberId, setActionMemberId] = useState("");
+  const [actionReason, setActionReason] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
+
+  // Server
+  const [guildEditName, setGuildEditName] = useState("");
+  const [guildVerifLevel, setGuildVerifLevel] = useState<string>("0");
+  const [guildSystemChannel, setGuildSystemChannel] = useState("");
+  const [savingSettings, setSavingSettings] = useState(false);
+
+  // ── Blacklist state ────────────────────────────────────────────────────────
+  const [blacklist, setBlacklist] = useState<BlacklistEntry[]>([]);
+  const [blLoading, setBlLoading] = useState(false);
+  const [newBlUserId, setNewBlUserId] = useState("");
+  const [newBlUserTag, setNewBlUserTag] = useState("");
+  const [newBlReason, setNewBlReason] = useState("");
+  const [addingBl, setAddingBl] = useState(false);
+  const [blSearch, setBlSearch] = useState("");
+
+  // ── Disabled commands state ────────────────────────────────────────────────
+  const [disabledCmds, setDisabledCmds] = useState<DisabledCommand[]>([]);
+  const [dcLoading, setDcLoading] = useState(false);
+  const [newCmdName, setNewCmdName] = useState("");
+  const [addingDc, setAddingDc] = useState(false);
+
+  // ── Transcripts state ─────────────────────────────────────────────────────
+  const [transcripts, setTranscripts] = useState<TranscriptMeta[]>([]);
+  const [trLoading, setTrLoading] = useState(false);
+  const [viewTranscript, setViewTranscript] = useState<TranscriptFull | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [trSearch, setTrSearch] = useState("");
+
+  // ── Bot settings state ────────────────────────────────────────────────────
+  const [botSettings, setBotSettings] = useState<BotSettings | null>(null);
+  const [bsLoading, setBsLoading] = useState(false);
+  const [bsSaving, setBsSaving] = useState(false);
+
+  // ── Captcha logs state ────────────────────────────────────────────────────
+  const [captchaLogs, setCaptchaLogs] = useState<CaptchaLogEntry[]>([]);
+  const [clLoading, setClLoading] = useState(false);
+  const [clFilter, setClFilter] = useState("");
+
+  // ── Test Bot state ────────────────────────────────────────────────────────
+  const [testBots, setTestBots] = useState<{ id: string; name: string; channelId: string }[]>([]);
+  const [tbLoading, setTbLoading] = useState(false);
+  const [tbNewName, setTbNewName] = useState("");
+  const [tbNewChannel, setTbNewChannel] = useState("");
+  const [tbCreating, setTbCreating] = useState(false);
+  const [tbSelected, setTbSelected] = useState("");
+  const [tbAction, setTbAction] = useState("message");
+  const [tbContent, setTbContent] = useState("");
+  const [tbCount, setTbCount] = useState(6);
+  const [tbSending, setTbSending] = useState(false);
+  const [errTestLoading, setErrTestLoading] = useState(false);
+
+  // ── Embed builder state ────────────────────────────────────────────────────
+  const [embedChannelId, setEmbedChannelId] = useState("");
+  const [embedTitle, setEmbedTitle] = useState("");
+  const [embedDesc, setEmbedDesc] = useState("");
+  const [embedColor, setEmbedColor] = useState("#5865f2");
+  const [embedImage, setEmbedImage] = useState("");
+  const [embedFooter, setEmbedFooter] = useState("");
+  const [sendingEmbed, setSendingEmbed] = useState(false);
+
+  // ── Schedule message state ─────────────────────────────────────────────────
+  const [schedChannelId, setSchedChannelId] = useState("");
+  const [schedContent, setSchedContent] = useState("");
+  const [schedDelay, setSchedDelay] = useState("10");
+  const [scheduling, setScheduling] = useState(false);
+
+  // ── Edit message state ─────────────────────────────────────────────────────
+  const [editChannelId, setEditChannelId] = useState("");
+  const [editMsgId, setEditMsgId] = useState("");
+  const [editContent, setEditContent] = useState("");
+  const [editing, setEditing] = useState(false);
+
+  // ── Unban state ────────────────────────────────────────────────────────────
+  const [unbanId, setUnbanId] = useState("");
+  const [unbanReason, setUnbanReason] = useState("");
+  const [unbanning, setUnbanning] = useState(false);
+
+  // ── Role management state ──────────────────────────────────────────────────
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [roleMemberId, setRoleMemberId] = useState("");
+  const [roleId, setRoleId] = useState("");
+  const [roleAction, setRoleAction] = useState<"add" | "remove">("add");
+  const [roleAssignLoading, setRoleAssignLoading] = useState(false);
+  const [roleFilterId, setRoleFilterId] = useState("");
+
+  // ── Channel moderation state ───────────────────────────────────────────────
+  const [lockChannelId, setLockChannelId] = useState("");
+  const [locking, setLocking] = useState(false);
+  const [purgeChannelId, setPurgeChannelId] = useState("");
+  const [purgeLimit, setPurgeLimit] = useState("50");
+  const [purgeUserId, setPurgeUserId] = useState("");
+  const [purging, setPurging] = useState(false);
+  const [slowChannelId, setSlowChannelId] = useState("");
+  const [slowSeconds, setSlowSeconds] = useState("5");
+  const [slowing, setSlowing] = useState(false);
+
+  // ── Automod state ──────────────────────────────────────────────────────────
+  const [automodCfg, setAutomodCfg] = useState<AutomodCfg | null>(null);
+  const [amLoading, setAmLoading] = useState(false);
+  const [amSaving, setAmSaving] = useState(false);
+  const [amNewWord, setAmNewWord] = useState("");
+  const [amNewDomain, setAmNewDomain] = useState("");
+  const [amAltPreview, setAmAltPreview] = useState<string[]>([]);
+  const [amAltSelected, setAmAltSelected] = useState<Set<string>>(new Set());
+  const [amAltOpen, setAmAltOpen] = useState(false);
+
+  // ── Anti-protection state ────────────────────────────────────────────────────
+  const [antiProtection, setAntiProtection] = useState<AntiProtection | null>(null);
+  const [apLoading, setApLoading] = useState(false);
+  const [apSaving, setApSaving] = useState(false);
+  const [stripRoleId, setStripRoleId] = useState("");
+  const [strippingPerms, setStrippingPerms] = useState(false);
+
+  // ── Suspect keywords state ────────────────────────────────────────────────────
+  const [suspectKeywords, setSuspectKeywords] = useState<string[]>([]);
+  const [skLoading, setSkLoading] = useState(false);
+  const [skNewWord, setSkNewWord] = useState("");
+  const [skScanLoading, setSkScanLoading] = useState(false);
+  const [skScanResult, setSkScanResult] = useState<{ scanned: number; matched: number } | null>(null);
+
+  // ── Mod roles state ───────────────────────────────────────────────────────────
+  type ModRolePermission = { key: string; label: string; has: boolean };
+  type ModRole = { id: string; name: string; color: string; position: number; memberCount: number; permissions: ModRolePermission[] };
+  const [modRoles, setModRoles] = useState<ModRole[]>([]);
+  const [modRolesLoading, setModRolesLoading] = useState(false);
+  const [modRoleEditing, setModRoleEditing] = useState<string | null>(null);
+  const [modRoleSaving, setModRoleSaving] = useState(false);
+  const modRolesSnapshotRef = useRef<Map<string, { key: string; label: string; has: boolean }[]>>(new Map());
+
+  // ── BL Serveur state ────────────────────────────────────────────────────────
+  const [blServers, setBlServers] = useState<string[]>([]);
+  const [blServersLoading, setBlServersLoading] = useState(false);
+  const [blServerNew, setBlServerNew] = useState("");
+
+  // ── Histoires dashboard state ─────────────────────────────────────────────────
+  const [histoireChannelId, setHistoireChannelId] = useState("");
+  const [histoirePosting, setHistoirePosting] = useState<number | null>(null);
+
+
+  // ── Whitelist membres state ───────────────────────────────────────────────────
+  const [memberWlList, setMemberWlList] = useState<string[] | null>(null);
+  const [memberWlLoading, setMemberWlLoading] = useState(false);
+  const [newMemberWlId, setNewMemberWlId] = useState("");
+  const [addingMemberWl, setAddingMemberWl] = useState(false);
+
+  // ── Assistant config state ────────────────────────────────────────────────────
+  type AssistantCfg = { enabled: boolean };
+  const [assistantCfg, setAssistantCfg] = useState<AssistantCfg | null>(null);
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantSaving, setAssistantSaving] = useState(false);
+
+  // ── Immune list state ─────────────────────────────────────────────────────────
+  type ImmuneEntry = { userId: string; label: string; addedAt: string };
+  const [immuneList, setImmuneList] = useState<{ permanent: ImmuneEntry[]; dynamic: ImmuneEntry[] } | null>(null);
+  const [immuneLoading, setImmuneLoading] = useState(false);
+  const [newImmuneUserId, setNewImmuneUserId] = useState("");
+  const [newImmuneLabel, setNewImmuneLabel] = useState("");
+  const [addingImmune, setAddingImmune] = useState(false);
+
+  // ── BL Tag state ─────────────────────────────────────────────────────────────
+  const [blTags, setBlTags] = useState<string[]>([]);
+  const [blTagsLoading, setBlTagsLoading] = useState(false);
+  const [blTagNew, setBlTagNew] = useState("");
+
+  // ── Bot status state ────────────────────────────────────────────────────────
+  const [botStatus, setBotStatus] = useState<BotStatusInfo | null>(null);
+  const [botStatusLoading, setBotStatusLoading] = useState(false);
+  const [botStatusEvents, setBotStatusEvents] = useState<BotStatusEvent[]>([]);
+  const [bseLoading, setBseLoading] = useState(false);
+  const [botActionLoading, setBotActionLoading] = useState<string>("");
+  const [presenceStatus, setPresenceStatus] = useState<"online" | "idle" | "dnd" | "invisible">("online");
+  const [presenceActivityType, setPresenceActivityType] = useState("0");
+  const [presenceActivityText, setPresenceActivityText] = useState("");
+  const [presenceSaving, setPresenceSaving] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcasting, setBroadcasting] = useState(false);
+  const [broadcastResults, setBroadcastResults] = useState<{ guildName: string; ok: boolean; error?: string }[]>([]);
+
+  // ── Verif state ────────────────────────────────────────────────────────────
+  interface VerifAccount {
+    ageDays: number; createdTimestamp: number; hasAvatar: boolean;
+    flags: string[]; trustFlags: string[]; vpnFlagged: boolean;
+    riskScore: number; riskLevel: string; guildsSeenCount: number;
+    suspectHistory: { guildName: string; reasons: string[]; actionTaken: string; vpnSuspicion: boolean; detectedAt: string | null }[];
+  }
+  interface VerifSpecific {
+    mode: "specific"; userId: string; tag: string; avatar: string;
+    found: boolean; guildId?: string; guildName?: string;
+    joinedAt?: string | null; roles?: { id: string; name: string }[];
+    account?: VerifAccount; error?: string;
+  }
+  interface VerifBlacklist {
+    mode: "blacklist"; userId: string; tag: string; avatar: string; foundCount: number;
+    results: { guildId: string; label: string; found: boolean; botPresent: boolean }[];
+    account?: VerifAccount;
+  }
+  type VerifResult = VerifSpecific | VerifBlacklist;
+
+  const [verifUserId, setVerifUserId] = useState("");
+  const [verifGuildId, setVerifGuildId] = useState("");
+  const [verifLoading, setVerifLoading] = useState(false);
+  const [verifResult, setVerifResult] = useState<VerifResult | null>(null);
+
+  // ── Spy Members state ──────────────────────────────────────────────────────
+  interface SpyMember { id: string; tag: string; username: string; joinedAt: string | null; }
+  interface SpyServer { id: string; name: string; memberCount: number; joinedAt: string | null; }
+  const [spyMode, setSpyMode] = useState<"guild" | "user">("guild");
+  const [spyGuildId, setSpyGuildId] = useState("");
+  const [spyUserId, setSpyUserId] = useState("");
+  const [spyResult, setSpyResult] = useState<{ guildName: string; memberCount: number; members: SpyMember[] } | null>(null);
+  const [spyUserResult, setSpyUserResult] = useState<{ userId: string; serverCount: number; servers: SpyServer[] } | null>(null);
+  const [spyLoading, setSpyLoading] = useState(false);
+  const [spyBanGuildId, setSpyBanGuildId] = useState("");
+  const [spyBanReason, setSpyBanReason] = useState("");
+  const [spyBanning, setSpyBanning] = useState(false);
+  const [spyFilter, setSpyFilter] = useState("");
+
+  // ── Server Blacklist state ─────────────────────────────────────────────────
+  interface ServerBlEntry { guildId: string; label: string; addedAt: string; }
+  const [serverBl, setServerBl] = useState<ServerBlEntry[]>([]);
+  const [serverBlLoading, setServerBlLoading] = useState(false);
+  const [serverBlNewId, setServerBlNewId] = useState("");
+  const [serverBlNewLabel, setServerBlNewLabel] = useState("");
+  const [serverBlSaving, setServerBlSaving] = useState(false);
+
+  // ── Voice Presence state ───────────────────────────────────────────────────
+  interface VoicePresence { connected: boolean; channelId?: string; channelName?: string; selfMute?: boolean; selfDeaf?: boolean; }
+  const [voicePresence, setVoicePresence] = useState<VoicePresence>({ connected: false });
+  const [vpLoading, setVpLoading] = useState(false);
+  const [vpSelectedChannel, setVpSelectedChannel] = useState("");
+  const [vpNickname, setVpNickname] = useState("");
+  const [vpNickSaving, setVpNickSaving] = useState(false);
+  const [vpJoinMeLoading, setVpJoinMeLoading] = useState(false);
+  const [vpAnnounceText, setVpAnnounceText] = useState("");
+  const [vpAnnouncing, setVpAnnouncing] = useState(false);
+  const [vpAutoJoin, setVpAutoJoin] = useState(true);
+  const [vpAutoJoinSaving, setVpAutoJoinSaving] = useState(false);
+
+  // ── Notif Roles state ──────────────────────────────────────────────────────
+  interface NotifRole { roleId: string; label: string; emoji: string }
+  const [notifRoles, setNotifRoles] = useState<NotifRole[]>([]);
+  const [notifPanelChannelId, setNotifPanelChannelId] = useState("");
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifSending, setNotifSending] = useState(false);
+  const [notifNewRoleId, setNotifNewRoleId] = useState("");
+  const [notifNewLabel, setNotifNewLabel] = useState("");
+  const [notifNewEmoji, setNotifNewEmoji] = useState("");
+
+  const fetchNotifRoles = useCallback(async () => {
+    if (!guildId) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/notif-roles`);
+    if (r.ok) {
+      const d = await r.json() as { notifRoles: NotifRole[]; notifPanelChannelId: string | null };
+      setNotifRoles(d.notifRoles ?? []);
+      setNotifPanelChannelId(d.notifPanelChannelId ?? "");
+    }
+  }, [guildId]);
+
+  // ── Tickets state ──────────────────────────────────────────────────────────
+  const [tickets, setTickets] = useState<ActiveTicket[]>([]);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [closingTicket, setClosingTicket] = useState("");
+  const [closeTicketReason, setCloseTicketReason] = useState("");
+
+  // ── Notes state ────────────────────────────────────────────────────────────
+  const [notesByUser, setNotesByUser] = useState<NotesByUser[]>([]);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [noteSearch, setNoteSearch] = useState("");
+
+  // ── Clone config state ─────────────────────────────────────────────────────
+  const [allGuilds, setAllGuilds] = useState<GuildInfo[]>([]);
+  const [cloneTarget, setCloneTarget] = useState("");
+  const [cloning, setCloning] = useState(false);
+  const [cloneResult, setCloneResult] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  // ── Invite blacklist state ─────────────────────────────────────────────────
+  const [inviteBl, setInviteBl] = useState<InviteBlEntry[]>([]);
+  const [inviteBlLoading, setInviteBlLoading] = useState(false);
+  const [iblSearch, setIblSearch] = useState("");
+
+  // ── Action log state ───────────────────────────────────────────────────────
+  const [actionLog, setActionLog] = useState<ActionLogEntry[]>([]);
+  const [actionLogLoading, setActionLogLoading] = useState(false);
+
+  // ── Quarantaine state ──────────────────────────────────────────────────────
+  const [quarantineList, setQuarantineList] = useState<QuarantineEntry[]>([]);
+  const [quarantineLoading, setQuarantineLoading] = useState(false);
+  const [liftingQ, setLiftingQ] = useState("");
+
+  // ── Voice log state ────────────────────────────────────────────────────────
+  const [voiceLog, setVoiceLog] = useState<VoiceEvent[]>([]);
+  const [voiceLogLoading, setVoiceLogLoading] = useState(false);
+  const [voiceSearch, setVoiceSearch] = useState("");
+
+  // ── Fiche membre ───────────────────────────────────────────────────────────
+  const [profileId, setProfileId] = useState("");
+  const [profileData, setProfileData] = useState<MemberProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // ── Warns ─────────────────────────────────────────────────────────────────
+  const [warnsUserId, setWarnsUserId] = useState("");
+  const [warnsData, setWarnsData] = useState<Warning[] | null>(null);
+  const [warnsLoading, setWarnsLoading] = useState(false);
+
+  // ── Tempbans ──────────────────────────────────────────────────────────────
+  const [tempbans, setTempbans] = useState<TempBanEntry[]>([]);
+  const [tempbansLoading, setTempbansLoading] = useState(false);
+
+  // ── Timeouts ──────────────────────────────────────────────────────────────
+  const [timeouts, setTimeouts] = useState<TimeoutEntry[]>([]);
+  const [timeoutsLoading, setTimeoutsLoading] = useState(false);
+
+  // ── Maintenance ───────────────────────────────────────────────────────────
+  const [maintenanceState, setMaintenanceState] = useState<{ active: boolean; message: string } | null>(null);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  const [maintenanceMsgDraft, setMaintenanceMsgDraft] = useState("");
+
+  // ── User Commands state ────────────────────────────────────────────────────
+  const [userCmds, setUserCmds] = useState<UserCmd[]>([]);
+  const [ucLoading, setUcLoading] = useState(false);
+  const [ucTypeFilter, setUcTypeFilter] = useState<"all" | "rolerequest" | "suggestion" | "support">("all");
+  const [ucSearch, setUcSearch] = useState("");
+  const [ucCfg, setUcCfg] = useState({ supportChannelId: "", supportPingRoleIds: "", roleRequestChannelId: "", roleRequestPingRoleIds: "" });
+  const [ucCfgSaving, setUcCfgSaving] = useState(false);
+
+  // ── Suspect Accounts state ─────────────────────────────────────────────────
+  const [suspectAccounts, setSuspectAccounts] = useState<SuspectAcc[]>([]);
+  const [saLoading, setSaLoading] = useState(false);
+  const [saActionLoading, setSaActionLoading] = useState<number | null>(null);
+  const [saFilterGuild, setSaFilterGuild] = useState<string>("all");
+  const [saFilterAction, setSaFilterAction] = useState<string>("all");
+  const [saFilterVpn, setSaFilterVpn] = useState<boolean>(false);
+  const [saFilterVerified, setSaFilterVerified] = useState<"all" | "verified" | "unverified">("all");
+  const [saTimeoutDuration, setSaTimeoutDuration] = useState<number>(86_400_000);
+  const [saBulkLoading, setSaBulkLoading] = useState(false);
+  const [saTagInputs, setSaTagInputs] = useState<Record<number, string>>({});
+  const [saFilterTag, setSaFilterTag] = useState<string>("");
+
+  // ── Navigation par catégorie ──────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState("messages");
+  const [activeCategory, setActiveCategory] = useState<string>("general");
+
+  // ── Masse-action ──────────────────────────────────────────────────────────
+  const [massRoleId, setMassRoleId] = useState("");
+  const [massAction, setMassAction] = useState<"kick" | "ban" | "timeout">("kick");
+  const [massReason, setMassReason] = useState("");
+  const [massTimeoutMins, setMassTimeoutMins] = useState(60);
+  const [massLoading, setMassLoading] = useState(false);
+
+  // ── Invitations ───────────────────────────────────────────────────────────
+  const [invites, setInvites] = useState<Invite[]>([]);
+  const [invitesLoading, setInvitesLoading] = useState(false);
+  const [newInviteChannelId, setNewInviteChannelId] = useState("");
+  const [newInviteMaxAge, setNewInviteMaxAge] = useState(0);
+  const [newInviteMaxUses, setNewInviteMaxUses] = useState(0);
+  const [newInviteTemporary, setNewInviteTemporary] = useState(false);
+
+  // ── Audit Log ─────────────────────────────────────────────────────────────
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+
+  // ── Log Channels ──────────────────────────────────────────────────────────
+  const [logChannels, setLogChannels] = useState<LogChannels | null>(null);
+  const [logChannelsDraft, setLogChannelsDraft] = useState<LogChannels>({ logChannelId: null, banLogChannelId: null, generalLogChannelId: null, inviteLogChannelId: null, messageLogChannelId: null, ticketLogChannelId: null, supportLogChannelId: null });
+  const [setupLogsLoading, setSetupLogsLoading] = useState(false);
+  const [logChannelsLoading, setLogChannelsLoading] = useState(false);
+  const [logChannelsSaving, setLogChannelsSaving] = useState(false);
+
+  // ── Config JSON ───────────────────────────────────────────────────────────
+  const [configImportJson, setConfigImportJson] = useState("");
+  const [configImportLoading, setConfigImportLoading] = useState(false);
+  const [configExportLoading, setConfigExportLoading] = useState(false);
+
+  // ── Commandes custom ──────────────────────────────────────────────────────
+  const [customCmds, setCustomCmds] = useState<CustomCmd[]>([]);
+  const [customCmdsLoading, setCustomCmdsLoading] = useState(false);
+  const [ccNewName, setCcNewName] = useState("");
+  const [ccNewResponse, setCcNewResponse] = useState("");
+  const [customCmdSaving, setCustomCmdSaving] = useState(false);
+  const [ccActionType, setCcActionType] = useState<"text" | "embed" | "moderation" | "role">("text");
+  // embed
+  const [ccEmbedTitle, setCcEmbedTitle] = useState("");
+  const [ccEmbedDesc, setCcEmbedDesc] = useState("");
+  const [ccEmbedColor, setCcEmbedColor] = useState("#5865f2");
+  const [ccEmbedFooter, setCcEmbedFooter] = useState("");
+  const [ccEmbedThumbnail, setCcEmbedThumbnail] = useState("");
+  const [ccEmbedImage, setCcEmbedImage] = useState("");
+  const [ccEmbedFields, setCcEmbedFields] = useState<EmbedField[]>([]);
+  // moderation
+  const [ccModAction, setCcModAction] = useState<"kick" | "ban" | "timeout" | "warn">("warn");
+  const [ccModTarget, setCcModTarget] = useState<"mentioned" | "author">("mentioned");
+  const [ccModDuration, setCcModDuration] = useState(10);
+  const [ccModReason, setCcModReason] = useState("");
+  // role
+  const [ccRoleAction, setCcRoleAction] = useState<"add" | "remove" | "toggle">("add");
+  const [ccRoleId, setCcRoleId] = useState("");
+  const [ccRoleTarget, setCcRoleTarget] = useState<"author" | "mentioned">("author");
+  const [guildRoles, setGuildRoles] = useState<GuildRole[]>([]);
+  const [guildRolesLoading, setGuildRolesLoading] = useState(false);
+  const [roleWl, setRoleWl] = useState<string[]>([]);
+  const [roleWlSelected, setRoleWlSelected] = useState("");
+
+  // ── Mots globaux ──────────────────────────────────────────────────────────
+  const [wordBl, setWordBl] = useState<string[]>([]);
+  const [wordBlLoading, setWordBlLoading] = useState(false);
+  const [newWord, setNewWord] = useState("");
+  const [wordBlSaving, setWordBlSaving] = useState(false);
+
+  // ── Recherche globale ─────────────────────────────────────────────────────
+  const [searchId, setSearchId] = useState("");
+  const [searchResults, setSearchResults] = useState<GlobalMemberResult[] | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  // ── Logs Bot (bot_reply) ───────────────────────────────────────────────────
+  const [botReplyLogs, setBotReplyLogs] = useState<BotReplyLog[]>([]);
+  const [botReplyLoading, setBotReplyLoading] = useState(false);
+  const [botReplyFilter, setBotReplyFilter] = useState<"all" | "error" | "warn" | "info">("all");
+
+  // ── Sondage ───────────────────────────────────────────────────────────────
+  const [pollChannelId, setPollChannelId] = useState("");
+  const [pollQuestion, setPollQuestion] = useState("");
+  const [pollOptions, setPollOptions] = useState(["", "", "", ""]);
+  const [pollSending, setPollSending] = useState(false);
+
+  // ── Auto-rôle ─────────────────────────────────────────────────────────────
+  const [autoRoleCfg, setAutoRoleCfg] = useState<{ autoRoleId: string | null } | null>(null);
+  const [autoRoleLoading, setAutoRoleLoading] = useState(false);
+
+  // ── IA Mod ────────────────────────────────────────────────────────────────
+  const [aiModCfg, setAiModCfg]       = useState<AiModCfg | null>(null);
+  const [aiModLoading, setAiModLoading] = useState(false);
+  const [aiModDraft, setAiModDraft]   = useState<AiModCfg | null>(null);
+  const [aiTrustId, setAiTrustId]     = useState("");
+  const [aiTrustResult, setAiTrustResult] = useState<AiTrustResult>(null);
+  const [aiTrustLoading, setAiTrustLoading] = useState(false);
+  const [aiRaidStatus, setAiRaidStatus] = useState<AiRaidStatus>(null);
+  const [aiRaidLoading, setAiRaidLoading] = useState(false);
+  const [aiRiskyMembers, setAiRiskyMembers] = useState<AiRiskyMember[]>([]);
+  const [aiRiskyLoading, setAiRiskyLoading] = useState(false);
+  const [autoRoleSaving, setAutoRoleSaving] = useState(false);
+  const [autoRoleDraft, setAutoRoleDraft] = useState("");
+
+  // ── Anti-spam ─────────────────────────────────────────────────────────────
+  type AntiSpamCfg = { antiSpamEnabled: boolean; antiSpamMessages: number; antiSpamWindowSecs: number; antiSpamAction: "timeout"|"kick"|"ban"; antiSpamTimeoutMins: number };
+  const [antiSpamCfg, setAntiSpamCfg] = useState<AntiSpamCfg | null>(null);
+  const [antiSpamLoading, setAntiSpamLoading] = useState(false);
+  const [antiSpamSaving, setAntiSpamSaving] = useState(false);
+
+  // ── Global Tempbans ───────────────────────────────────────────────────────
+  const [globalTempbans, setGlobalTempbans] = useState<TempBanEntry[]>([]);
+  const [globalTbLoading, setGlobalTbLoading] = useState(false);
+
+  // ── Global History ────────────────────────────────────────────────────────
+  type GlobalHistoryData = { userId: string; discordUser: { tag: string; avatarURL: string } | null; warns: { guildId: string; userId: string; warnings: { caseId: number; reason: string; moderatorTag: string; timestamp: string }[] }[]; notes: { guildId: string; userId: string; notes: { id: number; content: string; moderator: string; timestamp: string }[] }[]; tempban: TempBanEntry | null };
+  const [historyUserId, setHistoryUserId] = useState("");
+  const [historyData, setHistoryData] = useState<GlobalHistoryData | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  // ── Global Dashboard ──────────────────────────────────────────────────────
+  type GlobalDashboardData = { guildCount: number; totalMembers: number; totalTempBans: number; totalWarns: number; totalNotes: number; top5Cmds: { name: string; count: number }[]; guilds: { id: string; name: string; memberCount: number; iconURL: string | null; warns: number; tempbans: number; maintenanceActive: boolean; logConfigured: boolean }[] };
+  const [globalDashboard, setGlobalDashboard] = useState<GlobalDashboardData | null>(null);
+  const [globalDashboardLoading, setGlobalDashboardLoading] = useState(false);
+
+  // ── Stats commandes ────────────────────────────────────────────────────────
+  const [cmdStats, setCmdStats] = useState<{ name: string; count: number }[]>([]);
+  const [cmdStatsLoading, setCmdStatsLoading] = useState(false);
+
+  // ── Activité & Tiers ──────────────────────────────────────────────────────
+  type MsgRankEntry = { userId: string; count: number };
+  type VoiceRankEntry = { userId: string; totalMs: number };
+  type ActivityTier = { name: string; minMessages: number; minVoiceMinutes: number; roleId: string | null };
+  type ActivityTiersConfig = { activityTiersEnabled: boolean; activityTierPeriodDays: number; activityTiers: ActivityTier[] };
+  const [msgRanking, setMsgRanking] = useState<MsgRankEntry[]>([]);
+  const [msgRankingLoading, setMsgRankingLoading] = useState(false);
+  const [msgRankPeriod, setMsgRankPeriod] = useState(30);
+  const [voiceRanking, setVoiceRanking] = useState<VoiceRankEntry[]>([]);
+  const [voiceRankingLoading, setVoiceRankingLoading] = useState(false);
+  const [activityTiersConfig, setActivityTiersConfig] = useState<ActivityTiersConfig | null>(null);
+  const [activityTiersLoading, setActivityTiersLoading] = useState(false);
+  const [activityTiersSaving, setActivityTiersSaving] = useState(false);
+
+  // ── Invite Lookup ─────────────────────────────────────────────────────────
+  type InviteLookupGuildResult = { guildId: string; guildName: string; inviterId: string; inviteCode: string; inviterStats: { invited: number; left: number } };
+  type InviteLookupResult = { memberId: string; results: InviteLookupGuildResult[] } | null;
+  const [inviteLookupId, setInviteLookupId] = useState("");
+  const [inviteLookupResult, setInviteLookupResult] = useState<InviteLookupResult>(null);
+  const [inviteLookupLoading, setInviteLookupLoading] = useState(false);
+
+  // ── Fetch helpers ──────────────────────────────────────────────────────────
+  const fetchChannels = useCallback(async () => {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
+    if (r.status === 401 || r.status === 403) { clearToken(); setLocation("/"); return; }
+    if (r.ok) setChannels(await r.json());
+  }, [guildId, setLocation]);
+
+  const fetchMembers = useCallback(async (search = "") => {
+    const qs = search ? `?search=${encodeURIComponent(search)}&limit=50` : "?limit=50";
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/members${qs}`);
+    if (r.ok) setMembers(await r.json());
+  }, [guildId]);
+
+  const fetchGuildMeta = useCallback(async () => {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`);
+    if (!r.ok) return;
+    const r2 = await apiFetch(`/api/dashboard/guilds`);
+    if (r2.ok) {
+      const guilds = await r2.json() as Array<{ id: string; name: string }>;
+      const g = guilds.find((g) => g.id === guildId);
+      if (g) setGuildName(g.name);
+    }
+  }, [guildId]);
+
+  const fetchBlacklist = useCallback(async () => {
+    setBlLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/blacklist");
+      if (r.ok) setBlacklist(await r.json());
+    } finally { setBlLoading(false); }
+  }, []);
+
+  const fetchDisabledCmds = useCallback(async () => {
+    setDcLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`);
+      if (r.ok) setDisabledCmds(await r.json());
+    } finally { setDcLoading(false); }
+  }, [guildId]);
+
+  const fetchTranscripts = useCallback(async () => {
+    setTrLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/transcripts?guildId=${guildId}&limit=100`);
+      if (r.ok) setTranscripts(await r.json());
+    } finally { setTrLoading(false); }
+  }, [guildId]);
+
+  const fetchBotSettings = useCallback(async () => {
+    setBsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`);
+      if (r.ok) setBotSettings(await r.json());
+    } finally { setBsLoading(false); }
+  }, [guildId]);
+
+  const fetchRoleWl = useCallback(async () => {
+    if (!guildId) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/role-whitelist`);
+    if (r.ok) { const d = await r.json() as { roleIds: string[] }; setRoleWl(d.roleIds); }
+  }, [guildId]);
+
+  const fetchCaptchaLogs = useCallback(async () => {
+    setClLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/captcha-logs?limit=300`);
+      if (r.ok) setCaptchaLogs(await r.json());
+    } finally { setClLoading(false); }
+  }, [guildId]);
+
+  const fetchTestBots = useCallback(async () => {
+    if (!guildId) return;
+    setTbLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot`);
+      if (r.ok) setTestBots(await r.json());
+    } finally { setTbLoading(false); }
+  }, [guildId]);
+
+  const fetchRoles = useCallback(async () => {
+    setRolesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/roles`);
+      if (r.ok) setRoles(await r.json());
+    } finally { setRolesLoading(false); }
+  }, [guildId]);
+
+  const fetchAutomod = useCallback(async () => {
+    setAmLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/automod`);
+      if (r.ok) setAutomodCfg(await r.json());
+    } finally { setAmLoading(false); }
+  }, [guildId]);
+
+  const fetchTickets = useCallback(async () => {
+    setTicketsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tickets`);
+      if (r.ok) setTickets(await r.json());
+    } finally { setTicketsLoading(false); }
+  }, [guildId]);
+
+  const fetchAntiProtectionCb = useCallback(async () => {
+    setApLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-protection`);
+      if (r.ok) setAntiProtection(await r.json() as AntiProtection);
+    } finally { setApLoading(false); }
+  }, [guildId]);
+
+  const fetchSuspectKeywords = useCallback(async () => {
+    setSkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords`);
+      if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); }
+    } finally { setSkLoading(false); }
+  }, [guildId]);
+
+  const fetchMemberWl = useCallback(async () => {
+    if (!guildId) return;
+    setMemberWlLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/whitelist-members`);
+      if (r.ok) { const d = await r.json() as { whitelistedMemberIds: string[] }; setMemberWlList(d.whitelistedMemberIds); }
+    } finally { setMemberWlLoading(false); }
+  }, [guildId]);
+
+  const addToMemberWl = async () => {
+    if (!guildId || !newMemberWlId.trim()) return;
+    setAddingMemberWl(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/whitelist-members`, {
+        method: "POST", body: JSON.stringify({ userId: newMemberWlId.trim() }),
+      });
+      if (r.ok) { toast({ title: "✅ Membre whitelisté" }); setNewMemberWlId(""); await fetchMemberWl(); }
+      else { const d = await r.json() as { error?: string }; toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+    } finally { setAddingMemberWl(false); }
+  };
+
+  const removeFromMemberWl = async (userId: string) => {
+    if (!guildId) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/whitelist-members/${userId}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Retiré de la whitelist ✓" }); await fetchMemberWl(); }
+    else toast({ title: "Erreur", variant: "destructive" });
+  };
+
+  const fetchAssistantCfg = useCallback(async () => {
+    setAssistantLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/assistant-config");
+      if (r.ok) {
+        const d = await r.json() as AssistantCfg;
+        setAssistantCfg(d);
+      }
+    } finally { setAssistantLoading(false); }
+  }, []);
+
+  const saveAssistantCfg = async (patch: Partial<AssistantCfg>) => {
+    setAssistantSaving(true);
+    try {
+      const r = await apiFetch("/api/owner/assistant-config", { method: "PATCH", body: JSON.stringify(patch) });
+      if (r.ok) { setAssistantCfg(await r.json()); toast({ title: "✅ Config assistant sauvegardée" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setAssistantSaving(false); }
+  };
+
+  const fetchImmuneList = useCallback(async () => {
+    setImmuneLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/immune-list");
+      if (r.ok) setImmuneList(await r.json());
+    } finally { setImmuneLoading(false); }
+  }, []);
+
+  const addToImmuneList = async () => {
+    if (!newImmuneUserId.trim()) return;
+    setAddingImmune(true);
+    try {
+      const r = await apiFetch("/api/owner/immune-list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: newImmuneUserId.trim(), label: newImmuneLabel.trim() || newImmuneUserId.trim() }),
+      });
+      if (r.ok) {
+        toast({ title: "✅ Utilisateur immunisé", description: `${newImmuneUserId} ajouté à la liste.` });
+        setNewImmuneUserId(""); setNewImmuneLabel("");
+        await fetchImmuneList();
+      } else {
+        const d = await r.json() as { error?: string };
+        toast({ title: "Erreur", description: d.error ?? "Impossible d'ajouter", variant: "destructive" });
+      }
+    } finally { setAddingImmune(false); }
+  };
+
+  const removeFromImmuneList = async (userId: string) => {
+    const r = await apiFetch(`/api/owner/immune-list/${userId}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Retiré de la liste ✓" }); await fetchImmuneList(); }
+    else {
+      const d = await r.json() as { error?: string };
+      toast({ title: "Erreur", description: d.error ?? "Impossible de retirer", variant: "destructive" });
+    }
+  };
+
+  const fetchBlServers = useCallback(async () => {
+    setBlServersLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers`);
+      if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); }
+    } finally { setBlServersLoading(false); }
+  }, [guildId]);
+
+  const fetchBlTags = useCallback(async () => {
+    setBlTagsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags`);
+      if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); }
+    } finally { setBlTagsLoading(false); }
+  }, [guildId]);
+
+  useEffect(() => {
+    if (!unlocked) return;
+    setLoading(true);
+    Promise.all([fetchChannels(), fetchMembers(), fetchGuildMeta()]).finally(() => setLoading(false));
+    fetchBlacklist();
+    fetchDisabledCmds();
+    fetchTranscripts();
+    fetchBotSettings();
+    fetchAntiProtectionCb();
+    fetchCaptchaLogs();
+    fetchTestBots();
+    fetchRoles();
+    fetchAutomod();
+    fetchTickets();
+    fetchSuspectKeywords();
+    fetchBlServers();
+    fetchBlTags();
+    fetchRoleWl();
+  }, [unlocked, fetchChannels, fetchMembers, fetchGuildMeta, fetchBlacklist, fetchDisabledCmds, fetchTranscripts, fetchBotSettings, fetchAntiProtectionCb, fetchCaptchaLogs, fetchTestBots, fetchRoles, fetchAutomod, fetchTickets, fetchSuspectKeywords, fetchBlServers, fetchBlTags, fetchRoleWl]);
+
+  const fetchModRoles = useCallback(async () => {
+    if (!guildId) return;
+    setModRolesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/mod-roles`);
+      if (r.ok) setModRoles(await r.json() as ModRole[]);
+    } finally { setModRolesLoading(false); }
+  }, [guildId]);
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+  const textChannels = channels.filter((c) => [0, 5, 15].includes(c.type));
+  const voiceChannels = channels.filter((c) => c.type === 2);
+  const categories = channels.filter((c) => c.type === 4);
+  const channelById = Object.fromEntries(channels.map((c) => [c.id, c]));
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+  async function sendMessage() {
+    if (!selectedChannelId || !messageContent.trim()) return;
+    setSendingMsg(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/send`, { method: "POST", body: JSON.stringify({ channelId: selectedChannelId, content: messageContent.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message envoyé ✓", description: `ID: ${d.messageId}` }); setMessageContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSendingMsg(false); }
+  }
+
+  async function createChannel() {
+    if (!newChannelName.trim()) return;
+    setCreatingChannel(true);
+    try {
+      const body: Record<string, string> = { name: newChannelName.trim(), type: newChannelType };
+      if (newChannelParent) body["parentId"] = newChannelParent;
+      if (newChannelTopic.trim()) body["topic"] = newChannelTopic.trim();
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels`, { method: "POST", body: JSON.stringify(body) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Salon créé ✓", description: `#${d.name}` }); setNewChannelName(""); setNewChannelTopic(""); setNewChannelParent(""); await fetchChannels(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setCreatingChannel(false); }
+  }
+
+  async function deleteChannel(channelId: string, channelName: string) {
+    if (!confirm(`Supprimer #${channelName} ? Cette action est irréversible.`)) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${channelId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Salon supprimé ✓" }); await fetchChannels(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function memberAction(action: "kick" | "ban", memberId: string, displayName: string) {
+    if (!confirm(`${action === "kick" ? "Expulser" : "Bannir"} ${displayName} ?`)) return;
+    setActionLoading(true); setActionMemberId(memberId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/${memberId}/${action}`, { method: "POST", body: JSON.stringify({ reason: actionReason || undefined }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `${action === "kick" ? "Expulsé" : "Banni"} ✓`, description: displayName }); setActionReason(""); await fetchMembers(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setActionLoading(false); setActionMemberId(""); }
+  }
+
+  async function saveGuildSettings() {
+    setSavingSettings(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`, { method: "PATCH", body: JSON.stringify({ name: guildEditName.trim() || undefined, verificationLevel: Number(guildVerifLevel), systemChannelId: guildSystemChannel || null }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Paramètres sauvegardés ✓", description: d.name }); setGuildName(d.name); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSavingSettings(false); }
+  }
+
+  async function addToBlacklist() {
+    if (!newBlUserId.trim() || !newBlUserTag.trim() || !newBlReason.trim()) return;
+    setAddingBl(true);
+    try {
+      const r = await apiFetch("/api/owner/blacklist", { method: "POST", body: JSON.stringify({ userId: newBlUserId.trim(), userTag: newBlUserTag.trim(), reason: newBlReason.trim(), moderatorTag: user?.userTag ?? "Dashboard", moderatorId: user?.userId ?? "0" }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Blacklist mise à jour ✓", description: `${newBlUserTag} banni de tous les serveurs.` }); setNewBlUserId(""); setNewBlUserTag(""); setNewBlReason(""); await fetchBlacklist(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAddingBl(false); }
+  }
+
+  async function removeFromBlacklist(userId: string, userTag: string) {
+    if (!confirm(`Retirer ${userTag} de la blacklist globale ?`)) return;
+    const r = await apiFetch(`/api/owner/blacklist/${userId}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Retiré de la blacklist ✓" }); await fetchBlacklist(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function disableCmd() {
+    if (!newCmdName) return;
+    setAddingDc(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`, { method: "POST", body: JSON.stringify({ commandName: newCmdName }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `/${newCmdName} désactivée ✓` }); setNewCmdName(""); await fetchDisabledCmds(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAddingDc(false); }
+  }
+
+  async function enableCmd(commandName: string) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands/${commandName}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `/${commandName} réactivée ✓` }); await fetchDisabledCmds(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function enableAllCmds() {
+    if (!confirm("Réactiver toutes les commandes ?")) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/disabled-commands`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Toutes les commandes réactivées ✓" }); await fetchDisabledCmds(); }
+  }
+
+  async function openTranscript(id: number) {
+    setViewLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/transcripts/${id}`);
+      if (r.ok) setViewTranscript(await r.json());
+      else toast({ title: "Erreur de chargement", variant: "destructive" });
+    } finally { setViewLoading(false); }
+  }
+
+  async function deleteTranscriptFn(id: number) {
+    if (!confirm("Supprimer ce transcript ?")) return;
+    const r = await apiFetch(`/api/owner/transcripts/${id}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: "Transcript supprimé ✓" }); setTranscripts((prev) => prev.filter((t) => t.id !== id)); if (viewTranscript?.id === id) setViewTranscript(null); }
+  }
+
+  async function saveBotSettings() {
+    if (!botSettings) return;
+    setBsSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/settings`, { method: "PATCH", body: JSON.stringify(botSettings) });
+      const d = await r.json();
+      if (r.ok) { setBotSettings(d); toast({ title: "Réglages sauvegardés ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBsSaving(false); }
+  }
+
+  // ── Test Bot actions ───────────────────────────────────────────────────────
+  async function createTestBot() {
+    if (!tbNewName.trim() || !tbNewChannel) return;
+    setTbCreating(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot`, { method: "POST", body: JSON.stringify({ channelId: tbNewChannel, nom: tbNewName.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: `Bot de test "${tbNewName}" créé ✓` }); setTbNewName(""); setTbNewChannel(""); await fetchTestBots(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setTbCreating(false); }
+  }
+
+  async function deleteTestBot(name: string) {
+    if (!confirm(`Supprimer le bot de test "${name}" ?`)) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (r.ok) { toast({ title: `"${name}" supprimé ✓` }); if (tbSelected === name) setTbSelected(""); await fetchTestBots(); }
+    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+  }
+
+  async function sendTestBotAction() {
+    const bot = testBots.find((b) => b.name === tbSelected);
+    if (!bot) return;
+    setTbSending(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/testbot/send`, {
+        method: "POST",
+        body: JSON.stringify({ nom: bot.name, channelId: bot.channelId, action: tbAction, content: tbContent.trim() || undefined, count: tbCount }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: `Action "${tbAction}" exécutée ✓` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setTbSending(false); }
+  }
+
+  async function runErrTest() {
+    setErrTestLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/errortest", { method: "POST" });
+      if (r.ok) toast({ title: "Test alertes DM lancé ✓", description: "10 messages envoyés en DM au développeur." });
+      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+    } finally { setErrTestLoading(false); }
+  }
+
+  // ── Messages advanced actions ──────────────────────────────────────────────
+  async function sendEmbed() {
+    if (!embedChannelId || (!embedTitle.trim() && !embedDesc.trim())) return;
+    setSendingEmbed(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/send-embed`, {
+        method: "POST",
+        body: JSON.stringify({ channelId: embedChannelId, title: embedTitle.trim() || undefined, description: embedDesc.trim() || undefined, color: embedColor, imageURL: embedImage.trim() || undefined, footer: embedFooter.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Embed envoyé ✓", description: `ID: ${d.messageId}` }); setEmbedTitle(""); setEmbedDesc(""); setEmbedImage(""); setEmbedFooter(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSendingEmbed(false); }
+  }
+
+  async function scheduleMessage() {
+    if (!schedChannelId || !schedContent.trim() || Number(schedDelay) < 1) return;
+    setScheduling(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/schedule-message`, {
+        method: "POST",
+        body: JSON.stringify({ channelId: schedChannelId, content: schedContent.trim(), delayMinutes: Number(schedDelay) }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message planifié ✓", description: `Envoi prévu à ${d.scheduledAt}` }); setSchedContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setScheduling(false); }
+  }
+
+  async function editMessage() {
+    if (!editChannelId || !editMsgId.trim() || !editContent.trim()) return;
+    setEditing(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${editChannelId}/messages/${editMsgId.trim()}`, {
+        method: "PATCH",
+        body: JSON.stringify({ content: editContent.trim() }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Message modifié ✓" }); setEditMsgId(""); setEditContent(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setEditing(false); }
+  }
+
+  // ── Member actions ─────────────────────────────────────────────────────────
+  async function unbanUser() {
+    if (!unbanId.trim()) return;
+    setUnbanning(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/unban`, {
+        method: "POST",
+        body: JSON.stringify({ userId: unbanId.trim(), reason: unbanReason.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Utilisateur débanni ✓" }); setUnbanId(""); setUnbanReason(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setUnbanning(false); }
+  }
+
+  async function assignRole() {
+    if (!roleMemberId.trim() || !roleId) return;
+    setRoleAssignLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/members/${roleMemberId.trim()}/role`, {
+        method: "POST",
+        body: JSON.stringify({ roleId, action: roleAction }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: roleAction === "add" ? "Rôle ajouté ✓" : "Rôle retiré ✓" });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setRoleAssignLoading(false); }
+  }
+
+  // ── Channel actions ────────────────────────────────────────────────────────
+  async function lockUnlockChannel(action: "lock" | "unlock") {
+    if (!lockChannelId) return;
+    setLocking(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${lockChannelId}/${action}`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) { toast({ title: action === "lock" ? "Salon verrouillé 🔒" : "Salon déverrouillé 🔓" }); await fetchChannels(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setLocking(false); }
+  }
+
+  async function purgeChannel() {
+    if (!purgeChannelId) return;
+    const limit = Math.max(1, Math.min(100, Number(purgeLimit) || 50));
+    if (!confirm(`Supprimer jusqu'à ${limit} messages${purgeUserId.trim() ? " de cet utilisateur" : ""} ?`)) return;
+    setPurging(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${purgeChannelId}/purge`, {
+        method: "POST",
+        body: JSON.stringify({ limit, userId: purgeUserId.trim() || undefined }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: "Purge effectuée ✓", description: `${d.deleted} message(s) supprimé(s)` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setPurging(false); }
+  }
+
+  async function setSlowmode() {
+    if (!slowChannelId) return;
+    const s = Math.max(0, Math.min(21600, Number(slowSeconds) || 0));
+    setSlowing(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/channels/${slowChannelId}/slowmode`, {
+        method: "PATCH",
+        body: JSON.stringify({ seconds: s }),
+      });
+      const d = await r.json();
+      if (r.ok) toast({ title: s === 0 ? "Slowmode désactivé ✓" : `Slowmode ${s}s appliqué ✓` });
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setSlowing(false); }
+  }
+
+  // ── Automod actions ────────────────────────────────────────────────────────
+  async function patchAutomod(patch: Partial<AutomodCfg>) {
+    if (!automodCfg) return;
+    setAmSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/automod`, { method: "PATCH", body: JSON.stringify(patch) });
+      const d = await r.json();
+      if (r.ok) { setAutomodCfg(d); toast({ title: "Automod mis à jour ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setAmSaving(false); }
+  }
+
+  async function addAmWord() {
+    if (!amNewWord.trim() || !automodCfg) return;
+    const w = amNewWord.trim().toLowerCase();
+    if (automodCfg.antiInsultWords.includes(w)) { toast({ title: "Mot déjà présent", variant: "destructive" }); return; }
+    await patchAutomod({ antiInsultWords: [...automodCfg.antiInsultWords, w] });
+    setAmNewWord("");
+  }
+
+  async function removeAmWord(word: string) {
+    if (!automodCfg) return;
+    await patchAutomod({ antiInsultWords: automodCfg.antiInsultWords.filter((w) => w !== word) });
+  }
+
+  async function addAmDomain() {
+    if (!amNewDomain.trim() || !automodCfg) return;
+    const d = amNewDomain.trim().toLowerCase();
+    if (automodCfg.antilinkAllowedDomains.includes(d)) { toast({ title: "Domaine déjà présent", variant: "destructive" }); return; }
+    await patchAutomod({ antilinkAllowedDomains: [...automodCfg.antilinkAllowedDomains, d] });
+    setAmNewDomain("");
+  }
+
+  async function removeAmDomain(domain: string) {
+    if (!automodCfg) return;
+    await patchAutomod({ antilinkAllowedDomains: automodCfg.antilinkAllowedDomains.filter((d) => d !== domain) });
+  }
+
+  // ── Bot status actions ─────────────────────────────────────────────────────
+  async function saveAntiProtection() {
+    if (!antiProtection) return;
+    setApSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-protection`, { method: "PATCH", body: JSON.stringify(antiProtection) });
+      const d = await r.json();
+      if (r.ok) { setAntiProtection(d as AntiProtection); toast({ title: "Protections sauvegardées ✓" }); }
+      else toast({ title: "Erreur", description: (d as { error?: string }).error, variant: "destructive" });
+    } finally { setApSaving(false); }
+  }
+
+  async function stripRolePerms() {
+    if (!stripRoleId) return;
+    setStrippingPerms(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/roles/${stripRoleId}/strip-permissions`, { method: "POST" });
+      const d = await r.json() as { ok?: boolean; roleName?: string; error?: string };
+      if (r.ok) { toast({ title: `Permissions supprimées ✓`, description: `Rôle "${d.roleName}" vidé de toutes ses permissions.` }); setStripRoleId(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setStrippingPerms(false); }
+  }
+
+  const fetchBotStatus = useCallback(async () => {
+    setBotStatusLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/bot/status");
+      if (r.ok) setBotStatus(await r.json());
+    } finally { setBotStatusLoading(false); }
+  }, []);
+
+  const fetchBotStatusEvents = useCallback(async () => {
+    setBseLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/bot-status-events?limit=200");
+      if (r.ok) setBotStatusEvents(await r.json() as BotStatusEvent[]);
+    } finally { setBseLoading(false); }
+  }, []);
+
+  async function botAction(action: "restart" | "disconnect" | "reconnect") {
+    setBotActionLoading(action);
+    try {
+      const r = await apiFetch(`/api/owner/bot/${action}`, { method: "POST" });
+      const d = await r.json();
+      if (r.ok) {
+        toast({ title: { restart: "Bot redémarré ✓", disconnect: "Bot déconnecté ✓", reconnect: "Bot reconnecté ✓" }[action] });
+        setTimeout(fetchBotStatus, 3000);
+      } else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBotActionLoading(""); }
+  }
+
+  async function savePresence() {
+    setPresenceSaving(true);
+    try {
+      const r = await apiFetch("/api/owner/bot/presence", {
+        method: "PATCH",
+        body: JSON.stringify({ status: presenceStatus, activityType: Number(presenceActivityType), activityText: presenceActivityText }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Présence mise à jour ✓" }); setTimeout(fetchBotStatus, 1500); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setPresenceSaving(false); }
+  }
+
+  async function doBroadcast() {
+    if (!broadcastMsg.trim()) return;
+    setBroadcasting(true);
+    setBroadcastResults([]);
+    try {
+      const r = await apiFetch("/api/owner/bot/broadcast", { method: "POST", body: JSON.stringify({ message: broadcastMsg.trim() }) });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Diffusion envoyée ✓" }); setBroadcastResults(d.results ?? []); setBroadcastMsg(""); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setBroadcasting(false); }
+  }
+
+  // ── Ticket actions ─────────────────────────────────────────────────────────
+  async function doCloseTicket(channelId: string) {
+    setClosingTicket(channelId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tickets/${channelId}/close`, {
+        method: "POST",
+        body: JSON.stringify({ reason: closeTicketReason.trim() }),
+      });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Ticket fermé ✓" }); setCloseTicketReason(""); await fetchTickets(); void fetchTranscripts(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setClosingTicket(""); }
+  }
+
+  // ── Notes actions ─────────────────────────────────────────────────────────
+  const fetchNotes = useCallback(async () => {
+    setNotesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/notes`);
+      if (r.ok) setNotesByUser(await r.json());
+    } finally { setNotesLoading(false); }
+  }, [guildId]);
+
+  async function deleteNoteEntry(userId: string, noteId: number) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/notes/${userId}/${noteId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Note supprimée ✓" }); await fetchNotes(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function clearUserNotes(userId: string) {
+    if (!confirm("Supprimer toutes les notes de cet utilisateur ?")) return;
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/notes/${userId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: `${d.count} note(s) effacée(s) ✓` }); await fetchNotes(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  async function downloadSanctionsCsv() {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/sanctions/export`);
+    if (!r.ok) { toast({ title: "Erreur lors de l'export", variant: "destructive" }); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `sanctions-${guildId}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Clone config actions ───────────────────────────────────────────────────
+  const fetchAllGuilds = useCallback(async () => {
+    const r = await apiFetch("/api/owner/guilds");
+    if (r.ok) setAllGuilds(await r.json());
+  }, []);
+
+  async function doCloneConfig() {
+    if (!cloneTarget) return;
+    setCloning(true);
+    setCloneResult(null);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/clone-config`, {
+        method: "POST",
+        body: JSON.stringify({ targetGuildId: cloneTarget }),
+      });
+      const d = await r.json();
+      if (r.ok) {
+        const name = allGuilds.find((g) => g.id === cloneTarget)?.name ?? cloneTarget;
+        setCloneResult({ ok: true, msg: `Configuration clonée vers "${name}" avec succès ✓` });
+        toast({ title: "Configuration clonée ✓" });
+      } else {
+        setCloneResult({ ok: false, msg: d.error ?? "Erreur inconnue" });
+        toast({ title: "Erreur", description: d.error, variant: "destructive" });
+      }
+    } finally { setCloning(false); }
+  }
+
+  // ── Invite blacklist actions ───────────────────────────────────────────────
+  const fetchInviteBl = useCallback(async () => {
+    setInviteBlLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/invite-blacklist`);
+      if (r.ok) setInviteBl(await r.json());
+    } finally { setInviteBlLoading(false); }
+  }, [guildId]);
+
+  async function removeInviteBlEntry(userId: string) {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/invite-blacklist/${userId}`, { method: "DELETE" });
+    const d = await r.json();
+    if (r.ok) { toast({ title: "Entrée retirée ✓" }); await fetchInviteBl(); }
+    else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+  }
+
+  // ── Action log ─────────────────────────────────────────────────────────────
+  const fetchActionLog = useCallback(async () => {
+    setActionLogLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/action-log");
+      if (r.ok) setActionLog(await r.json());
+    } finally { setActionLogLoading(false); }
+  }, []);
+
+  // ── Quarantaine actions ────────────────────────────────────────────────────
+  const fetchQuarantine = useCallback(async () => {
+    setQuarantineLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/quarantine`);
+      if (r.ok) setQuarantineList(await r.json());
+    } finally { setQuarantineLoading(false); }
+  }, [guildId]);
+
+  async function liftQuarantine(userId: string) {
+    setLiftingQ(userId);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/quarantine/${userId}`, { method: "DELETE" });
+      const d = await r.json();
+      if (r.ok) { toast({ title: "Quarantaine levée ✓" }); await fetchQuarantine(); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setLiftingQ(""); }
+  }
+
+  // ── Voice log actions ──────────────────────────────────────────────────────
+  const fetchProfile = useCallback(async () => {
+    if (!profileId.trim()) return;
+    setProfileLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/member-profile/${profileId.trim()}`);
+      const d = await r.json() as MemberProfile & { error?: string };
+      if (r.ok) setProfileData(d);
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setProfileLoading(false); }
+  }, [guildId, profileId, toast]);
+
+  const fetchWarns = useCallback(async () => {
+    if (!warnsUserId.trim()) return;
+    setWarnsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/member-profile/${warnsUserId.trim()}`);
+      const d = await r.json() as MemberProfile & { error?: string };
+      if (r.ok) setWarnsData(d.warns ?? []);
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setWarnsLoading(false); }
+  }, [guildId, warnsUserId, toast]);
+
+  const fetchTempbans = useCallback(async () => {
+    setTempbansLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/tempbans`);
+      if (r.ok) setTempbans(await r.json() as TempBanEntry[]);
+    } finally { setTempbansLoading(false); }
+  }, [guildId]);
+
+  const fetchTimeouts = useCallback(async () => {
+    setTimeoutsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/timeouts`);
+      if (r.ok) setTimeouts(await r.json() as TimeoutEntry[]);
+    } finally { setTimeoutsLoading(false); }
+  }, [guildId]);
+
+  const fetchMaintenance = useCallback(async () => {
+    setMaintenanceLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`);
+      if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); setMaintenanceMsgDraft(d.message); }
+    } finally { setMaintenanceLoading(false); }
+  }, [guildId]);
+
+  const fetchUserCmds = useCallback(async () => {
+    setUcLoading(true);
+    try {
+      const [r, rcfg] = await Promise.all([
+        apiFetch(`/api/owner/user-commands?limit=200`),
+        apiFetch(`/api/owner/guilds/${guildId}/usercommands-config`),
+      ]);
+      if (r.ok) setUserCmds(await r.json() as UserCmd[]);
+      if (rcfg.ok) {
+        const cfg = await rcfg.json() as { supportChannelId: string | null; supportPingRoleIds: string[]; roleRequestChannelId: string | null; roleRequestPingRoleIds: string[] };
+        setUcCfg({
+          supportChannelId: cfg.supportChannelId ?? "",
+          supportPingRoleIds: (cfg.supportPingRoleIds ?? []).join(", "),
+          roleRequestChannelId: cfg.roleRequestChannelId ?? "",
+          roleRequestPingRoleIds: (cfg.roleRequestPingRoleIds ?? []).join(", "),
+        });
+      }
+    } finally { setUcLoading(false); }
+  }, [guildId]);
+
+  const saveUcCfg = useCallback(async () => {
+    setUcCfgSaving(true);
+    try {
+      const parseIds = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
+      await apiFetch(`/api/owner/guilds/${guildId}/usercommands-config`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          supportChannelId: ucCfg.supportChannelId || null,
+          supportPingRoleIds: parseIds(ucCfg.supportPingRoleIds),
+          roleRequestChannelId: ucCfg.roleRequestChannelId || null,
+          roleRequestPingRoleIds: parseIds(ucCfg.roleRequestPingRoleIds),
+        }),
+      });
+      toast({ title: "Configuration sauvegardée ✓" });
+    } catch { toast({ title: "Erreur de sauvegarde", variant: "destructive" }); }
+    finally { setUcCfgSaving(false); }
+  }, [guildId, ucCfg, toast]);
+
+  const fetchSuspectAccounts = useCallback(async () => {
+    setSaLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts?limit=500`);
+      if (r.ok) setSuspectAccounts(await r.json() as SuspectAcc[]);
+    } finally { setSaLoading(false); }
+  }, []);
+
+  async function doSuspectAction(sa: SuspectAcc, action: "timeout" | "kick" | "ban", durationMs?: number) {
+    setSaActionLoading(sa.id);
+    try {
+      let r: Response;
+      const reasonBase = `[Dashboard Owner] Compte suspect (${sa.reasons.join(", ")})`;
+      if (action === "timeout") {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/timeout`, {
+          method: "POST", body: JSON.stringify({ durationMs: durationMs ?? saTimeoutDuration, reason: reasonBase }),
+        });
+      } else if (action === "kick") {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/kick`, {
+          method: "POST", body: JSON.stringify({ reason: reasonBase }),
+        });
+      } else {
+        r = await apiFetch(`/api/owner/guilds/${sa.guildId}/members/${sa.userId}/ban`, {
+          method: "POST", body: JSON.stringify({ reason: reasonBase }),
+        });
+      }
+      const d = await r.json();
+      if (r.ok) toast({ title: `Action appliquée ✓ (${action})` });
+      else toast({ title: "Erreur", description: (d as { error?: string }).error, variant: "destructive" });
+    } finally { setSaActionLoading(null); }
+  }
+
+  async function deleteSuspect(sa: SuspectAcc) {
+    setSaActionLoading(sa.id);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}`, { method: "DELETE" });
+      if (r.ok) { setSuspectAccounts(prev => prev.filter(x => x.id !== sa.id)); toast({ title: "Entrée supprimée ✓" }); }
+      else toast({ title: "Erreur suppression", variant: "destructive" });
+    } finally { setSaActionLoading(null); }
+  }
+
+  async function toggleSuspectVerified(sa: SuspectAcc) {
+    setSaActionLoading(sa.id);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}/verify`, {
+        method: "PATCH", body: JSON.stringify({ verified: !sa.verified }),
+      });
+      if (r.ok) {
+        setSuspectAccounts(prev => prev.map(x => x.id === sa.id ? { ...x, verified: !sa.verified } : x));
+        toast({ title: sa.verified ? "Marqué comme suspect ✓" : "Marqué comme vérifié ✓" });
+      }
+    } finally { setSaActionLoading(null); }
+  }
+
+  async function doBulkSuspectAction(guildId: string, userIds: string[], action: "timeout" | "kick" | "ban") {
+    if (userIds.length === 0) return;
+    if (!confirm(`Appliquer "${action}" à ${userIds.length} compte(s) suspect(s) sur ce serveur ?`)) return;
+    setSaBulkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/suspect-accounts/bulk-action`, {
+        method: "POST", body: JSON.stringify({ guildId, userIds, action, durationMs: saTimeoutDuration }),
+      });
+      const d = await r.json() as { results?: { userId: string; ok: boolean; error?: string }[] };
+      const ok = d.results?.filter(x => x.ok).length ?? 0;
+      const fail = d.results?.filter(x => !x.ok).length ?? 0;
+      toast({ title: `Action en masse — ${ok} OK, ${fail} échec(s)` });
+    } finally { setSaBulkLoading(false); }
+  }
+
+  async function addSkWord() {
+    if (!skNewWord.trim() || !guildId) return;
+    setSkLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords`, {
+        method: "POST",
+        body: JSON.stringify({ keyword: skNewWord.trim() }),
+      });
+      if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); setSkNewWord(""); }
+    } finally { setSkLoading(false); }
+  }
+
+  function exportSuspectsCsv(accounts: SuspectAcc[]) {
+    const headers = ["id","guildId","guildName","userId","userTag","accountAgeDays","hasNoAvatar","reasons","actionTaken","securityLevel","vpnSuspicion","userLocale","verified","tags","detectedAt"];
+    const rows = accounts.map(sa => [
+      sa.id, sa.guildId, sa.guildName, sa.userId, sa.userTag, sa.accountAgeDays,
+      sa.hasNoAvatar, sa.reasons.join("; "), sa.actionTaken, sa.securityLevel,
+      sa.vpnSuspicion, sa.userLocale ?? "", sa.verified, sa.tags.join("; "), sa.detectedAt,
+    ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
+    const csv = [headers.join(","), ...rows].join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = "suspects.csv"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  async function updateTagsForSuspect(sa: SuspectAcc, newTags: string[]) {
+    const r = await apiFetch(`/api/owner/suspect-accounts/${sa.id}/tags`, {
+      method: "PATCH", body: JSON.stringify({ tags: newTags }),
+    });
+    if (r.ok) setSuspectAccounts(prev => prev.map(x => x.id === sa.id ? { ...x, tags: newTags } : x));
+    else toast({ title: "Erreur mise à jour tags", variant: "destructive" });
+  }
+
+  function addTagToSuspect(sa: SuspectAcc) {
+    const raw = saTagInputs[sa.id]?.trim();
+    if (!raw) return;
+    const newTags = [...new Set([...sa.tags, raw])];
+    setSaTagInputs(prev => ({ ...prev, [sa.id]: "" }));
+    void updateTagsForSuspect(sa, newTags);
+  }
+
+  function removeTagFromSuspect(sa: SuspectAcc, tag: string) {
+    const newTags = sa.tags.filter(t => t !== tag);
+    void updateTagsForSuspect(sa, newTags);
+  }
+
+  const fetchInvites = useCallback(async () => {
+    setInvitesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/invites`);
+      if (r.ok) setInvites(await r.json() as Invite[]);
+    } finally { setInvitesLoading(false); }
+  }, [guildId]);
+
+  const fetchAuditLog = useCallback(async () => {
+    setAuditLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/audit-log?limit=50`);
+      if (r.ok) setAuditLog(await r.json() as AuditEntry[]);
+    } finally { setAuditLoading(false); }
+  }, [guildId]);
+
+  const fetchLogChannels = useCallback(async () => {
+    setLogChannelsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/log-channels`);
+      if (r.ok) { const d = await r.json() as LogChannels; setLogChannels(d); setLogChannelsDraft(d); }
+    } finally { setLogChannelsLoading(false); }
+  }, [guildId]);
+
+  const saveLogChannels = async () => {
+    setLogChannelsSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/log-channels`, { method: "PATCH", body: JSON.stringify(logChannelsDraft) });
+      if (r.ok) { setLogChannels(await r.json() as LogChannels); toast({ title: "Salons de logs mis à jour ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setLogChannelsSaving(false); }
+  };
+
+  const fetchCustomCmds = useCallback(async () => {
+    setCustomCmdsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands`);
+      if (r.ok) setCustomCmds(await r.json() as CustomCmd[]);
+    } finally { setCustomCmdsLoading(false); }
+  }, [guildId]);
+
+  const fetchGuildRoles = useCallback(async () => {
+    if (!guildId) return;
+    setGuildRolesLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/roles`);
+      if (r.ok) setGuildRoles(await r.json() as GuildRole[]);
+    } finally { setGuildRolesLoading(false); }
+  }, [guildId]);
+
+  const addCustomCmd = async () => {
+    if (!ccNewName.trim()) return;
+    setCustomCmdSaving(true);
+    try {
+      const colorHexToInt = (hex: string) => parseInt(hex.replace("#", ""), 16);
+      const body: Record<string, unknown> = { name: ccNewName.trim(), actionType: ccActionType };
+      if (ccActionType === "text") {
+        if (!ccNewResponse.trim()) { toast({ title: "Réponse requise", variant: "destructive" }); return; }
+        body.response = ccNewResponse.trim();
+      } else if (ccActionType === "embed") {
+        body.embedTitle = ccEmbedTitle || undefined;
+        body.embedDescription = ccEmbedDesc || undefined;
+        body.embedColor = colorHexToInt(ccEmbedColor);
+        body.embedFields = ccEmbedFields.filter(f => f.name && f.value);
+        body.embedFooter = ccEmbedFooter || undefined;
+        body.embedThumbnail = ccEmbedThumbnail || undefined;
+        body.embedImage = ccEmbedImage || undefined;
+      } else if (ccActionType === "moderation") {
+        body.modAction = ccModAction;
+        body.modTarget = ccModTarget;
+        body.modDuration = ccModDuration;
+        body.modReason = ccModReason || undefined;
+      } else if (ccActionType === "role") {
+        if (!ccRoleId) { toast({ title: "Sélectionne un rôle", variant: "destructive" }); return; }
+        body.roleAction = ccRoleAction;
+        body.roleId = ccRoleId;
+        body.roleTarget = ccRoleTarget;
+      }
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands`, { method: "POST", body: JSON.stringify(body) });
+      const d = await r.json() as { ok?: boolean; error?: string };
+      if (r.ok) {
+        toast({ title: `Commande &${ccNewName.toLowerCase()} créée ✓` });
+        setCcNewName(""); setCcNewResponse(""); setCcEmbedTitle(""); setCcEmbedDesc(""); setCcEmbedColor("#5865f2");
+        setCcEmbedFooter(""); setCcEmbedThumbnail(""); setCcEmbedImage(""); setCcEmbedFields([]);
+        setCcModReason(""); setCcModDuration(10); setCcRoleId("");
+        void fetchCustomCmds();
+      } else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setCustomCmdSaving(false); }
+  };
+
+  const deleteCustomCmd = async (name: string) => {
+    const r = await apiFetch(`/api/owner/guilds/${guildId}/custom-commands/${encodeURIComponent(name)}`, { method: "DELETE" });
+    if (r.ok) { setCustomCmds(prev => prev.filter(c => c.name !== name)); toast({ title: `Commande &${name} supprimée` }); }
+  };
+
+  const fetchWordBl = useCallback(async () => {
+    setWordBlLoading(true);
+    try {
+      const r = await apiFetch("/api/owner/global/word-blacklist");
+      if (r.ok) setWordBl(await r.json() as string[]);
+    } finally { setWordBlLoading(false); }
+  }, []);
+
+  const addWord = async () => {
+    if (!newWord.trim()) return;
+    setWordBlSaving(true);
+    try {
+      const r = await apiFetch("/api/owner/global/word-blacklist", { method: "POST", body: JSON.stringify({ word: newWord.trim() }) });
+      const d = await r.json() as { ok?: boolean; words?: string[]; error?: string };
+      if (r.ok) { setWordBl(d.words ?? []); setNewWord(""); toast({ title: "Mot ajouté ✓" }); }
+      else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+    } finally { setWordBlSaving(false); }
+  };
+
+  const removeWord = async (word: string) => {
+    const r = await apiFetch(`/api/owner/global/word-blacklist/${encodeURIComponent(word)}`, { method: "DELETE" });
+    const d = await r.json() as { words?: string[] };
+    if (r.ok) setWordBl(d.words ?? []);
+  };
+
+  const doGlobalSearch = async () => {
+    if (!searchId.trim()) return;
+    setSearchLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/member/${searchId.trim()}`);
+      if (r.ok) setSearchResults(await r.json() as GlobalMemberResult[]);
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setSearchLoading(false); }
+  };
+
+  const fetchBotReplyLogs = useCallback(async () => {
+    setBotReplyLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/bot-reply-logs?limit=200`);
+      if (r.ok) setBotReplyLogs(await r.json() as BotReplyLog[]);
+    } finally { setBotReplyLoading(false); }
+  }, [guildId]);
+
+  const fetchVoiceLog = useCallback(async () => {
+    setVoiceLogLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-log`);
+      if (r.ok) setVoiceLog(await r.json());
+    } finally { setVoiceLogLoading(false); }
+  }, [guildId]);
+
+  async function clearVoiceLogAction() {
+    if (!confirm("Effacer tout le journal vocal ?")) return;
+    await apiFetch(`/api/owner/guilds/${guildId}/voice-log`, { method: "DELETE" });
+    setVoiceLog([]);
+    toast({ title: "Journal vocal effacé ✓" });
+  }
+
+  // ── Fetch: Auto-rôle ─────────────────────────────────────────────────────
+  const fetchAutoRole = useCallback(async () => {
+    if (!guildId) return;
+    setAutoRoleLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/auto-role`);
+      if (r.ok) { const d = await r.json(); setAutoRoleCfg(d); setAutoRoleDraft(d.autoRoleId ?? ""); }
+    } finally { setAutoRoleLoading(false); }
+  }, [guildId]);
+
+  const fetchAiModCfg = useCallback(async () => {
+    if (!guildId) return;
+    setAiModLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/ai-mod`);
+      if (r.ok) { const d = await r.json() as AiModCfg; setAiModCfg(d); setAiModDraft(d); }
+    } finally { setAiModLoading(false); }
+  }, [guildId]);
+
+  async function saveAiModCfg() {
+    if (!aiModDraft || !guildId) return;
+    setAiModLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/ai-mod`, { method: "PATCH", body: JSON.stringify(aiModDraft) });
+      if (r.ok) { const d = await r.json() as AiModCfg; setAiModCfg(d); setAiModDraft(d); toast({ title: "Config IA sauvegardée ✓" }); }
+      else toast({ title: "Erreur sauvegarde IA", variant: "destructive" });
+    } finally { setAiModLoading(false); }
+  }
+
+  async function lookupAiTrust() {
+    if (!aiTrustId.trim() || !guildId) return;
+    setAiTrustLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/ai-trust?userId=${encodeURIComponent(aiTrustId.trim())}`);
+      if (r.ok) setAiTrustResult(await r.json() as AiTrustResult);
+      else toast({ title: "Membre introuvable", variant: "destructive" });
+    } finally { setAiTrustLoading(false); }
+  }
+
+  const fetchAiRaidStatus = useCallback(async () => {
+    if (!guildId) return;
+    setAiRaidLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/ai-raid-status`);
+      if (r.ok) setAiRaidStatus(await r.json() as AiRaidStatus);
+    } finally { setAiRaidLoading(false); }
+  }, [guildId]);
+
+  const fetchAiRiskyMembers = useCallback(async () => {
+    if (!guildId) return;
+    setAiRiskyLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/ai-risky-members?limit=20`);
+      if (r.ok) setAiRiskyMembers(await r.json() as AiRiskyMember[]);
+    } finally { setAiRiskyLoading(false); }
+  }, [guildId]);
+
+  async function saveAutoRole() {
+    setAutoRoleSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/auto-role`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ autoRoleId: autoRoleDraft || null }) });
+      if (r.ok) { const d = await r.json(); setAutoRoleCfg(d); toast({ title: "Auto-rôle sauvegardé ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setAutoRoleSaving(false); }
+  }
+
+  // ── Fetch: Anti-spam ─────────────────────────────────────────────────────
+  const fetchAntiSpam = useCallback(async () => {
+    if (!guildId) return;
+    setAntiSpamLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-spam`);
+      if (r.ok) setAntiSpamCfg(await r.json());
+    } finally { setAntiSpamLoading(false); }
+  }, [guildId]);
+
+  async function saveAntiSpam() {
+    if (!antiSpamCfg) return;
+    setAntiSpamSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/anti-spam`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(antiSpamCfg) });
+      if (r.ok) { setAntiSpamCfg(await r.json()); toast({ title: "Anti-spam sauvegardé ✓" }); }
+      else toast({ title: "Erreur", variant: "destructive" });
+    } finally { setAntiSpamSaving(false); }
+  }
+
+  // ── Fetch: Sondage ────────────────────────────────────────────────────────
+  async function sendPoll() {
+    if (!pollChannelId || !pollQuestion || pollOptions.filter(Boolean).length < 2) {
+      toast({ title: "Renseignez le salon, la question et au moins 2 options.", variant: "destructive" }); return;
+    }
+    setPollSending(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/poll`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ channelId: pollChannelId, question: pollQuestion, options: pollOptions.filter(Boolean) }) });
+      if (r.ok) { toast({ title: "Sondage envoyé ✓" }); setPollQuestion(""); setPollOptions(["","","",""]); }
+      else { const d = await r.json().catch(() => ({})); toast({ title: d.error ?? "Erreur", variant: "destructive" }); }
+    } finally { setPollSending(false); }
+  }
+
+  // ── Fetch: Global Tempbans ────────────────────────────────────────────────
+  const fetchGlobalTempbans = useCallback(async () => {
+    setGlobalTbLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/tempbans`);
+      if (r.ok) setGlobalTempbans(await r.json());
+    } finally { setGlobalTbLoading(false); }
+  }, []);
+
+  // ── Fetch: Global History ─────────────────────────────────────────────────
+  async function fetchHistory() {
+    if (!historyUserId.trim()) return;
+    setHistoryLoading(true);
+    setHistoryData(null);
+    try {
+      const r = await apiFetch(`/api/owner/global/member-history/${historyUserId.trim()}`);
+      if (r.ok) setHistoryData(await r.json());
+      else toast({ title: "Membre introuvable", variant: "destructive" });
+    } finally { setHistoryLoading(false); }
+  }
+
+  // ── Fetch: Global Dashboard ───────────────────────────────────────────────
+  const fetchGlobalDashboard = useCallback(async () => {
+    setGlobalDashboardLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/global/dashboard`);
+      if (r.ok) setGlobalDashboard(await r.json());
+    } finally { setGlobalDashboardLoading(false); }
+  }, []);
+
+  // ── Fetch: Invite Lookup ──────────────────────────────────────────────────
+  async function fetchInviteLookup() {
+    const id = inviteLookupId.trim();
+    if (!id) return;
+    setInviteLookupLoading(true);
+    setInviteLookupResult(null);
+    try {
+      const r = await apiFetch(`/api/owner/global/invite-lookup/${id}`);
+      if (r.ok) setInviteLookupResult(await r.json());
+      else toast({ title: "Erreur lors de la recherche", variant: "destructive" });
+    } finally { setInviteLookupLoading(false); }
+  }
+
+  // ── Fetch: Stats commandes ────────────────────────────────────────────────
+  const fetchCmdStats = useCallback(async () => {
+    if (!guildId) return;
+    setCmdStatsLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/cmd-stats`);
+      if (r.ok) setCmdStats(await r.json());
+    } finally { setCmdStatsLoading(false); }
+  }, [guildId]);
+
+  async function resetCmdStats() {
+    if (!confirm("Réinitialiser les statistiques de commandes ?")) return;
+    await apiFetch(`/api/owner/guilds/${guildId}/cmd-stats`, { method: "DELETE" });
+    setCmdStats([]);
+    toast({ title: "Statistiques réinitialisées ✓" });
+  }
+
+  const fetchMsgRanking = useCallback(async (period = msgRankPeriod) => {
+    if (!guildId) return;
+    setMsgRankingLoading(true);
+    try {
+      const since = Date.now() - period * 86400_000;
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/activity/message-ranking?since=${since}&limit=50`);
+      if (r.ok) setMsgRanking(await r.json());
+    } finally { setMsgRankingLoading(false); }
+  }, [guildId, msgRankPeriod]);
+
+  const fetchVoiceRanking = useCallback(async (period = msgRankPeriod) => {
+    if (!guildId) return;
+    setVoiceRankingLoading(true);
+    try {
+      const since = Date.now() - period * 86400_000;
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/activity/voice-ranking?since=${since}&limit=50`);
+      if (r.ok) setVoiceRanking(await r.json());
+    } finally { setVoiceRankingLoading(false); }
+  }, [guildId, msgRankPeriod]);
+
+  const fetchActivityTiers = useCallback(async () => {
+    if (!guildId) return;
+    setActivityTiersLoading(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/activity/tiers`);
+      if (r.ok) setActivityTiersConfig(await r.json());
+    } finally { setActivityTiersLoading(false); }
+  }, [guildId]);
+
+  async function saveActivityTiers(patch: Partial<ActivityTiersConfig>) {
+    if (!guildId) return;
+    setActivityTiersSaving(true);
+    try {
+      const r = await apiFetch(`/api/owner/guilds/${guildId}/activity/tiers`, {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+      if (r.ok) { setActivityTiersConfig(await r.json()); toast({ title: "Tiers sauvegardés ✓" }); }
+      else toast({ title: "Erreur sauvegarde", variant: "destructive" });
+    } finally { setActivityTiersSaving(false); }
+  }
+
+  // ── Password gate render ───────────────────────────────────────────────────
+  if (!unlocked) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-background">
+        <div className="w-full max-w-sm space-y-6">
+          <div className="text-center space-y-1">
+            <div className="flex justify-center mb-3">
+              <div className="rounded-full bg-primary/10 p-4"><Lock className="h-8 w-8 text-primary" /></div>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tighter uppercase font-mono">Panneau Propriétaire</h1>
+            <p className="text-muted-foreground font-mono text-xs">Accès restreint — mot de passe requis.</p>
+          </div>
+          <Card className="border-muted bg-card">
+            <CardHeader>
+              <CardTitle>Vérification</CardTitle>
+              <CardDescription>Entrez le mot de passe propriétaire pour continuer.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleUnlock} className="space-y-4">
+                {pwError && <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertDescription>{pwError}</AlertDescription></Alert>}
+                <Input type="password" value={pwInput} onChange={(e) => setPwInput(e.target.value)} placeholder="••••••••" disabled={pwLoading} autoFocus className="font-mono" />
+                <Button type="submit" disabled={pwLoading || pwInput.length === 0} className="w-full font-mono uppercase tracking-widest">
+                  {pwLoading ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Vérification…</> : "Déverrouiller"}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+          <div className="text-center">
+            <Link href="/guilds">
+              <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground">
+                <ArrowLeft className="h-4 w-4" /> Retour au dashboard
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (user && !user.isOwner) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="w-full max-w-sm text-center">
+          <CardHeader>
+            <div className="mx-auto w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center mb-2">
+              <ShieldOff className="h-6 w-6 text-destructive" />
+            </div>
+            <CardTitle>Accès refusé</CardTitle>
+            <CardDescription>Le panneau propriétaire est réservé au propriétaire du bot.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link href="/guilds"><Button variant="outline" className="gap-2"><ArrowLeft className="h-4 w-4" /> Retour</Button></Link>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen p-8 space-y-4">
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-96 w-full" />
+      </div>
+    );
+  }
+
+  // ── Filtered lists ─────────────────────────────────────────────────────────
+  const filteredBl = blacklist.filter((e) =>
+    !blSearch || e.userTag.toLowerCase().includes(blSearch.toLowerCase()) || e.userId.includes(blSearch) || e.reason.toLowerCase().includes(blSearch.toLowerCase())
+  );
+  const filteredTr = transcripts.filter((t) =>
+    !trSearch || t.channelName.includes(trSearch) || t.userTag.toLowerCase().includes(trSearch.toLowerCase()) || String(t.ticketNumber).includes(trSearch)
+  );
+  const disabledCmdNames = new Set(disabledCmds.map((d) => d.commandName));
+  const availableCmds = ALL_COMMANDS.filter((c) => !disabledCmdNames.has(c));
+
+  return (
+    <div className="min-h-screen bg-background text-foreground p-4 md:p-8 space-y-6">
+      <header className="flex items-center gap-4 border-b border-border pb-5">
+        <Link href="/guilds">
+          <Button variant="ghost" size="sm" className="gap-2"><ArrowLeft className="h-4 w-4" /> Retour</Button>
+        </Link>
+        <div className="flex-1">
+          <h1 className="text-2xl font-bold font-mono uppercase tracking-tight flex items-center gap-2">
+            <Shield className="h-6 w-6 text-primary" /> Panneau Propriétaire
+          </h1>
+          <p className="text-muted-foreground font-mono text-sm">{guildName || guildId}</p>
+        </div>
+        {user && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <img src={user.avatarURL} alt={user.userTag} className="h-7 w-7 rounded-full border border-border" />
+            <span className="hidden md:block font-mono">{user.userTag}</span>
+          </div>
+        )}
+      </header>
+
+      <Tabs value={activeTab} onValueChange={(v) => { setActiveTab(v); setActiveCategory(tabCategory(v)); }} className="space-y-4">
+        {/* ── Barre de catégories ───────────────────────────────────────────── */}
+        <div className="flex flex-wrap gap-1 border-b pb-2">
+          {Object.entries(CATEGORY_TABS).map(([key, { label, icon }]) => (
+            <button key={key}
+              onClick={() => {
+                setActiveCategory(key);
+                const tabs = CATEGORY_TABS[key]!.tabs;
+                if (!tabs.includes(activeTab)) setActiveTab(tabs[0]!);
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                activeCategory === key
+                  ? key === "securite"
+                    ? "bg-orange-500 text-white shadow-sm"
+                    : "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}>
+              <span>{icon}</span>
+              {label}
+              <Badge variant="secondary" className="text-[9px] px-1 py-0 font-mono ml-0.5">
+                {CATEGORY_TABS[key]!.tabs.length}
+              </Badge>
+            </button>
+          ))}
+        </div>
+
+        {/* ── Onglets filtrés par catégorie ─────────────────────────────────── */}
+        <TabsList className="flex flex-wrap h-auto gap-1 bg-muted/50 p-1 rounded-lg">
+          {/* Général */}
+          {activeCategory === "general" && <>
+            <TabsTrigger value="messages" className="gap-1.5 text-xs"><Send className="h-3.5 w-3.5" />Messages</TabsTrigger>
+            <TabsTrigger value="channels" className="gap-1.5 text-xs"><Hash className="h-3.5 w-3.5" />Salons</TabsTrigger>
+            <TabsTrigger value="members" className="gap-1.5 text-xs"><UserX className="h-3.5 w-3.5" />Membres</TabsTrigger>
+            <TabsTrigger value="server" className="gap-1.5 text-xs"><Settings className="h-3.5 w-3.5" />Serveur</TabsTrigger>
+            <TabsTrigger value="global-search" className="gap-1.5 text-xs" onClick={() => setSearchResults(null)}><SearchCode className="h-3.5 w-3.5" />Recherche</TabsTrigger>
+            <TabsTrigger value="botstatus" className="gap-1.5 text-xs" onClick={() => { void fetchBotStatus(); void fetchBotStatusEvents(); }}><Server className="h-3.5 w-3.5" />Statut Bot</TabsTrigger>
+            <TabsTrigger value="tests" className="gap-1.5 text-xs" onClick={fetchTestBots}><FlaskConical className="h-3.5 w-3.5" />Tests Bot</TabsTrigger>
+            <TabsTrigger value="voicepresence" className="gap-1.5 text-xs" onClick={async () => {
+              const [r1, r2] = await Promise.all([
+                apiFetch(`/api/owner/guilds/${guildId}/voice-presence`),
+                apiFetch(`/api/owner/guilds/${guildId}/voice-autojoin`),
+              ]);
+              if (r1.ok) setVoicePresence(await r1.json());
+              if (r2.ok) { const d = await r2.json(); setVpAutoJoin(d.enabled); }
+            }}><Headphones className="h-3.5 w-3.5" />Présence Vocale</TabsTrigger>
+            <TabsTrigger value="global-dashboard" className="gap-1.5 text-xs" onClick={fetchGlobalDashboard}><Globe className="h-3.5 w-3.5" />Tableau Global</TabsTrigger>
+            <TabsTrigger value="sondage" className="gap-1.5 text-xs"><MessageSquareWarning className="h-3.5 w-3.5" />Sondage</TabsTrigger>
+            <TabsTrigger value="assistant" className="gap-1.5 text-xs" onClick={fetchAssistantCfg}><Bot className="h-3.5 w-3.5" />Assistant</TabsTrigger>
+          </>}
+          {/* Sécurité */}
+          {activeCategory === "securite" && <>
+            <TabsTrigger value="blacklist" className="gap-1.5 text-xs"><Ban className="h-3.5 w-3.5" />Blacklist</TabsTrigger>
+            <TabsTrigger value="bl-serveur" className="gap-1.5 text-xs" onClick={fetchBlServers}><Ban className="h-3.5 w-3.5" />BL Serveur</TabsTrigger>
+            <TabsTrigger value="bl-tag" className="gap-1.5 text-xs" onClick={fetchBlTags}><Ban className="h-3.5 w-3.5" />BL Tag</TabsTrigger>
+            <TabsTrigger value="captchalogs" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Logs Captcha</TabsTrigger>
+            <TabsTrigger value="automod" className="gap-1.5 text-xs" onClick={fetchAutomod}><Zap className="h-3.5 w-3.5" />Automod</TabsTrigger>
+            <TabsTrigger value="quarantine" className="gap-1.5 text-xs" onClick={fetchQuarantine}><ShieldOff className="h-3.5 w-3.5" />Quarantaine</TabsTrigger>
+            <TabsTrigger value="suspectaccounts" className="gap-1.5 text-xs" onClick={fetchSuspectAccounts}><ShieldAlert className="h-3.5 w-3.5" />Suspects</TabsTrigger>
+            <TabsTrigger value="mod-roles" className="gap-1.5 text-xs" onClick={fetchModRoles}><Shield className="h-3.5 w-3.5" />Rôles Mod</TabsTrigger>
+            <TabsTrigger value="mass-action" className="gap-1.5 text-xs"><Gavel className="h-3.5 w-3.5" />Masse-Action</TabsTrigger>
+            <TabsTrigger value="spy-members" className="gap-1.5 text-xs" onClick={() => { if (!spyBanGuildId) setSpyBanGuildId(guildId ?? ""); fetchAllGuilds(); }}><Users className="h-3.5 w-3.5" />Membres Serveur</TabsTrigger>
+            <TabsTrigger value="verif-check" className="gap-1.5 text-xs"><ShieldCheck className="h-3.5 w-3.5" />Vérif Utilisateur</TabsTrigger>
+            <TabsTrigger value="invitebl" className="gap-1.5 text-xs" onClick={fetchInviteBl}><Link2Off className="h-3.5 w-3.5" />Invites BL</TabsTrigger>
+            <TabsTrigger value="word-bl" className="gap-1.5 text-xs" onClick={fetchWordBl}><Globe className="h-3.5 w-3.5" />Mots Globaux</TabsTrigger>
+            <TabsTrigger value="tempbans" className="gap-1.5 text-xs" onClick={fetchTempbans}><Ban className="h-3.5 w-3.5" />Tempbans</TabsTrigger>
+            <TabsTrigger value="timeouts" className="gap-1.5 text-xs" onClick={fetchTimeouts}><Clock className="h-3.5 w-3.5" />Timeouts</TabsTrigger>
+            <TabsTrigger value="warns" className="gap-1.5 text-xs" onClick={() => setWarnsData(null)}><AlertCircle className="h-3.5 w-3.5" />Warns</TabsTrigger>
+            <TabsTrigger value="maintenance" className="gap-1.5 text-xs" onClick={fetchMaintenance}><Wrench className="h-3.5 w-3.5" />Maintenance</TabsTrigger>
+            <TabsTrigger value="global-tempbans" className="gap-1.5 text-xs" onClick={fetchGlobalTempbans}><Ban className="h-3.5 w-3.5" />Tempbans Globaux</TabsTrigger>
+            <TabsTrigger value="anti-spam" className="gap-1.5 text-xs" onClick={fetchAntiSpam}><Zap className="h-3.5 w-3.5" />Anti-Spam</TabsTrigger>
+            <TabsTrigger value="immune-list" className="gap-1.5 text-xs" onClick={fetchImmuneList}><ShieldCheck className="h-3.5 w-3.5" />Immunisés</TabsTrigger>
+            <TabsTrigger value="whitelist-members" className="gap-1.5 text-xs" onClick={fetchMemberWl}><Users className="h-3.5 w-3.5" />Whitelist Membres</TabsTrigger>
+          </>}
+          {/* Modération */}
+          {activeCategory === "moderation" && <>
+            <TabsTrigger value="actionlog" className="gap-1.5 text-xs" onClick={fetchActionLog}><ScrollText className="h-3.5 w-3.5" />Journal</TabsTrigger>
+            <TabsTrigger value="audit-log" className="gap-1.5 text-xs" onClick={fetchAuditLog}><ListFilter className="h-3.5 w-3.5" />Audit Log</TabsTrigger>
+            <TabsTrigger value="notes" className="gap-1.5 text-xs" onClick={fetchNotes}><BookOpen className="h-3.5 w-3.5" />Notes</TabsTrigger>
+            <TabsTrigger value="member-profile" className="gap-1.5 text-xs" onClick={() => setProfileData(null)}><UserCheck className="h-3.5 w-3.5" />Fiche Membre</TabsTrigger>
+            <TabsTrigger value="global-history" className="gap-1.5 text-xs" onClick={() => { setHistoryData(null); setHistoryUserId(""); }}><Search className="h-3.5 w-3.5" />Historique Global</TabsTrigger>
+            <TabsTrigger value="invite-lookup" className="gap-1.5 text-xs" onClick={() => { setInviteLookupResult(null); setInviteLookupId(""); }}><Users className="h-3.5 w-3.5" />Invitations</TabsTrigger>
+          </>}
+          {/* Support */}
+          {activeCategory === "support" && <>
+            <TabsTrigger value="transcripts" className="gap-1.5 text-xs"><FileText className="h-3.5 w-3.5" />Transcripts</TabsTrigger>
+            <TabsTrigger value="tickets" className="gap-1.5 text-xs" onClick={fetchTickets}><Ticket className="h-3.5 w-3.5" />Tickets</TabsTrigger>
+            <TabsTrigger value="usercommands" className="gap-1.5 text-xs" onClick={fetchUserCmds}><MessageSquareWarning className="h-3.5 w-3.5" />Cmd. Users</TabsTrigger>
+            <TabsTrigger value="notif-roles" className="gap-1.5 text-xs" onClick={fetchNotifRoles}><Bell className="h-3.5 w-3.5" />Rôles Notifs</TabsTrigger>
+          </>}
+          {/* Config */}
+          {activeCategory === "config" && <>
+            <TabsTrigger value="botsettings" className="gap-1.5 text-xs"><Sliders className="h-3.5 w-3.5" />Réglages Bot</TabsTrigger>
+            <TabsTrigger value="disabled" className="gap-1.5 text-xs"><PowerOff className="h-3.5 w-3.5" />Commandes</TabsTrigger>
+            <TabsTrigger value="log-channels" className="gap-1.5 text-xs" onClick={fetchLogChannels}><Hash className="h-3.5 w-3.5" />Logs Config</TabsTrigger>
+            <TabsTrigger value="cloneconfig" className="gap-1.5 text-xs" onClick={fetchAllGuilds}><Copy className="h-3.5 w-3.5" />Clone Config</TabsTrigger>
+            <TabsTrigger value="invitations" className="gap-1.5 text-xs" onClick={fetchInvites}><Link2Off className="h-3.5 w-3.5" />Invitations</TabsTrigger>
+            <TabsTrigger value="custom-cmds" className="gap-1.5 text-xs" onClick={() => { void fetchCustomCmds(); void fetchGuildRoles(); }}><Command className="h-3.5 w-3.5" />Cmds Custom</TabsTrigger>
+            <TabsTrigger value="config-json" className="gap-1.5 text-xs"><Download className="h-3.5 w-3.5" />Config JSON</TabsTrigger>
+            <TabsTrigger value="server-bl" className="gap-1.5 text-xs" onClick={async () => { setServerBlLoading(true); const r = await apiFetch("/api/owner/server-blacklist"); if (r.ok) setServerBl(await r.json()); setServerBlLoading(false); }}><Ban className="h-3.5 w-3.5" />Serveurs BL</TabsTrigger>
+            <TabsTrigger value="auto-role" className="gap-1.5 text-xs" onClick={fetchAutoRole}><UserCheck className="h-3.5 w-3.5" />Auto-Rôle</TabsTrigger>
+          </>}
+          {/* Logs */}
+          {activeCategory === "logs" && <>
+            <TabsTrigger value="bot-reply-logs" className="gap-1.5 text-xs" onClick={fetchBotReplyLogs}><MessageSquareWarning className="h-3.5 w-3.5" />Logs Bot</TabsTrigger>
+            <TabsTrigger value="voicelog" className="gap-1.5 text-xs" onClick={fetchVoiceLog}><Volume2 className="h-3.5 w-3.5" />Vocaux</TabsTrigger>
+            <TabsTrigger value="cmd-stats" className="gap-1.5 text-xs" onClick={fetchCmdStats}><Activity className="h-3.5 w-3.5" />Stats Cmds</TabsTrigger>
+          </>}
+          {/* IA Mod */}
+          {activeCategory === "ia" && <>
+            <TabsTrigger value="ai-mod-config" className="gap-1.5 text-xs" onClick={fetchAiModCfg}><Sliders className="h-3.5 w-3.5" />Config IA</TabsTrigger>
+            <TabsTrigger value="ai-trust-lookup" className="gap-1.5 text-xs"><Shield className="h-3.5 w-3.5" />Trust Score</TabsTrigger>
+            <TabsTrigger value="ai-raid-status" className="gap-1.5 text-xs" onClick={fetchAiRaidStatus}><ShieldAlert className="h-3.5 w-3.5" />Raid Predict</TabsTrigger>
+            <TabsTrigger value="ai-risky" className="gap-1.5 text-xs" onClick={fetchAiRiskyMembers}><ShieldCheck className="h-3.5 w-3.5" />Membres Risqués</TabsTrigger>
+            <TabsTrigger value="ai-commands" className="gap-1.5 text-xs"><BookOpen className="h-3.5 w-3.5" />Commandes /</TabsTrigger>
+          </>}
+          {/* Activité */}
+          {activeCategory === "activite" && <>
+            <TabsTrigger value="activity-ranking" className="gap-1.5 text-xs" onClick={() => fetchMsgRanking()}><BarChart2 className="h-3.5 w-3.5" />Classement Messages</TabsTrigger>
+            <TabsTrigger value="activity-voice" className="gap-1.5 text-xs" onClick={() => fetchVoiceRanking()}><Mic className="h-3.5 w-3.5" />Classement Vocal</TabsTrigger>
+            <TabsTrigger value="activity-tiers" className="gap-1.5 text-xs" onClick={fetchActivityTiers}><Layers className="h-3.5 w-3.5" />Tiers d'Activité</TabsTrigger>
+          </>}
+        </TabsList>
+
+        {/* ── Messages ──────────────────────────────────────────────────────── */}
+        <TabsContent value="messages" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📨 Envoyer un Message</CardTitle>
+              <CardDescription>Envoie un message directement dans un salon textuel du serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Salon de destination</label>
+                <Select value={selectedChannelId} onValueChange={setSelectedChannelId}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                  <SelectContent>
+                    {categories.map((cat) => (
+                      <div key={cat.id}>
+                        <div className="px-2 py-1 text-xs text-muted-foreground uppercase tracking-wider font-semibold">{cat.name}</div>
+                        {textChannels.filter((c) => c.parentId === cat.id).map((c) => (
+                          <SelectItem key={c.id} value={c.id}><span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span></SelectItem>
+                        ))}
+                      </div>
+                    ))}
+                    {textChannels.filter((c) => !c.parentId).map((c) => (
+                      <SelectItem key={c.id} value={c.id}><span className="flex items-center gap-1.5">{CHANNEL_TYPE_ICON[c.type]} #{c.name}</span></SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Contenu du message</label>
+                <Textarea value={messageContent} onChange={(e) => setMessageContent(e.target.value)} placeholder="Votre message (supporte le markdown Discord)..." rows={4} className="font-mono text-sm resize-none" />
+              </div>
+              <Button onClick={sendMessage} disabled={sendingMsg || !selectedChannelId || !messageContent.trim()} className="gap-2">
+                {sendingMsg ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Embed builder */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎨 Envoyer un Embed</CardTitle>
+              <CardDescription>Construit et envoie un message embed avec titre, description et couleur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                <Select value={embedChannelId} onValueChange={setEmbedChannelId}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                  <SelectContent>
+                    {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Titre</label>
+                  <Input value={embedTitle} onChange={(e) => setEmbedTitle(e.target.value)} placeholder="Titre de l'embed..." maxLength={256} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Couleur</label>
+                  <div className="flex gap-2 items-center">
+                    <input type="color" value={embedColor} onChange={(e) => setEmbedColor(e.target.value)} className="h-9 w-14 rounded border border-border cursor-pointer bg-transparent" />
+                    <Input value={embedColor} onChange={(e) => setEmbedColor(e.target.value)} placeholder="#5865f2" className="font-mono flex-1" />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Description</label>
+                <Textarea value={embedDesc} onChange={(e) => setEmbedDesc(e.target.value)} placeholder="Contenu de l'embed (markdown Discord)..." rows={3} className="font-mono text-sm resize-none" maxLength={4096} />
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Image (URL, facultatif)</label>
+                  <Input value={embedImage} onChange={(e) => setEmbedImage(e.target.value)} placeholder="https://..." />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Footer (facultatif)</label>
+                  <Input value={embedFooter} onChange={(e) => setEmbedFooter(e.target.value)} placeholder="Texte de bas de page..." maxLength={2048} />
+                </div>
+              </div>
+              <Button onClick={sendEmbed} disabled={sendingEmbed || !embedChannelId || (!embedTitle.trim() && !embedDesc.trim())} className="gap-2">
+                {sendingEmbed ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer l'embed</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Schedule message */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⏰ Programmer un Message</CardTitle>
+              <CardDescription>Envoie un message dans X minutes dans le salon choisi.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={schedChannelId} onValueChange={setSchedChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Délai (minutes)</label>
+                  <Input type="number" min="1" max="1440" value={schedDelay} onChange={(e) => setSchedDelay(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Contenu</label>
+                <Textarea value={schedContent} onChange={(e) => setSchedContent(e.target.value)} placeholder="Message à envoyer dans X minutes..." rows={3} className="font-mono text-sm resize-none" />
+              </div>
+              <Button onClick={scheduleMessage} disabled={scheduling || !schedChannelId || !schedContent.trim() || Number(schedDelay) < 1} className="gap-2">
+                {scheduling ? <><Loader2 className="h-4 w-4 animate-spin" />Planification…</> : <><Clock className="h-4 w-4" />Planifier</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Edit message */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">✏️ Modifier un Message du Bot</CardTitle>
+              <CardDescription>Modifie le contenu d'un message envoyé par le bot via son ID.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={editChannelId} onValueChange={setEditChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID du message</label>
+                  <Input value={editMsgId} onChange={(e) => setEditMsgId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Nouveau contenu</label>
+                <Textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} placeholder="Nouveau texte du message..." rows={3} className="font-mono text-sm resize-none" />
+              </div>
+              <Button onClick={editMessage} disabled={editing || !editChannelId || !editMsgId.trim() || !editContent.trim()} className="gap-2">
+                {editing ? <><Loader2 className="h-4 w-4 animate-spin" />Modification…</> : <><Pencil className="h-4 w-4" />Modifier</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Channels ──────────────────────────────────────────────────────── */}
+        <TabsContent value="channels" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">➕ Créer un salon</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nom</label>
+                  <Input value={newChannelName} onChange={(e) => setNewChannelName(e.target.value)} placeholder="nouveau-salon" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Type</label>
+                  <Select value={newChannelType} onValueChange={setNewChannelType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text">Texte</SelectItem>
+                      <SelectItem value="voice">Vocal</SelectItem>
+                      <SelectItem value="category">Catégorie</SelectItem>
+                      <SelectItem value="announcement">Annonce</SelectItem>
+                      <SelectItem value="forum">Forum</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Catégorie parente</label>
+                  <Select value={newChannelParent || "__none__"} onValueChange={(v) => setNewChannelParent(v === "__none__" ? "" : v)}>
+                    <SelectTrigger><SelectValue placeholder="Aucune" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Aucune</SelectItem>
+                      {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Topic (facultatif)</label>
+                  <Input value={newChannelTopic} onChange={(e) => setNewChannelTopic(e.target.value)} placeholder="Description du salon..." />
+                </div>
+              </div>
+              <Button onClick={createChannel} disabled={creatingChannel || !newChannelName.trim()} className="gap-2">
+                {creatingChannel ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer
+              </Button>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Salons existants</CardTitle>
+              <div className="flex justify-end">
+                <Button variant="ghost" size="sm" onClick={fetchChannels} className="gap-1.5 text-xs">
+                  <RefreshCw className="h-3.5 w-3.5" /> Actualiser
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-1 max-h-96 overflow-y-auto">
+                {channels.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2 p-2 rounded-md hover:bg-muted/50 group">
+                    <span className="text-muted-foreground">{CHANNEL_TYPE_ICON[c.type]}</span>
+                    <span className="flex-1 text-sm font-mono">{c.type === 4 ? c.name.toUpperCase() : `#${c.name}`}</span>
+                    <Badge variant="outline" className="text-xs hidden group-hover:flex">{c.id}</Badge>
+                    {c.type !== 4 && (
+                      <Button variant="ghost" size="sm" onClick={() => deleteChannel(c.id, c.name)} className="h-7 w-7 p-0 text-destructive opacity-0 group-hover:opacity-100 hover:bg-destructive/10">
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Lock / Unlock */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔒 Verrouiller / Déverrouiller</CardTitle>
+              <CardDescription>Empêche ou restaure l'envoi de messages (@everyone) en un clic.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Salon cible</label>
+                <Select value={lockChannelId} onValueChange={setLockChannelId}>
+                  <SelectTrigger><SelectValue placeholder="Choisir un salon texte..." /></SelectTrigger>
+                  <SelectContent>
+                    {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => lockUnlockChannel("lock")} disabled={locking || !lockChannelId} variant="destructive" className="gap-2">
+                  {locking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lock className="h-4 w-4" />} Verrouiller
+                </Button>
+                <Button onClick={() => lockUnlockChannel("unlock")} disabled={locking || !lockChannelId} variant="outline" className="gap-2">
+                  {locking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unlock className="h-4 w-4" />} Déverrouiller
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Purge */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🗑️ Purge de Messages</CardTitle>
+              <CardDescription>Supprime les X derniers messages d'un salon (max 100, ≤14 jours).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="md:col-span-1">
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={purgeChannelId} onValueChange={setPurgeChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nombre (1-100)</label>
+                  <Input type="number" min="1" max="100" value={purgeLimit} onChange={(e) => setPurgeLimit(e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID utilisateur (optionnel)</label>
+                  <Input value={purgeUserId} onChange={(e) => setPurgeUserId(e.target.value)} placeholder="ID ou vide pour tous" className="font-mono" />
+                </div>
+              </div>
+              <Button onClick={purgeChannel} disabled={purging || !purgeChannelId} variant="destructive" className="gap-2">
+                {purging ? <><Loader2 className="h-4 w-4 animate-spin" />Purge…</> : <><Trash2 className="h-4 w-4" />Purger</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Slowmode */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🐢 Slowmode Rapide</CardTitle>
+              <CardDescription>Définit le délai entre messages dans un salon (0 = désactivé, max 21600s).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={slowChannelId} onValueChange={setSlowChannelId}>
+                    <SelectTrigger><SelectValue placeholder="Salon..." /></SelectTrigger>
+                    <SelectContent>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Délai en secondes</label>
+                  <Input type="number" min="0" max="21600" value={slowSeconds} onChange={(e) => setSlowSeconds(e.target.value)} placeholder="0 pour désactiver" />
+                </div>
+              </div>
+              <Button onClick={setSlowmode} disabled={slowing || !slowChannelId} className="gap-2">
+                {slowing ? <><Loader2 className="h-4 w-4 animate-spin" />Application…</> : <>🐢 Appliquer</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Members ───────────────────────────────────────────────────────── */}
+        <TabsContent value="members" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">👥 Membres</CardTitle>
+              <div className="flex gap-2 mt-2">
+                <Input placeholder="Rechercher un membre..." value={memberSearch} onChange={(e) => setMemberSearch(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") fetchMembers(memberSearch); }} className="max-w-xs" />
+                <Button variant="outline" size="sm" onClick={() => fetchMembers(memberSearch)} className="gap-1.5"><Search className="h-3.5 w-3.5" /></Button>
+              </div>
+              <div className="mt-2">
+                <label className="text-sm font-medium mb-1.5 block">Raison (kick/ban)</label>
+                <Input value={actionReason} onChange={(e) => setActionReason(e.target.value)} placeholder="Raison (facultatif)" className="max-w-xs" />
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {members.filter((m) => !m.bot).map((m) => (
+                  <div key={m.id} className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50">
+                    <img src={m.avatarURL} alt={m.tag} className="h-8 w-8 rounded-full border border-border" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{m.displayName}</p>
+                      <p className="text-xs text-muted-foreground font-mono truncate">{m.tag}</p>
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button variant="outline" size="sm" onClick={() => memberAction("kick", m.id, m.displayName)} disabled={actionLoading && actionMemberId === m.id} className="gap-1.5 text-xs">
+                        <UserX className="h-3.5 w-3.5" /> Kick
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => memberAction("ban", m.id, m.displayName)} disabled={actionLoading && actionMemberId === m.id} className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
+                        <Shield className="h-3.5 w-3.5" /> Ban
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+                {members.filter((m) => !m.bot).length === 0 && (
+                  <div className="text-center text-muted-foreground py-8 text-sm">Aucun membre trouvé.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Unban */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔓 Débannir un Membre</CardTitle>
+              <CardDescription>Retire un bannissement via l'ID utilisateur Discord.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">ID Utilisateur</label>
+                  <Input value={unbanId} onChange={(e) => setUnbanId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Raison (optionnel)</label>
+                  <Input value={unbanReason} onChange={(e) => setUnbanReason(e.target.value)} placeholder="Raison du débannissement..." />
+                </div>
+              </div>
+              <Button onClick={unbanUser} disabled={unbanning || !unbanId.trim()} className="gap-2">
+                {unbanning ? <><Loader2 className="h-4 w-4 animate-spin" />Débannissement…</> : <>🔓 Débannir</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Role assignment */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🏷️ Gérer les Rôles</CardTitle>
+              <CardDescription>Ajoute ou retire un rôle sur un membre présent dans le serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Membre</label>
+                  <Select value={roleMemberId} onValueChange={setRoleMemberId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un membre..." /></SelectTrigger>
+                    <SelectContent>
+                      {members.filter((m) => !m.bot).map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.displayName}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Rôle</label>
+                  <Select value={roleId} onValueChange={setRoleId}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un rôle..." /></SelectTrigger>
+                    <SelectContent>
+                      {roles.map((r) => (
+                        <SelectItem key={r.id} value={r.id}>
+                          <span className="flex items-center gap-2">
+                            {r.color && r.color !== "#000000" && (
+                              <span className="h-2.5 w-2.5 rounded-full inline-block" style={{ backgroundColor: r.color }} />
+                            )}
+                            {r.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button onClick={() => { setRoleAction("add"); setTimeout(assignRole, 0); }} disabled={rolesLoading || !roleMemberId || !roleId} className="gap-2">
+                  {rolesLoading && roleAction === "add" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tag className="h-4 w-4" />} Ajouter le rôle
+                </Button>
+                <Button onClick={() => { setRoleAction("remove"); setTimeout(assignRole, 0); }} disabled={rolesLoading || !roleMemberId || !roleId} variant="outline" className="gap-2">
+                  {rolesLoading && roleAction === "remove" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Tag className="h-4 w-4" />} Retirer le rôle
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Server settings ───────────────────────────────────────────────── */}
+        <TabsContent value="server" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⚙️ Paramètres Discord</CardTitle>
+              <CardDescription>Modification directe des paramètres Discord du serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nom du serveur</label>
+                  <Input value={guildEditName} onChange={(e) => setGuildEditName(e.target.value)} placeholder="Laisser vide pour ne pas changer" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Niveau de vérification</label>
+                  <Select value={guildVerifLevel} onValueChange={setGuildVerifLevel}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {VERIFICATION_LABELS.map((label, i) => <SelectItem key={i} value={String(i)}>{label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="md:col-span-2">
+                  <label className="text-sm font-medium mb-1.5 block">Salon système</label>
+                  <Select value={guildSystemChannel || "__none__"} onValueChange={(v) => setGuildSystemChannel(v === "__none__" ? "" : v)}>
+                    <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Aucun</SelectItem>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <Button onClick={saveGuildSettings} disabled={savingSettings} className="gap-2">
+                <Settings className="h-4 w-4" />{savingSettings ? "Sauvegarde..." : "Appliquer"}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Blacklist globale ─────────────────────────────────────────────── */}
+        <TabsContent value="blacklist" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⛔ Ajouter à la Blacklist Globale</CardTitle>
+              <CardDescription>L'utilisateur sera banni de tous les serveurs où le bot est présent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Discord ID</label>
+                  <Input value={newBlUserId} onChange={(e) => setNewBlUserId(e.target.value)} placeholder="123456789012345678" className="font-mono" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Tag / Nom</label>
+                  <Input value={newBlUserTag} onChange={(e) => setNewBlUserTag(e.target.value)} placeholder="user#1234 ou pseudo" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Raison</label>
+                  <Input value={newBlReason} onChange={(e) => setNewBlReason(e.target.value)} placeholder="Raison du ban global..." />
+                </div>
+              </div>
+              <Button onClick={addToBlacklist} disabled={addingBl || !newBlUserId.trim() || !newBlUserTag.trim() || !newBlReason.trim()} variant="destructive" className="gap-2">
+                {addingBl ? <Loader2 className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Blacklister
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">📋 Liste ({blacklist.length})</CardTitle>
+                <Button variant="ghost" size="sm" onClick={fetchBlacklist} disabled={blLoading} className="gap-1.5 text-xs">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blLoading ? "animate-spin" : ""}`} /> Actualiser
+                </Button>
+              </div>
+              <Input placeholder="Rechercher..." value={blSearch} onChange={(e) => setBlSearch(e.target.value)} className="mt-2 max-w-xs" />
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 max-h-[500px] overflow-y-auto">
+                {filteredBl.length === 0 && <p className="text-center text-muted-foreground py-8 text-sm">Aucune entrée.</p>}
+                {filteredBl.map((e) => (
+                  <div key={e.userId} className="flex items-start gap-3 p-3 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{e.userTag}</span>
+                        <Badge variant="outline" className="font-mono text-xs">{e.userId}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Raison : {e.reason}</p>
+                      <p className="text-xs text-muted-foreground">Par {e.moderatorTag} · {new Date(e.createdAt).toLocaleDateString("fr-FR")}</p>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => removeFromBlacklist(e.userId, e.userTag)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0">
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── BL Serveur ───────────────────────────────────────────────────── */}
+        <TabsContent value="bl-serveur" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Blacklist Serveur
+              </CardTitle>
+              <CardDescription>
+                Quand un utilisateur rejoint, le bot vérifie s'il est membre d'un de ces serveurs. Si oui, il est automatiquement banni.
+                Le bot doit être présent dans le serveur cible.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={blServerNew}
+                  onChange={(e) => setBlServerNew(e.target.value.trim())}
+                  placeholder="ID du serveur à blacklister…"
+                  className="font-mono text-sm flex-1"
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                />
+                <Button
+                  disabled={blServersLoading || !blServerNew.trim()}
+                  className="gap-2 shrink-0"
+                  onClick={async () => {
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers`, {
+                      method: "POST", body: JSON.stringify({ serverId: blServerNew }),
+                    });
+                    if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); setBlServerNew(""); toast({ title: "Serveur ajouté à la blacklist ✓" }); }
+                    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                  }}
+                >
+                  <Ban className="h-4 w-4" /> Ajouter
+                </Button>
+                <Button variant="ghost" size="sm" onClick={fetchBlServers} disabled={blServersLoading} className="px-2">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blServersLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {blServers.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun serveur blacklisté.</p>
+                ) : blServers.map((sid) => (
+                  <div key={sid} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <span className="font-mono text-sm">{sid}</span>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0"
+                      onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-servers/${encodeURIComponent(sid)}`, { method: "DELETE" });
+                        if (r.ok) { const d = await r.json(); setBlServers(d.servers ?? []); toast({ title: "Serveur retiré ✓" }); }
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── BL Tag ───────────────────────────────────────────────────────── */}
+        <TabsContent value="bl-tag" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Blacklist Tag
+              </CardTitle>
+              <CardDescription>
+                Quand un utilisateur rejoint, le bot compare son username, global name et tag à cette liste.
+                Si une correspondance exacte est trouvée, il est automatiquement banni.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={blTagNew}
+                  onChange={(e) => setBlTagNew(e.target.value)}
+                  placeholder="username, globalname ou user#1234…"
+                  className="text-sm flex-1"
+                  onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                />
+                <Button
+                  disabled={blTagsLoading || !blTagNew.trim()}
+                  className="gap-2 shrink-0"
+                  onClick={async () => {
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags`, {
+                      method: "POST", body: JSON.stringify({ tag: blTagNew }),
+                    });
+                    if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); setBlTagNew(""); toast({ title: "Tag ajouté à la blacklist ✓" }); }
+                    else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                  }}
+                >
+                  <Ban className="h-4 w-4" /> Ajouter
+                </Button>
+                <Button variant="ghost" size="sm" onClick={fetchBlTags} disabled={blTagsLoading} className="px-2">
+                  <RefreshCw className={`h-3.5 w-3.5 ${blTagsLoading ? "animate-spin" : ""}`} />
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {blTags.length === 0 ? (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun tag blacklisté.</p>
+                ) : blTags.map((t) => (
+                  <div key={t} className="flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-border bg-card hover:bg-muted/30">
+                    <span className="font-mono text-sm">{t}</span>
+                    <Button
+                      variant="ghost" size="sm"
+                      className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 shrink-0"
+                      onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bl-tags/${encodeURIComponent(t)}`, { method: "DELETE" });
+                        if (r.ok) { const d = await r.json(); setBlTags(d.tags ?? []); toast({ title: "Tag retiré ✓" }); }
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Commandes désactivées ─────────────────────────────────────────── */}
+        <TabsContent value="disabled" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔇 Désactiver une Commande</CardTitle>
+              <CardDescription>Les commandes désactivées seront ignorées sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-3">
+                <Select value={newCmdName} onValueChange={setNewCmdName}>
+                  <SelectTrigger className="max-w-xs font-mono">
+                    <SelectValue placeholder="Choisir une commande..." />
+                  </SelectTrigger>
+                  <SelectContent className="font-mono">
+                    {availableCmds.map((c) => <SelectItem key={c} value={c}>/{c}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Button onClick={disableCmd} disabled={addingDc || !newCmdName} variant="destructive" className="gap-2">
+                  {addingDc ? <Loader2 className="h-4 w-4 animate-spin" /> : <PowerOff className="h-4 w-4" />} Désactiver
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">⛔ Commandes désactivées ({disabledCmds.length})</CardTitle>
+                {disabledCmds.length > 0 && (
+                  <Button variant="outline" size="sm" onClick={enableAllCmds} className="gap-1.5 text-xs">
+                    <Power className="h-3.5 w-3.5" /> Tout réactiver
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              {dcLoading && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+              {!dcLoading && disabledCmds.length === 0 && <p className="text-center text-muted-foreground py-8 text-sm">Aucune commande désactivée.</p>}
+              <div className="space-y-2">
+                {disabledCmds.map((d) => (
+                  <div key={d.id} className="flex items-center gap-3 p-3 rounded-md border border-destructive/30 bg-destructive/5">
+                    <code className="flex-1 text-sm font-mono text-foreground">/{d.commandName}</code>
+                    <span className="text-xs text-muted-foreground hidden md:block">désactivée par {d.disabledBy}</span>
+                    <span className="text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString("fr-FR")}</span>
+                    <Button variant="ghost" size="sm" onClick={() => enableCmd(d.commandName)} className="h-7 gap-1.5 text-xs text-green-500 hover:bg-green-500/10 hover:text-green-500">
+                      <Power className="h-3.5 w-3.5" /> Réactiver
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Transcripts ───────────────────────────────────────────────────── */}
+        <TabsContent value="transcripts" className="space-y-4">
+          {viewTranscript ? (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base font-mono uppercase">📄 Ticket #{viewTranscript.ticketNumber} — #{viewTranscript.channelName}</CardTitle>
+                    <CardDescription>
+                      Créé par {viewTranscript.userTag} · Fermé par {viewTranscript.closedBy} · {viewTranscript.messageCount} messages
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => { const blob = new Blob([viewTranscript.content], { type: "text/plain" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `transcript-${viewTranscript.ticketNumber}.txt`; a.click(); }} className="gap-1.5 text-xs">
+                      ⬇ Télécharger
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setViewTranscript(null)} className="gap-1.5">
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <pre className="text-xs font-mono bg-muted rounded-md p-4 overflow-auto max-h-[60vh] whitespace-pre-wrap leading-relaxed">{viewTranscript.content}</pre>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-mono uppercase">📄 Transcripts de tickets ({transcripts.length})</CardTitle>
+                  <Button variant="ghost" size="sm" onClick={fetchTranscripts} disabled={trLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${trLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                </div>
+                <Input placeholder="Rechercher par salon, utilisateur, numéro..." value={trSearch} onChange={(e) => setTrSearch(e.target.value)} className="mt-2 max-w-xs" />
+              </CardHeader>
+              <CardContent>
+                {trLoading && <div className="text-center py-4"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+                {!trLoading && filteredTr.length === 0 && (
+                  <p className="text-center text-muted-foreground py-8 text-sm">Aucun transcript. Les transcripts sont générés automatiquement à la fermeture d'un ticket.</p>
+                )}
+                <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+                  {filteredTr.map((t) => (
+                    <div key={t.id} className="flex items-center gap-3 p-3 rounded-md border border-border bg-card hover:bg-muted/30 group">
+                      <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">Ticket #{t.ticketNumber}</span>
+                          <Badge variant="secondary" className="text-xs font-mono">#{t.channelName}</Badge>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {t.userTag} · Fermé par {t.closedBy} · {t.messageCount} msgs · {new Date(t.closedAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+                        </p>
+                        {t.reason && t.reason !== "Aucune raison" && <p className="text-xs text-muted-foreground italic">Raison : {t.reason}</p>}
+                      </div>
+                      <div className="flex gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Button variant="outline" size="sm" onClick={() => openTranscript(t.id)} disabled={viewLoading} className="h-7 gap-1.5 text-xs">
+                          <Eye className="h-3.5 w-3.5" /> Voir
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => deleteTranscriptFn(t.id)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── Réglages Bot ──────────────────────────────────────────────────── */}
+        <TabsContent value="botsettings" className="space-y-4">
+          {bsLoading || !botSettings ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🔒 Rôles Protégés</CardTitle>
+                  <CardDescription>Ces rôles sont automatiquement recréés s'ils sont supprimés par qui que ce soit. Seul le panel owner peut les retirer de la liste.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex gap-2">
+                    <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={fetchGuildRoles} disabled={guildRolesLoading}>
+                      {guildRolesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} Charger les rôles
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    <Select value={roleWlSelected} onValueChange={setRoleWlSelected}>
+                      <SelectTrigger className="flex-1">
+                        <SelectValue placeholder={guildRoles.length === 0 ? "Clique sur Charger les rôles…" : "Choisir un rôle à protéger…"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {guildRoles.filter(r => !roleWl.includes(r.id)).map(r => (
+                          <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" disabled={!roleWlSelected} onClick={async () => {
+                      if (!roleWlSelected) return;
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/role-whitelist`, { method: "POST", body: JSON.stringify({ roleId: roleWlSelected }) });
+                      if (r.ok) { const d = await r.json() as { roleIds: string[] }; setRoleWl(d.roleIds); setRoleWlSelected(""); toast({ title: "✅ Rôle protégé" }); }
+                      else toast({ title: "Erreur", variant: "destructive" });
+                    }}>Protéger</Button>
+                  </div>
+                  {roleWl.length === 0 ? (
+                    <p className="text-xs text-muted-foreground italic">Aucun rôle protégé.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {roleWl.map(id => {
+                        const role = guildRoles.find(r => r.id === id);
+                        return (
+                          <div key={id} className="flex items-center justify-between px-3 py-1.5 rounded-md bg-muted/40 text-sm">
+                            <span>{role ? role.name : <span className="font-mono text-xs text-muted-foreground">{id}</span>}</span>
+                            <Button variant="ghost" size="sm" className="h-6 text-xs text-destructive hover:text-destructive" onClick={async () => {
+                              const r = await apiFetch(`/api/owner/guilds/${guildId}/role-whitelist/${id}`, { method: "DELETE" });
+                              if (r.ok) { const d = await r.json() as { roleIds: string[] }; setRoleWl(d.roleIds); toast({ title: "🗑️ Rôle retiré de la protection" }); }
+                              else toast({ title: "Erreur", variant: "destructive" });
+                            }}>Retirer</Button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🤖 Configuration Captcha</CardTitle>
+                  <CardDescription>Vérifie les nouveaux membres via un code captcha.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Captcha activé</label>
+                    <Button
+                      size="sm" variant={botSettings.captchaEnabled ? "default" : "outline"}
+                      onClick={() => setBotSettings({ ...botSettings, captchaEnabled: !botSettings.captchaEnabled })}
+                      className="gap-1.5 w-28"
+                    >
+                      {botSettings.captchaEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Salon de vérification</label>
+                      <Select value={botSettings.captchaChannelId ?? "__none__"} onValueChange={(v) => setBotSettings({ ...botSettings, captchaChannelId: v === "__none__" ? null : v })}>
+                        <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Aucun</SelectItem>
+                          {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Rôle vérifié (à attribuer)</label>
+                      <Input value={botSettings.captchaVerifiedRoleId ?? ""} onChange={(e) => setBotSettings({ ...botSettings, captchaVerifiedRoleId: e.target.value || null })} placeholder="ID du rôle" className="font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Mode</label>
+                      <Select value={botSettings.captchaMode} onValueChange={(v) => setBotSettings({ ...botSettings, captchaMode: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="channel">Salon (visible)</SelectItem>
+                          <SelectItem value="dm">DM (privé)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Tentatives max ({botSettings.captchaMaxAttempts})</label>
+                      <Input type="number" min={1} max={10} value={botSettings.captchaMaxAttempts} onChange={(e) => setBotSettings({ ...botSettings, captchaMaxAttempts: Number(e.target.value) })} className="font-mono" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Timeout (minutes · {botSettings.captchaTimeoutMins})</label>
+                      <Input type="number" min={1} max={60} value={botSettings.captchaTimeoutMins} onChange={(e) => setBotSettings({ ...botSettings, captchaTimeoutMins: Number(e.target.value) })} className="font-mono" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">👋 Message de Bienvenue</CardTitle>
+                  <CardDescription>Envoie un message quand un nouveau membre rejoint.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Bienvenue activé</label>
+                    <Button size="sm" variant={botSettings.welcomeEnabled ? "default" : "outline"} onClick={() => setBotSettings({ ...botSettings, welcomeEnabled: !botSettings.welcomeEnabled })} className="gap-1.5 w-28">
+                      {botSettings.welcomeEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                      <Select value={botSettings.welcomeChannelId ?? "__none__"} onValueChange={(v) => setBotSettings({ ...botSettings, welcomeChannelId: v === "__none__" ? null : v })}>
+                        <SelectTrigger><SelectValue placeholder="Aucun" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Aucun</SelectItem>
+                          {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-sm font-medium mb-1.5 block">Message <span className="text-muted-foreground text-xs">(variables : {"{user}"}, {"{server}"}, {"{memberCount}"})</span></label>
+                      <Textarea value={botSettings.welcomeMessage ?? ""} onChange={(e) => setBotSettings({ ...botSettings, welcomeMessage: e.target.value || null })} placeholder="Bienvenue {user} sur {server} ! Tu es le {memberCount}ème membre." rows={3} className="font-mono text-sm resize-none" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={saveBotSettings} disabled={bsSaving} className="gap-2 font-mono uppercase tracking-widest">
+                  {bsSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <><Sliders className="h-4 w-4" />Sauvegarder les réglages</>}
+                </Button>
+              </div>
+            </>
+          )}
+
+          {/* ── Protections Anti-Abus ───────────────────────────────────────── */}
+          {apLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : antiProtection ? (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🚨 Anti-Raider Silencieux</CardTitle>
+                  <CardDescription>Détecte automatiquement les vagues de joins et prend action en silence (sans log public).</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center gap-3 p-3 rounded-md bg-muted/40">
+                    <label className="text-sm font-medium flex-1">Anti-Raider activé</label>
+                    <Button size="sm" variant={antiProtection.antiRaiderEnabled ? "default" : "outline"}
+                      onClick={() => setAntiProtection({ ...antiProtection, antiRaiderEnabled: !antiProtection.antiRaiderEnabled })}
+                      className="gap-1.5 w-28">
+                      {antiProtection.antiRaiderEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Seuil (joins · {antiProtection.antiRaiderThreshold})</label>
+                      <Input type="number" min={2} max={50} value={antiProtection.antiRaiderThreshold}
+                        onChange={(e) => setAntiProtection({ ...antiProtection, antiRaiderThreshold: Number(e.target.value) })} className="font-mono" />
+                      <p className="text-xs text-muted-foreground mt-1">Nombre de joins déclenchant l'alerte</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Fenêtre (secondes · {antiProtection.antiRaiderWindow})</label>
+                      <Input type="number" min={3} max={120} value={antiProtection.antiRaiderWindow}
+                        onChange={(e) => setAntiProtection({ ...antiProtection, antiRaiderWindow: Number(e.target.value) })} className="font-mono" />
+                      <p className="text-xs text-muted-foreground mt-1">Délai dans lequel compter les joins</p>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Action</label>
+                      <Select value={antiProtection.antiRaiderAction} onValueChange={(v) => setAntiProtection({ ...antiProtection, antiRaiderAction: v })}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="timeout">Timeout 1h (silencieux)</SelectItem>
+                          <SelectItem value="kick">Expulsion (silencieux)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🛡️ Protections Audit Log</CardTitle>
+                  <CardDescription>Détecte et sanctionne les abus d'administration via le journal d'audit Discord. Nécessite l'intent GuildModeration.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {/* Bypass de permissions admin */}
+                  <div className="flex items-start gap-3 p-3 rounded-md border border-yellow-500/30 bg-yellow-500/5">
+                    <span className="text-lg mt-0.5">⚡</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">Bypass de permissions</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Quand activé : si l'exécuteur a la perm <span className="font-mono">Administrator</span>, le bot retire temporairement ses rôles admin pour pouvoir le timeout, puis les remet automatiquement à la fin. Désactiver si vous voulez que les admins restent intouchables par le bot.
+                      </p>
+                    </div>
+                    <Button size="sm" variant={antiProtection.antiAuditBypassPerms ? "default" : "outline"}
+                      onClick={() => setAntiProtection({ ...antiProtection, antiAuditBypassPerms: !antiProtection.antiAuditBypassPerms })}
+                      className="gap-1.5 w-28 shrink-0">
+                      {antiProtection.antiAuditBypassPerms ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+
+                  {([
+                    { key: "antiMoveEnabled" as const, label: "Anti-Move", icon: "🔀", desc: "Détecte les déplacements forcés de membres en vocal — bypasse les perms admin" },
+                    { key: "antiMuteEnabled" as const, label: "Anti-Mute", icon: "🔇", desc: "Détecte le mute serveur de membres — révoque le mute + sanctionne l'exécuteur" },
+                    { key: "antiDisconnectEnabled" as const, label: "Anti-Disconnect", icon: "🔌", desc: "Détecte les déconnexions forcées du vocal — bypasse les perms admin" },
+                    { key: "antiBotEnabled" as const, label: "Anti-Bot", icon: "🤖", desc: "Expulse les bots ajoutés non autorisés — sanctionne l'ajouteur" },
+                    { key: "antiRoleModifyEnabled" as const, label: "Anti-Role-Modify", icon: "🔑", desc: "Détecte l'ajout de permissions dangereuses (Admin, ManageRoles…) sur un rôle — revert auto + sanctionne l'exécuteur" },
+                  ] as { key: keyof AntiProtection; label: string; icon: string; desc: string }[]).map(({ key, label, icon, desc }) => (
+                    <div key={key} className="flex items-start gap-3 p-3 rounded-md bg-muted/40">
+                      <span className="text-lg mt-0.5">{icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium">{label}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>
+                      </div>
+                      <Button size="sm" variant={antiProtection[key] ? "default" : "outline"}
+                        onClick={() => setAntiProtection({ ...antiProtection, [key]: !antiProtection[key] })}
+                        className="gap-1.5 w-28 shrink-0">
+                        {antiProtection[key] ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                      </Button>
+                    </div>
+                  ))}
+
+                  {/* Anti-@everyone / @here */}
+                  <div className="flex items-start gap-3 p-3 rounded-md bg-muted/40">
+                    <span className="text-lg mt-0.5">📢</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">Anti-@everyone / @here</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Supprime le message et timeout 1h l'auteur — s'applique à tout le monde, même les admins.</p>
+                      {antiProtection.antiEveryoneEnabled && (
+                        <div className="mt-2 flex items-center gap-2">
+                          <label className="text-xs text-muted-foreground">Durée timeout (s)</label>
+                          <Input type="number" min={60} max={3600} value={antiProtection.antiEveryoneTimeoutSecs}
+                            onChange={(e) => setAntiProtection({ ...antiProtection, antiEveryoneTimeoutSecs: Number(e.target.value) })}
+                            className="h-6 text-xs font-mono w-24" />
+                          <span className="text-xs text-muted-foreground font-mono">({Math.round((antiProtection.antiEveryoneTimeoutSecs ?? 3600) / 60)} min)</span>
+                        </div>
+                      )}
+                    </div>
+                    <Button size="sm" variant={antiProtection.antiEveryoneEnabled ? "default" : "outline"}
+                      onClick={() => setAntiProtection({ ...antiProtection, antiEveryoneEnabled: !antiProtection.antiEveryoneEnabled })}
+                      className="gap-1.5 w-28 shrink-0">
+                      {antiProtection.antiEveryoneEnabled ? <><Power className="h-3.5 w-3.5" />Activé</> : <><PowerOff className="h-3.5 w-3.5" />Désactivé</>}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-mono uppercase">🔑 Retirer les Permissions d'un Rôle</CardTitle>
+                  <CardDescription>Vide entièrement les permissions d'un rôle (met toutes les permissions à 0). Action irréversible.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex gap-3">
+                    <Select value={stripRoleId} onValueChange={setStripRoleId}>
+                      <SelectTrigger className="flex-1"><SelectValue placeholder="Sélectionner un rôle…" /></SelectTrigger>
+                      <SelectContent>
+                        {roles.filter((r) => r.name !== "@everyone").map((r) => (
+                          <SelectItem key={r.id} value={r.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="inline-block w-2.5 h-2.5 rounded-full shrink-0" style={{ background: r.color || "#6b7280" }} />
+                              {r.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button variant="destructive" disabled={!stripRoleId || strippingPerms} onClick={stripRolePerms} className="gap-2 shrink-0">
+                      {strippingPerms ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldOff className="h-4 w-4" />}
+                      Retirer les perms
+                    </Button>
+                  </div>
+                  {stripRoleId && (
+                    <p className="text-xs text-destructive font-medium">⚠️ Cette action retirera <strong>toutes</strong> les permissions du rôle sélectionné sur Discord. Elle ne peut pas être annulée depuis ici.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={saveAntiProtection} disabled={apSaving} className="gap-2 font-mono uppercase tracking-widest">
+                  {apSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <><Shield className="h-4 w-4" />Sauvegarder les protections</>}
+                </Button>
+              </div>
+            </>
+          ) : null}
+        </TabsContent>
+        {/* ── Captcha Logs ──────────────────────────────────────────────────── */}
+        <TabsContent value="captchalogs" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">🛡️ Logs Captcha ({captchaLogs.length})</CardTitle>
+                  <CardDescription>Historique des événements captcha — déclenchements, succès, échecs, expulsions.</CardDescription>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="ghost" size="sm" onClick={fetchCaptchaLogs} disabled={clLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${clLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={async () => {
+                    if (!confirm("Effacer tous les logs captcha de ce serveur ?")) return;
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/captcha-logs`, { method: "DELETE" });
+                    if (r.ok) { setCaptchaLogs([]); toast({ title: "Logs effacés ✓" }); }
+                  }} className="gap-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10">
+                    <Trash2 className="h-3.5 w-3.5" /> Effacer
+                  </Button>
+                </div>
+              </div>
+              <div className="flex gap-2 mt-2 flex-wrap">
+                <Input placeholder="Rechercher utilisateur, ID…" value={clFilter} onChange={(e) => setClFilter(e.target.value)} className="max-w-xs text-sm" />
+                <Select value={clFilter.startsWith("event:") ? clFilter.slice(6) : "all"} onValueChange={(v) => setClFilter(v === "all" ? "" : `event:${v}`)}>
+                  <SelectTrigger className="w-44 text-xs"><SelectValue placeholder="Filtrer par événement" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tous les événements</SelectItem>
+                    <SelectItem value="triggered_channel">Déclenché (salon)</SelectItem>
+                    <SelectItem value="triggered_dm">Déclenché (DM)</SelectItem>
+                    <SelectItem value="success">Réussi ✅</SelectItem>
+                    <SelectItem value="fail_attempt">Mauvaise réponse ❌</SelectItem>
+                    <SelectItem value="fail_kick">Expulsé (trop de mauvaises)</SelectItem>
+                    <SelectItem value="timeout_kick">Expulsé (timeout)</SelectItem>
+                    <SelectItem value="dm_closed">DMs fermés</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {clLoading && <div className="text-center py-6"><Loader2 className="h-5 w-5 animate-spin mx-auto" /></div>}
+              {!clLoading && captchaLogs.length === 0 && (
+                <p className="text-center text-muted-foreground py-8 text-sm">Aucun log captcha. Ils apparaîtront automatiquement dès qu'un membre déclenche le captcha.</p>
+              )}
+              {!clLoading && captchaLogs.length > 0 && (() => {
+                const filtered = captchaLogs.filter((e) => {
+                  if (!clFilter) return true;
+                  if (clFilter.startsWith("event:")) return e.event === clFilter.slice(6);
+                  const q = clFilter.toLowerCase();
+                  return e.userTag.toLowerCase().includes(q) || e.userId.includes(q) || e.details.toLowerCase().includes(q);
+                });
+                const EVENT_META: Record<string, { label: string; color: string; icon: string }> = {
+                  triggered_channel: { label: "Déclenché (salon)", color: "text-blue-400", icon: "🤖" },
+                  triggered_dm:      { label: "Déclenché (DM)",    color: "text-blue-400", icon: "📨" },
+                  success:           { label: "Réussi",            color: "text-green-400", icon: "✅" },
+                  fail_attempt:      { label: "Mauvaise réponse",  color: "text-yellow-400", icon: "⚠️" },
+                  fail_kick:         { label: "Expulsé (échecs)",  color: "text-red-400", icon: "❌" },
+                  timeout_kick:      { label: "Expulsé (timeout)", color: "text-red-400", icon: "⏰" },
+                  dm_closed:         { label: "DMs fermés",        color: "text-orange-400", icon: "🔒" },
+                };
+                return (
+                  <div className="space-y-1 max-h-[60vh] overflow-y-auto">
+                    {filtered.length === 0 && <p className="text-center text-muted-foreground py-4 text-sm">Aucun résultat.</p>}
+                    {filtered.map((e) => {
+                      const meta = EVENT_META[e.event] ?? { label: e.event, color: "text-muted-foreground", icon: "❓" };
+                      return (
+                        <div key={e.id} className="flex items-start gap-3 p-2.5 rounded-md hover:bg-muted/30 border border-transparent hover:border-border transition-colors">
+                          <span className="text-base shrink-0 mt-0.5">{meta.icon}</span>
+                          <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-x-4">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`text-xs font-semibold font-mono ${meta.color}`}>{meta.label}</span>
+                                <span className="text-sm font-medium truncate">{e.userTag}</span>
+                                <Badge variant="outline" className="font-mono text-xs hidden md:flex">{e.userId}</Badge>
+                              </div>
+                              {e.details && <p className="text-xs text-muted-foreground mt-0.5 truncate">{e.details}</p>}
+                            </div>
+                            <time className="text-xs text-muted-foreground shrink-0 mt-0.5 whitespace-nowrap">
+                              {new Date(e.createdAt).toLocaleString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                            </time>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tests Bot ────────────────────────────────────────────────────── */}
+        <TabsContent value="tests" className="space-y-4">
+          {/* Bots de test (webhooks) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🤖 Bots de test (Webhooks)</CardTitle>
+              <CardDescription>
+                Crée des pseudos-bots via webhooks Discord pour simuler du spam, des insultes ou des liens non autorisés et tester visuellement les logs d'automod.
+                <span className="block mt-1 text-xs text-amber-500/80">⚠️ Les webhooks ne sont pas sanctionnés par l'automod (pas de GuildMember). Ils servent uniquement à vérifier l'apparence des logs.</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Créer un bot */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pb-4 border-b border-border">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Nom du bot de test</label>
+                  <Input value={tbNewName} onChange={(e) => setTbNewName(e.target.value)} placeholder="MonBotTest" />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Salon</label>
+                  <Select value={tbNewChannel || "__none__"} onValueChange={(v) => setTbNewChannel(v === "__none__" ? "" : v)}>
+                    <SelectTrigger><SelectValue placeholder="Choisir un salon…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Choisir un salon</SelectItem>
+                      {textChannels.map((c) => <SelectItem key={c.id} value={c.id}>#{c.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end">
+                  <Button onClick={createTestBot} disabled={tbCreating || !tbNewName.trim() || !tbNewChannel} className="gap-2 w-full">
+                    {tbCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Créer
+                  </Button>
+                </div>
+              </div>
+
+              {/* Sélection + action */}
+              {testBots.length > 0 ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Bot sélectionné</label>
+                      <Select value={tbSelected || "__none__"} onValueChange={(v) => setTbSelected(v === "__none__" ? "" : v)}>
+                        <SelectTrigger><SelectValue placeholder="Sélectionner un bot…" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">Sélectionner…</SelectItem>
+                          {testBots.map((b) => (
+                            <SelectItem key={b.id} value={b.name}>
+                              {b.name} — #{channels.find((c) => c.id === b.channelId)?.name ?? b.channelId}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium mb-1.5 block">Action</label>
+                      <Select value={tbAction} onValueChange={setTbAction}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="message">📝 Message personnalisé</SelectItem>
+                          <SelectItem value="spam">💬 Spam (rafale de messages)</SelectItem>
+                          <SelectItem value="insulte">🤬 Insulte (test détection)</SelectItem>
+                          <SelectItem value="lien">🔗 Lien non autorisé</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {tbAction === "message" && (
+                    <Input value={tbContent} onChange={(e) => setTbContent(e.target.value)} placeholder="Contenu du message à envoyer…" />
+                  )}
+                  {tbAction === "spam" && (
+                    <div className="flex items-center gap-3">
+                      <label className="text-sm font-medium">Nombre de messages :</label>
+                      <Input type="number" min={2} max={10} value={tbCount} onChange={(e) => setTbCount(Math.min(10, Math.max(2, Number(e.target.value))))} className="w-20 font-mono text-center" />
+                      <span className="text-xs text-muted-foreground">(max 10, délai 200 ms entre chaque)</span>
+                    </div>
+                  )}
+                  <Button onClick={sendTestBotAction} disabled={tbSending || !tbSelected} className="gap-2">
+                    {tbSending ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Exécuter</>}
+                  </Button>
+                </div>
+              ) : null}
+
+              {/* Liste des bots existants */}
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide text-xs">
+                    Bots créés {testBots.length > 0 ? `(${testBots.length})` : ""}
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={fetchTestBots} disabled={tbLoading} className="gap-1.5 text-xs">
+                    <RefreshCw className={`h-3.5 w-3.5 ${tbLoading ? "animate-spin" : ""}`} /> Actualiser
+                  </Button>
+                </div>
+                {testBots.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-6 border border-dashed border-border rounded-lg">
+                    Aucun bot de test créé sur ce serveur.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {testBots.map((b) => (
+                      <div key={b.id} className="flex items-center gap-3 p-2.5 rounded-md border border-border bg-muted/30">
+                        <FlaskConical className="h-4 w-4 text-primary shrink-0" />
+                        <span className="flex-1 text-sm font-mono font-medium">{b.name}</span>
+                        <span className="text-xs text-muted-foreground">#{channels.find((c) => c.id === b.channelId)?.name ?? b.channelId}</span>
+                        <Badge variant="outline" className="font-mono text-xs hidden md:inline-flex">{b.id}</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => deleteTestBot(b.name)} className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Test alertes DM */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔔 Test Alertes DM</CardTitle>
+              <CardDescription>
+                Envoie 10 messages d'alerte simulés en DM au développeur du bot pour vérifier que toutes les notifications fonctionnent.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button onClick={runErrTest} disabled={errTestLoading} variant="outline" className="gap-2">
+                {errTestLoading
+                  ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi en cours…</>
+                  : <><Send className="h-4 w-4" />Lancer les 10 tests d'alertes</>}
+              </Button>
+              <div className="text-xs text-muted-foreground space-y-0.5">
+                <p className="font-medium text-foreground">Messages simulés :</p>
+                <p>1. 🟢 Démarrage complet · 2. ❌ Erreur de commande · 3. ⚠️ Ping élevé · 4. 💥 Promesse rejetée</p>
+                <p>5. 🔴 Arrêt · 6-9. 🔑 Captcha admin (déclenché / réussi / échoué / expiré) · 10. 📨 DM sécurité groupé</p>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Automod ────────────────────────────────────────────────────────── */}
+        <TabsContent value="automod" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🤖 Modules Automod</CardTitle>
+              <CardDescription>Active ou désactive les modules de modération automatique du serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {automodCfg ? (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Anti-insultes */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🤬 Anti-Insultes</p>
+                        <p className="text-xs text-muted-foreground">Filtre les mots offensants définis ci-dessous.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antiInsultEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antiInsultEnabled: !automodCfg.antiInsultEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antiInsultEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Anti-webhooks */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🪝 Anti-Webhooks</p>
+                        <p className="text-xs text-muted-foreground">Supprime les messages envoyés par des webhooks.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antiWebhookEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antiWebhookEnabled: !automodCfg.antiWebhookEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antiWebhookEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Anti-liens */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🔗 Anti-Liens</p>
+                        <p className="text-xs text-muted-foreground">Bloque les liens selon la liste de domaines autorisés.</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antilinkEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antilinkEnabled: !automodCfg.antilinkEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antilinkEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Anti-Full-Maj */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🔠 Anti-Full Majuscules</p>
+                        <p className="text-xs text-muted-foreground">Timeout les messages entièrement en majuscules (≥ 8 lettres).</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={automodCfg.antiCapsEnabled ? "default" : "outline"}
+                        onClick={() => patchAutomod({ antiCapsEnabled: !automodCfg.antiCapsEnabled })}
+                        className="gap-1.5 text-xs"
+                      >
+                        {automodCfg.antiCapsEnabled ? "✅ Activé" : "⬜ Désactivé"}
+                      </Button>
+                    </div>
+                    {/* Niveau de sécurité */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">🛡️ Niveau de Sécurité</p>
+                        <p className="text-xs text-muted-foreground">Actuel : <strong>{automodCfg.securityLevel}</strong></p>
+                      </div>
+                      <Select
+                        value={String(automodCfg.securityLevel)}
+                        onValueChange={(v) => patchAutomod({ securityLevel: Number(v) as 1 | 2 | 3 })}
+                      >
+                        <SelectTrigger className="w-28 text-xs h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="1">1 — Bas</SelectItem>
+                          <SelectItem value="2">2 — Moyen</SelectItem>
+                          <SelectItem value="3">3 — Élevé</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {/* Action antilink */}
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-border">
+                      <div>
+                        <p className="text-sm font-medium">⚡ Action Anti-Liens</p>
+                        <p className="text-xs text-muted-foreground">Actuel : <strong>{automodCfg.antilinkAction}</strong></p>
+                      </div>
+                      <Select
+                        value={automodCfg.antilinkAction}
+                        onValueChange={(v) => patchAutomod({ antilinkAction: v as AutomodCfg["antilinkAction"] })}
+                      >
+                        <SelectTrigger className="w-36 text-xs h-8"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="delete">Supprimer</SelectItem>
+                          <SelectItem value="warn">Avertir</SelectItem>
+                          <SelectItem value="timeout">Timeout</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  {/* Insult words editor */}
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">📋 Mots Interdits</p>
+                      <span className="text-xs text-muted-foreground">{automodCfg.antiInsultWords.length} mot{automodCfg.antiInsultWords.length !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+                      {automodCfg.antiInsultWords.map((w) => (
+                        <Badge key={w} variant="secondary" className="gap-1 pr-1 font-mono">
+                          {w}
+                          <button onClick={() => removeAmWord(w)} className="ml-0.5 hover:text-destructive transition-colors">×</button>
+                        </Badge>
+                      ))}
+                      {automodCfg.antiInsultWords.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Aucun mot défini.</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={amNewWord}
+                        onChange={(e) => { setAmNewWord(e.target.value); setAmAltOpen(false); setAmAltPreview([]); }}
+                        placeholder="Ajouter un mot interdit..."
+                        className="flex-1 text-sm font-mono"
+                        onKeyDown={(e) => { if (e.key === "Enter") addAmWord(); }}
+                      />
+                      <Button onClick={addAmWord} disabled={!amNewWord.trim()} size="sm" className="gap-1.5 shrink-0">
+                        <Plus className="h-3.5 w-3.5" /> Ajouter
+                      </Button>
+                      <Button
+                        variant="outline" size="sm"
+                        disabled={!amNewWord.trim()}
+                        className="gap-1.5 shrink-0"
+                        onClick={() => {
+                          const alts = generateAlternations(amNewWord.trim());
+                          setAmAltPreview(alts);
+                          setAmAltSelected(new Set(alts));
+                          setAmAltOpen(true);
+                        }}
+                      >
+                        🔤 Alternances
+                      </Button>
+                    </div>
+
+                    {/* Alternances preview */}
+                    {amAltOpen && amAltPreview.length > 0 && (
+                      <div className="rounded-lg border border-border bg-muted/30 p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-muted-foreground uppercase">
+                            🔤 {amAltPreview.length} alternance{amAltPreview.length !== 1 ? "s" : ""} générée{amAltPreview.length !== 1 ? "s" : ""} pour « {amNewWord.trim()} »
+                          </p>
+                          <div className="flex gap-1.5">
+                            <button
+                              className="text-xs text-primary underline"
+                              onClick={() => setAmAltSelected(new Set(amAltPreview))}
+                            >Tout cocher</button>
+                            <span className="text-muted-foreground">·</span>
+                            <button
+                              className="text-xs text-muted-foreground underline"
+                              onClick={() => setAmAltSelected(new Set())}
+                            >Tout décocher</button>
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                          {amAltPreview.map((alt) => {
+                            const checked = amAltSelected.has(alt);
+                            const alreadyIn = automodCfg.antiInsultWords.includes(alt);
+                            return (
+                              <button
+                                key={alt}
+                                disabled={alreadyIn}
+                                onClick={() => setAmAltSelected((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(alt)) next.delete(alt); else next.add(alt);
+                                  return next;
+                                })}
+                                className={`font-mono text-xs px-2 py-0.5 rounded border transition-colors ${
+                                  alreadyIn
+                                    ? "border-border text-muted-foreground opacity-40 cursor-not-allowed"
+                                    : checked
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border bg-muted/40 text-muted-foreground"
+                                }`}
+                              >
+                                {alreadyIn ? "✓ " : ""}{alt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex gap-2 pt-1">
+                          <Button
+                            size="sm"
+                            disabled={amAltSelected.size === 0}
+                            className="gap-1.5"
+                            onClick={async () => {
+                              const toAdd = [...amAltSelected].filter(a => !automodCfg.antiInsultWords.includes(a));
+                              if (toAdd.length === 0) return;
+                              const base = amNewWord.trim().toLowerCase();
+                              const all = [
+                                ...automodCfg.antiInsultWords,
+                                ...(automodCfg.antiInsultWords.includes(base) ? [] : [base]),
+                                ...toAdd,
+                              ];
+                              await patchAutomod({ antiInsultWords: all });
+                              setAmNewWord("");
+                              setAmAltOpen(false);
+                              setAmAltPreview([]);
+                              setAmAltSelected(new Set());
+                            }}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Ajouter sélection ({amAltSelected.size})
+                          </Button>
+                          <Button variant="ghost" size="sm" onClick={() => { setAmAltOpen(false); setAmAltPreview([]); }}>
+                            Annuler
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                    {amAltOpen && amAltPreview.length === 0 && (
+                      <p className="text-xs text-muted-foreground">Aucune alternance détectée pour ce mot.</p>
+                    )}
+                  </div>
+
+                  {/* Allowed domains editor */}
+                  <div className="border border-border rounded-lg p-4 space-y-3">
+                    <p className="text-sm font-medium">✅ Domaines Autorisés (Anti-Liens)</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {automodCfg.antilinkAllowedDomains.map((d) => (
+                        <Badge key={d} variant="outline" className="gap-1 pr-1">
+                          {d}
+                          <button onClick={() => removeAmDomain(d)} className="ml-0.5 hover:text-destructive transition-colors">×</button>
+                        </Badge>
+                      ))}
+                      {automodCfg.antilinkAllowedDomains.length === 0 && (
+                        <span className="text-xs text-muted-foreground">Aucun domaine autorisé.</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={amNewDomain}
+                        onChange={(e) => setAmNewDomain(e.target.value)}
+                        placeholder="discord.com, exemple.fr..."
+                        className="flex-1 text-sm font-mono"
+                        onKeyDown={(e) => { if (e.key === "Enter") addAmDomain(); }}
+                      />
+                      <Button onClick={addAmDomain} disabled={!amNewDomain.trim()} size="sm" className="gap-1.5">
+                        <Plus className="h-3.5 w-3.5" /> Ajouter
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex justify-center items-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tickets ────────────────────────────────────────────────────────── */}
+        <TabsContent value="tickets" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎫 Tickets Actifs</CardTitle>
+              <CardDescription>Liste tous les tickets ouverts. Ferme un ticket et génère son transcript.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-sm font-medium">Raison de fermeture <span className="text-muted-foreground">(optionnel)</span></label>
+                <Input
+                  value={closeTicketReason}
+                  onChange={(e) => setCloseTicketReason(e.target.value)}
+                  placeholder="Laissez vide pour utiliser la raison par défaut"
+                  className="text-sm"
+                />
+              </div>
+              {ticketsLoading ? (
+                <div className="flex justify-center items-center py-12">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : tickets.length === 0 ? (
+                <div className="text-center text-muted-foreground py-12 text-sm">Aucun ticket ouvert pour ce serveur.</div>
+              ) : (
+                <div className="space-y-2">
+                  {tickets.map((t) => (
+                    <div key={t.channelId} className="flex items-center gap-3 p-3 rounded-lg border border-border hover:bg-muted/40 transition-colors">
+                      <Ticket className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">Ticket #{t.ticketNumber}</p>
+                        <p className="text-xs text-muted-foreground truncate font-mono">
+                          {t.username}
+                          {t.claimedBy && <> · Pris en charge : {t.claimedBy}</>}
+                          {t.createdAt && <> · {new Date(t.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</>}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        disabled={closingTicket === t.channelId}
+                        onClick={() => doCloseTicket(t.channelId)}
+                        className="gap-1.5 text-xs flex-shrink-0"
+                      >
+                        {closingTicket === t.channelId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />} Clore
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="mt-4 flex justify-end">
+                <Button variant="outline" size="sm" onClick={fetchTickets} className="gap-2">
+                  <Loader2 className={`h-3.5 w-3.5 ${ticketsLoading ? "animate-spin" : "opacity-0"}`} />
+                  Rafraîchir
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Présence Vocale ─────────────────────────────────────────────────── */}
+        <TabsContent value="voicepresence" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Headphones className="h-4 w-4 text-indigo-400" /> Présence Vocale du Bot
+              </CardTitle>
+              <CardDescription>
+                Faites rejoindre le bot dans un salon vocal. Contrôlez le micro (self-mute) et le casque (self-deaf) depuis ce panel.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+
+              {/* Pseudo du bot */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium block">Pseudo du bot sur ce serveur</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={vpNickname}
+                    onChange={(e) => setVpNickname(e.target.value)}
+                    placeholder="Laisser vide pour réinitialiser"
+                    maxLength={32}
+                    className="flex-1 font-mono"
+                  />
+                  <Button
+                    size="sm"
+                    disabled={vpNickSaving}
+                    onClick={async () => {
+                      setVpNickSaving(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/bot-nickname`, {
+                          method: "PATCH",
+                          body: JSON.stringify({ nickname: vpNickname }),
+                        });
+                        if (r.ok) {
+                          const d = await r.json();
+                          toast({ title: "Pseudo mis à jour", description: `Nouveau pseudo : ${d.nickname}` });
+                        } else {
+                          const d = await r.json();
+                          toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                        }
+                      } finally { setVpNickSaving(false); }
+                    }}
+                    className="gap-2 shrink-0"
+                  >
+                    {vpNickSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Pencil className="h-3.5 w-3.5" />}
+                    Appliquer
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Vide = pseudo réinitialisé au nom d'origine du bot.</p>
+              </div>
+
+              <div className="border-t border-border" />
+
+              {/* Auto-join toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/10 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium flex items-center gap-2">
+                    <Headphones className="h-4 w-4 text-indigo-400" /> Auto-join
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Le bot rejoint le vocal quand tu le quittes</p>
+                </div>
+                <button
+                  disabled={vpAutoJoinSaving}
+                  onClick={async () => {
+                    setVpAutoJoinSaving(true);
+                    try {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-autojoin`, {
+                        method: "PATCH",
+                        body: JSON.stringify({ enabled: !vpAutoJoin }),
+                      });
+                      if (r.ok) { const d = await r.json(); setVpAutoJoin(d.enabled); }
+                      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    } finally { setVpAutoJoinSaving(false); }
+                  }}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${vpAutoJoin ? "bg-indigo-600" : "bg-muted-foreground/30"} ${vpAutoJoinSaving ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${vpAutoJoin ? "translate-x-6" : "translate-x-1"}`} />
+                </button>
+              </div>
+
+              {/* Statut actuel */}
+              <div className={`rounded-lg border p-4 flex items-center gap-3 ${voicePresence.connected ? "border-green-500/40 bg-green-500/5" : "border-border bg-muted/30"}`}>
+                <div className={`h-3 w-3 rounded-full flex-shrink-0 ${voicePresence.connected ? "bg-green-500 animate-pulse" : "bg-muted-foreground/40"}`} />
+                <div className="flex-1 min-w-0">
+                  {voicePresence.connected ? (
+                    <p className="text-sm font-medium text-green-400">
+                      Connecté — <span className="font-mono">🔊 {voicePresence.channelName ?? voicePresence.channelId}</span>
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Bot hors des salons vocaux</p>
+                  )}
+                  {voicePresence.connected && (
+                    <div className="flex gap-3 mt-1 text-xs text-muted-foreground">
+                      <span className={voicePresence.selfMute ? "text-red-400" : "text-green-400"}>
+                        {voicePresence.selfMute ? "🎙️ Micro coupé" : "🎙️ Micro actif"}
+                      </span>
+                      <span className={voicePresence.selfDeaf ? "text-red-400" : "text-green-400"}>
+                        {voicePresence.selfDeaf ? "🎧 Casque coupé" : "🎧 Casque actif"}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Rejoindre */}
+              {!voicePresence.connected && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium mb-1.5 block">Salon vocal</label>
+                    <Select value={vpSelectedChannel || "__none__"} onValueChange={(v) => setVpSelectedChannel(v === "__none__" ? "" : v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Choisir un salon vocal…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">Choisir un salon…</SelectItem>
+                        {voiceChannels.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>🔊 {c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    disabled={vpLoading || !vpSelectedChannel}
+                    onClick={async () => {
+                      setVpLoading(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/join`, {
+                          method: "POST",
+                          body: JSON.stringify({ channelId: vpSelectedChannel, selfMute: false, selfDeaf: false }),
+                        });
+                        if (r.ok) { setVoicePresence(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setVpLoading(false); }
+                    }}
+                    className="gap-2 w-full"
+                  >
+                    {vpLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Headphones className="h-4 w-4" />}
+                    Rejoindre le salon vocal
+                  </Button>
+                </div>
+              )}
+
+              {/* Contrôles quand connecté */}
+              {voicePresence.connected && (
+                <div className="space-y-4">
+                  {/* Toggles micro / casque */}
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Micro */}
+                    <div className={`rounded-lg border p-4 flex flex-col items-center gap-2 cursor-pointer transition-colors ${voicePresence.selfMute ? "border-red-500/50 bg-red-500/10" : "border-green-500/40 bg-green-500/5"}`}
+                      onClick={async () => {
+                        setVpLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ selfMute: !voicePresence.selfMute }),
+                          });
+                          if (r.ok) setVoicePresence(await r.json());
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        } finally { setVpLoading(false); }
+                      }}
+                    >
+                      {voicePresence.selfMute
+                        ? <MicOff className="h-8 w-8 text-red-400" />
+                        : <Mic className="h-8 w-8 text-green-400" />
+                      }
+                      <span className="text-xs font-medium text-center">
+                        {voicePresence.selfMute ? "Micro coupé" : "Micro actif"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Cliquer pour {voicePresence.selfMute ? "activer" : "couper"}</span>
+                    </div>
+                    {/* Casque */}
+                    <div className={`rounded-lg border p-4 flex flex-col items-center gap-2 cursor-pointer transition-colors ${voicePresence.selfDeaf ? "border-red-500/50 bg-red-500/10" : "border-green-500/40 bg-green-500/5"}`}
+                      onClick={async () => {
+                        setVpLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence`, {
+                            method: "PATCH",
+                            body: JSON.stringify({ selfDeaf: !voicePresence.selfDeaf }),
+                          });
+                          if (r.ok) setVoicePresence(await r.json());
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        } finally { setVpLoading(false); }
+                      }}
+                    >
+                      {voicePresence.selfDeaf
+                        ? <Headphones className="h-8 w-8 text-red-400" />
+                        : <Headphones className="h-8 w-8 text-green-400" />
+                      }
+                      <span className="text-xs font-medium text-center">
+                        {voicePresence.selfDeaf ? "Casque coupé" : "Casque actif"}
+                      </span>
+                      <span className="text-xs text-muted-foreground">Cliquer pour {voicePresence.selfDeaf ? "activer" : "couper"}</span>
+                    </div>
+                  </div>
+
+                  {vpLoading && (
+                    <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Mise à jour en cours…
+                    </div>
+                  )}
+
+                  {/* Me connecter au vocal */}
+                  <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-2">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Mic className="h-4 w-4 text-indigo-400" /> Rejoindre le vocal du bot
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Vous devez d'abord être connecté à n'importe quel salon vocal sur Discord. Le bot vous déplacera dans son salon et désactivera son casque pour vous entendre.
+                    </p>
+                    <Button
+                      className="gap-2 w-full bg-indigo-600 hover:bg-indigo-500"
+                      disabled={vpJoinMeLoading}
+                      onClick={async () => {
+                        setVpJoinMeLoading(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/join-me`, { method: "POST" });
+                          const d = await r.json();
+                          if (r.ok) {
+                            if (d.voicePresence) setVoicePresence(d.voicePresence);
+                            toast({ title: "✓ Déplacé vers " + (d.channelName ?? d.channelId), description: "Le bot peut maintenant vous entendre." });
+                          } else {
+                            toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                          }
+                        } finally { setVpJoinMeLoading(false); }
+                      }}
+                    >
+                      {vpJoinMeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Mic className="h-4 w-4" />}
+                      Me connecter au vocal
+                    </Button>
+                  </div>
+
+                  {/* Annonces vocales TTS */}
+                  <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+                    <p className="text-sm font-medium flex items-center gap-2">
+                      <Volume2 className="h-4 w-4 text-indigo-400" /> Annonce vocale (TTS)
+                    </p>
+                    <p className="text-xs text-muted-foreground">Le bot lira ce message à voix haute dans le salon vocal.</p>
+                    <textarea
+                      value={vpAnnounceText}
+                      onChange={(e) => setVpAnnounceText(e.target.value)}
+                      placeholder="Tapez votre message ici…"
+                      rows={3}
+                      maxLength={500}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">{vpAnnounceText.length}/500</span>
+                      <Button
+                        size="sm"
+                        className="gap-2 bg-indigo-600 hover:bg-indigo-500"
+                        disabled={vpAnnouncing || !vpAnnounceText.trim()}
+                        onClick={async () => {
+                          setVpAnnouncing(true);
+                          try {
+                            const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/announce`, {
+                              method: "POST",
+                              body: JSON.stringify({ text: vpAnnounceText.trim() }),
+                            });
+                            const d = await r.json();
+                            if (r.ok) {
+                              toast({ title: "✓ Annonce envoyée", description: "Le bot parle dans le salon vocal." });
+                              setVpAnnounceText("");
+                            } else {
+                              toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                            }
+                          } finally { setVpAnnouncing(false); }
+                        }}
+                      >
+                        {vpAnnouncing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Volume2 className="h-3.5 w-3.5" />}
+                        Annoncer
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Quitter */}
+                  <Button
+                    variant="destructive"
+                    className="gap-2 w-full"
+                    disabled={vpLoading}
+                    onClick={async () => {
+                      setVpLoading(true);
+                      try {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/voice-presence/leave`, { method: "POST" });
+                        if (r.ok) { setVoicePresence({ connected: false }); setVpSelectedChannel(""); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setVpLoading(false); }
+                    }}
+                  >
+                    <WifiOff className="h-4 w-4" /> Quitter le salon vocal
+                  </Button>
+                </div>
+              )}
+
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Bot Status ─────────────────────────────────────────────────────── */}
+        <TabsContent value="botstatus" className="space-y-4">
+
+          {/* Stats */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">📊 Statut en Temps Réel</CardTitle>
+                <CardDescription>Informations live sur la connexion et les ressources du bot.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchBotStatus} disabled={botStatusLoading} className="gap-2">
+                <RefreshCw className={`h-3.5 w-3.5 ${botStatusLoading ? "animate-spin" : ""}`} />
+                Actualiser
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {!botStatus ? (
+                <div className="flex justify-center items-center py-10">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Bot identity */}
+                  <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40">
+                    {botStatus.avatarURL ? (
+                      <img src={botStatus.avatarURL} alt="avatar" className="h-12 w-12 rounded-full" />
+                    ) : (
+                      <div className="h-12 w-12 rounded-full bg-primary/20 flex items-center justify-center"><Server className="h-6 w-6" /></div>
+                    )}
+                    <div>
+                      <p className="font-semibold">{botStatus.username ?? "—"}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{botStatus.tag ?? "non connecté"}</p>
+                    </div>
+                    <div className="ml-auto">
+                      {botStatus.online ? (
+                        <Badge className="gap-1.5 bg-green-500/20 text-green-400 border-green-500/30">
+                          <Wifi className="h-3 w-3" /> En ligne
+                        </Badge>
+                      ) : (
+                        <Badge variant="destructive" className="gap-1.5">
+                          <WifiOff className="h-3 w-3" /> Hors ligne
+                        </Badge>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Metrics grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{botStatus.ping >= 0 ? `${botStatus.ping}ms` : "—"}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Ping WS</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">
+                        {botStatus.uptime != null
+                          ? (() => { const h = Math.floor(botStatus.uptime / 3600000); const m = Math.floor((botStatus.uptime % 3600000) / 60000); return h > 0 ? `${h}h${m}m` : `${m}m`; })()
+                          : "—"}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Uptime</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{botStatus.guildCount}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Serveurs</p>
+                    </div>
+                    <div className="p-3 rounded-lg border border-border text-center">
+                      <p className="text-2xl font-bold font-mono">{(botStatus.memory / 1024 / 1024).toFixed(0)} MB</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">RAM (heap)</p>
+                    </div>
+                  </div>
+
+                  {/* Current presence */}
+                  {botStatus.presence && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Activity className="h-3.5 w-3.5" />
+                      Présence actuelle :
+                      <Badge variant="outline" className="text-xs capitalize">{botStatus.presence.status}</Badge>
+                      {botStatus.presence.activities.length > 0 && (
+                        <span className="font-mono text-xs">{botStatus.presence.activities[0].name}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Bot status event log */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">📋 Journal d'Événements Bot</CardTitle>
+                  <CardDescription>Ping élevé, reconnexions Discord, DM échoués, erreurs non gérées, démarrages.</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchBotStatusEvents} disabled={bseLoading} className="gap-1.5 shrink-0">
+                  {bseLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Actualiser
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {bseLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : botStatusEvents.length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Aucun événement enregistré depuis le dernier démarrage.</p>
+              ) : (
+                <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
+                  {botStatusEvents.map((ev) => {
+                    const icons: Record<string, string> = {
+                      ready: "🟢", ping_alert: "🟡", reconnect: "🔄",
+                      shard_resume: "✅", shard_disconnect: "🔌",
+                      dm_failed: "✉️", client_error: "🔴",
+                      unhandled_rejection: "💥", shutdown: "🛑",
+                    };
+                    const colors: Record<string, string> = {
+                      ready: "text-green-600 border-green-300 bg-green-500/10",
+                      ping_alert: "text-yellow-600 border-yellow-300 bg-yellow-500/10",
+                      reconnect: "text-blue-600 border-blue-300 bg-blue-500/10",
+                      shard_resume: "text-green-600 border-green-300 bg-green-500/10",
+                      shard_disconnect: "text-orange-600 border-orange-300 bg-orange-500/10",
+                      dm_failed: "text-purple-600 border-purple-300 bg-purple-500/10",
+                      client_error: "text-red-600 border-red-300 bg-red-500/10",
+                      unhandled_rejection: "text-red-700 border-red-400 bg-red-500/15",
+                      shutdown: "text-gray-600 border-gray-300 bg-gray-500/10",
+                    };
+                    const icon = icons[ev.type] ?? "❓";
+                    const colorClass = colors[ev.type] ?? "text-muted-foreground border-border bg-muted/20";
+                    return (
+                      <div key={ev.id} className="flex items-start gap-2.5 rounded-md border border-border bg-muted/20 px-3 py-2">
+                        <span className="shrink-0 mt-0.5">{icon}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className={`text-[10px] font-mono px-1.5 py-0 ${colorClass}`}>{ev.type.replace(/_/g, " ")}</Badge>
+                            {ev.errCode && <span className="font-mono text-[10px] text-muted-foreground">{ev.errCode}</span>}
+                            {ev.ping != null && <span className="text-[10px] text-yellow-600 font-mono">{ev.ping}ms</span>}
+                            <span className="text-xs text-muted-foreground ml-auto shrink-0">{new Date(ev.timestamp).toLocaleString("fr-FR")}</span>
+                          </div>
+                          <p className="text-sm mt-0.5 break-words text-muted-foreground">{ev.detail}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Controls */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⚡ Contrôle du Processus</CardTitle>
+              <CardDescription>Redémarre, déconnecte ou reconnecte le bot Discord. L'API reste active en permanence.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  onClick={() => botAction("restart")}
+                  disabled={!!botActionLoading}
+                  className="gap-2"
+                >
+                  {botActionLoading === "restart" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  Redémarrer
+                </Button>
+                <Button
+                  onClick={() => botAction("disconnect")}
+                  disabled={!!botActionLoading}
+                  variant="destructive"
+                  className="gap-2"
+                >
+                  {botActionLoading === "disconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <WifiOff className="h-4 w-4" />}
+                  Déconnecter
+                </Button>
+                <Button
+                  onClick={() => botAction("reconnect")}
+                  disabled={!!botActionLoading}
+                  variant="outline"
+                  className="gap-2"
+                >
+                  {botActionLoading === "reconnect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}
+                  Reconnecter
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                ⚠️ <strong>Redémarrer</strong> = déconnexion + reconnexion immédiate. <strong>Déconnecter</strong> coupe le bot jusqu'au prochain "Reconnecter".
+              </p>
+
+              {/* Deploy slash commands */}
+              <div className="border-t border-border pt-4 space-y-2">
+                <p className="text-sm font-medium">📋 Commandes Slash Discord</p>
+                <p className="text-xs text-muted-foreground">
+                  Force la ré-enregistrement de toutes les commandes <code>/</code> auprès de Discord. À utiliser après l'ajout de nouvelles commandes.
+                  La propagation est quasi-instantanée si le bot est déjà dans tes serveurs.
+                </p>
+                <DeployCommandsButton />
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Presence setter */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎭 Présence Personnalisée</CardTitle>
+              <CardDescription>Change le statut et l'activité affichés sur le profil Discord du bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Statut</label>
+                  <Select value={presenceStatus} onValueChange={(v) => setPresenceStatus(v as typeof presenceStatus)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="online">🟢 En ligne</SelectItem>
+                      <SelectItem value="idle">🟡 Absent</SelectItem>
+                      <SelectItem value="dnd">🔴 Ne pas déranger</SelectItem>
+                      <SelectItem value="invisible">⚫ Invisible</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Type d'activité</label>
+                  <Select value={presenceActivityType} onValueChange={setPresenceActivityType}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">🎮 Joue à</SelectItem>
+                      <SelectItem value="1">📡 Stream</SelectItem>
+                      <SelectItem value="2">🎵 Écoute</SelectItem>
+                      <SelectItem value="3">👁️ Regarde</SelectItem>
+                      <SelectItem value="5">🏆 Participe à</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-1.5 block">Texte de l'activité</label>
+                  <Input
+                    value={presenceActivityText}
+                    onChange={(e) => setPresenceActivityText(e.target.value)}
+                    placeholder="le serveur 🛡️ (vide = aucune activité)"
+                  />
+                </div>
+              </div>
+              <Button onClick={savePresence} disabled={presenceSaving} className="gap-2">
+                {presenceSaving ? <><Loader2 className="h-4 w-4 animate-spin" />Sauvegarde…</> : <>🎭 Appliquer la présence</>}
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* Broadcast */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📢 Diffusion Globale</CardTitle>
+              <CardDescription>Envoie un message dans le salon de logs de chaque serveur où le bot est présent.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Textarea
+                value={broadcastMsg}
+                onChange={(e) => setBroadcastMsg(e.target.value)}
+                placeholder="Message à envoyer dans tous les salons logs..."
+                rows={3}
+                className="font-mono text-sm resize-none"
+              />
+              <Button onClick={doBroadcast} disabled={broadcasting || !broadcastMsg.trim()} variant="destructive" className="gap-2">
+                {broadcasting ? <><Loader2 className="h-4 w-4 animate-spin" />Diffusion…</> : <><Radio className="h-4 w-4" />Diffuser sur tous les serveurs</>}
+              </Button>
+              {broadcastResults.length > 0 && (
+                <div className="space-y-1 max-h-48 overflow-y-auto text-xs">
+                  {broadcastResults.map((r) => (
+                    <div key={r.guildName} className={`flex items-center gap-2 px-2 py-1 rounded ${r.ok ? "bg-green-500/10 text-green-400" : "bg-destructive/10 text-destructive"}`}>
+                      {r.ok ? "✅" : "❌"} <span className="font-medium">{r.guildName}</span>
+                      {r.error && <span className="text-muted-foreground ml-auto">{r.error}</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+        </TabsContent>
+
+        {/* ── Notes ─────────────────────────────────────────────────────────── */}
+        <TabsContent value="notes" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📝 Notes Membres</CardTitle>
+              <CardDescription>Notes admin privées sur les membres de ce serveur. Chargement à l'ouverture de l'onglet.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={noteSearch} onChange={(e) => setNoteSearch(e.target.value)} placeholder="Filtrer par userId…" className="font-mono text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchNotes} disabled={notesLoading} className="gap-1.5 shrink-0">
+                  {notesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              {notesLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : notesByUser.filter((u) => !noteSearch || u.userId.includes(noteSearch)).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune note enregistrée sur ce serveur.</p>
+              ) : (
+                <div className="space-y-4 max-h-[40rem] overflow-y-auto pr-1">
+                  {notesByUser
+                    .filter((u) => !noteSearch || u.userId.includes(noteSearch))
+                    .map((u) => (
+                      <div key={u.userId} className="border rounded-lg p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-sm font-semibold">{u.userId}</span>
+                          <Button size="sm" variant="destructive" onClick={() => clearUserNotes(u.userId)} className="gap-1 text-xs h-7">
+                            <Trash2 className="h-3 w-3" /> Tout effacer
+                          </Button>
+                        </div>
+                        <div className="space-y-1.5">
+                          {u.notes.map((n) => (
+                            <div key={n.id} className="flex items-start gap-2 bg-muted/50 rounded px-3 py-2 text-sm">
+                              <span className="text-muted-foreground text-xs font-mono mt-0.5 shrink-0">#{n.id}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="break-words">{n.content}</p>
+                                <p className="text-xs text-muted-foreground mt-0.5">{n.moderator} · {new Date(n.timestamp).toLocaleString("fr-FR")}</p>
+                              </div>
+                              <Button size="icon" variant="ghost" className="h-6 w-6 text-muted-foreground hover:text-destructive shrink-0" onClick={() => deleteNoteEntry(u.userId, n.id)}>
+                                <X className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📊 Export Sanctions (CSV)</CardTitle>
+              <CardDescription>Télécharge toutes les warns enregistrées par le bot sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={downloadSanctionsCsv} variant="outline" className="gap-2">
+                <Download className="h-4 w-4" /> Télécharger le CSV
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Clone Config ──────────────────────────────────────────────────── */}
+        <TabsContent value="cloneconfig" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Cloner la Configuration</CardTitle>
+              <CardDescription>Copie la configuration complète du serveur actuel (antilink, antispam, logs, captcha, bienvenue, sécurité…) vers un autre serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="p-3 bg-muted/50 rounded-lg text-sm space-y-1">
+                <p className="font-medium">Source : <span className="font-mono text-primary">{guildName || guildId}</span></p>
+                <p className="text-xs text-muted-foreground">Toutes les options de configuration du bot seront copiées vers le serveur cible. Les canaux logs / rôles / IDs devront être reconfigurés manuellement.</p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Serveur cible</label>
+                {allGuilds.filter((g) => g.id !== guildId).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Aucun autre serveur disponible.</p>
+                ) : (
+                  <Select value={cloneTarget} onValueChange={setCloneTarget}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choisir le serveur cible…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allGuilds.filter((g) => g.id !== guildId).map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          {g.name} <span className="text-muted-foreground text-xs ml-1">({g.memberCount} membres)</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              {cloneResult && (
+                <Alert variant={cloneResult.ok ? "default" : "destructive"}>
+                  <AlertDescription>{cloneResult.msg}</AlertDescription>
+                </Alert>
+              )}
+              <Button onClick={doCloneConfig} disabled={cloning || !cloneTarget} variant="destructive" className="gap-2">
+                {cloning ? <><Loader2 className="h-4 w-4 animate-spin" />Clonage en cours…</> : <><Copy className="h-4 w-4" />Cloner la configuration</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invite Blacklist ──────────────────────────────────────────────── */}
+        <TabsContent value="invitebl" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔗 Invitations Blacklistées ({inviteBl.length})</CardTitle>
+              <CardDescription>Membres dont les invitations Discord sont bloquées sur ce serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={iblSearch} onChange={(e) => setIblSearch(e.target.value)} placeholder="Rechercher par tag ou ID…" className="text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchInviteBl} disabled={inviteBlLoading} className="gap-1.5 shrink-0">
+                  {inviteBlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              {inviteBlLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : inviteBl.filter((e) => !iblSearch || e.userTag.toLowerCase().includes(iblSearch.toLowerCase()) || e.userId.includes(iblSearch)).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune entrée dans la blacklist d'invitations.</p>
+              ) : (
+                <div className="space-y-2 max-h-[36rem] overflow-y-auto pr-1">
+                  {inviteBl
+                    .filter((e) => !iblSearch || e.userTag.toLowerCase().includes(iblSearch.toLowerCase()) || e.userId.includes(iblSearch))
+                    .map((e) => (
+                      <div key={e.userId} className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-mono text-sm font-semibold">{e.userTag}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{e.userId}</p>
+                          <p className="text-xs mt-0.5">{e.reason} <span className="text-muted-foreground">· par {e.moderatorTag}</span></p>
+                          <p className="text-xs text-muted-foreground">{new Date(e.timestamp).toLocaleString("fr-FR")}</p>
+                        </div>
+                        <Button size="sm" variant="destructive" onClick={() => removeInviteBlEntry(e.userId)} className="gap-1 text-xs shrink-0 h-8">
+                          <Trash2 className="h-3 w-3" /> Retirer
+                        </Button>
+                      </div>
+                    ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Action Log ────────────────────────────────────────────────────── */}
+        <TabsContent value="actionlog" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Journal des Actions Owner</CardTitle>
+              <CardDescription>Historique des 300 dernières actions mutantes effectuées depuis le panel (toutes sessions, en mémoire).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button variant="outline" size="sm" onClick={fetchActionLog} disabled={actionLogLoading} className="gap-1.5">
+                {actionLogLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Actualiser
+              </Button>
+              {actionLogLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : actionLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune action enregistrée (redémarrage du bot efface le journal).</p>
+              ) : (
+                <div className="space-y-1 max-h-[36rem] overflow-y-auto">
+                  {actionLog.map((entry, i) => (
+                    <div key={i} className="flex items-start gap-2 px-3 py-2 rounded-lg bg-muted/40 text-xs font-mono">
+                      <span className="text-muted-foreground shrink-0 w-36">{new Date(entry.timestamp).toLocaleString("fr-FR")}</span>
+                      <Badge
+                        variant={entry.method === "DELETE" ? "destructive" : entry.method === "POST" ? "default" : "secondary"}
+                        className="text-xs shrink-0 w-16 justify-center"
+                      >
+                        {entry.method}
+                      </Badge>
+                      <span className="text-foreground break-all flex-1">{entry.path}</span>
+                      {Object.keys(entry.body ?? {}).length > 0 && (
+                        <span className="text-muted-foreground truncate max-w-[180px] shrink-0" title={JSON.stringify(entry.body)}>
+                          {JSON.stringify(entry.body)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Quarantaine ───────────────────────────────────────────────────── */}
+        <TabsContent value="quarantine" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔒 Quarantaine Staff ({quarantineList.length})</CardTitle>
+              <CardDescription>
+                Membres staff mis en quarantaine automatiquement (≥ 10 commandes en 30s). Le timeout Discord de 27 jours est appliqué.
+                <br />
+                <span className="text-amber-500 font-medium">Seul ce panel peut lever une quarantaine.</span>
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Button variant="outline" size="sm" onClick={fetchQuarantine} disabled={quarantineLoading} className="gap-1.5">
+                {quarantineLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                Actualiser
+              </Button>
+              {quarantineLoading ? (
+                <Skeleton className="h-24 w-full" />
+              ) : quarantineList.length === 0 ? (
+                <div className="flex flex-col items-center gap-2 py-10 text-muted-foreground">
+                  <ShieldOff className="h-8 w-8 opacity-30" />
+                  <p className="text-sm">Aucun membre en quarantaine sur ce serveur.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {quarantineList.map((entry) => (
+                    <div key={entry.userId} className="flex items-start gap-3 p-4 border border-amber-500/30 bg-amber-500/5 rounded-lg">
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Badge variant="destructive" className="text-xs">QUARANTAINE</Badge>
+                          <span className="font-mono text-sm font-semibold">{entry.userTag}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground font-mono">{entry.userId}</p>
+                        <p className="text-xs">
+                          <span className="text-amber-400 font-medium">Déclencheur :</span> {entry.triggerCount} commandes en {entry.windowSeconds}s
+                        </p>
+                        <p className="text-xs text-muted-foreground">{entry.reason}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(entry.timestamp).toLocaleString("fr-FR")}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => liftQuarantine(entry.userId)}
+                        disabled={liftingQ === entry.userId}
+                        className="gap-1.5 shrink-0 border-green-500/50 text-green-500 hover:bg-green-500/10"
+                      >
+                        {liftingQ === entry.userId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Unlock className="h-3 w-3" />}
+                        Lever
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Vocaux ────────────────────────────────────────────────────────── */}
+        <TabsContent value="voicelog" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎙️ Surveillance Vocaux ({voiceLog.length})</CardTitle>
+              <CardDescription>Événements vocaux en temps réel (max 500 par serveur, en mémoire). Se réinitialise au redémarrage du bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input value={voiceSearch} onChange={(e) => setVoiceSearch(e.target.value)} placeholder="Filtrer par tag, userId ou salon…" className="text-sm" />
+                <Button variant="outline" size="sm" onClick={fetchVoiceLog} disabled={voiceLogLoading} className="gap-1.5 shrink-0">
+                  {voiceLogLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={clearVoiceLogAction} className="gap-1.5 shrink-0">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+              {voiceLogLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : voiceLog.filter((e) => !voiceSearch || e.userTag.toLowerCase().includes(voiceSearch.toLowerCase()) || e.userId.includes(voiceSearch) || (e.channelName ?? "").toLowerCase().includes(voiceSearch.toLowerCase())).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun événement vocal enregistré.</p>
+              ) : (
+                <div className="space-y-0.5 max-h-[40rem] overflow-y-auto font-mono text-xs">
+                  {voiceLog
+                    .filter((e) => !voiceSearch || e.userTag.toLowerCase().includes(voiceSearch.toLowerCase()) || e.userId.includes(voiceSearch) || (e.channelName ?? "").toLowerCase().includes(voiceSearch.toLowerCase()))
+                    .map((e, i) => {
+                      const typeColors: Record<string, string> = {
+                        join: "text-green-400", leave: "text-red-400", move: "text-blue-400",
+                        mute: "text-yellow-400", unmute: "text-green-300",
+                        sourd: "text-orange-400", "non-sourd": "text-green-300",
+                        "mute-serveur": "text-red-500", "unmute-serveur": "text-green-400",
+                        "sourd-serveur": "text-red-500", "non-sourd-serveur": "text-green-400",
+                        "stream-début": "text-purple-400", "stream-fin": "text-purple-300",
+                        "caméra": "text-cyan-400",
+                      };
+                      const typeIcons: Record<string, string> = {
+                        join: "🟢", leave: "🔴", move: "🔄",
+                        mute: "🔇", unmute: "🔊", sourd: "🎧", "non-sourd": "🎙️",
+                        "mute-serveur": "🚫", "unmute-serveur": "✅",
+                        "sourd-serveur": "🚫", "non-sourd-serveur": "✅",
+                        "stream-début": "📡", "stream-fin": "📴", caméra: "📷",
+                      };
+                      return (
+                        <div key={i} className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-muted/40">
+                          <span className="text-muted-foreground shrink-0 w-32">{new Date(e.timestamp).toLocaleTimeString("fr-FR")}</span>
+                          <span className={`shrink-0 w-28 ${typeColors[e.type] ?? "text-foreground"}`}>
+                            {typeIcons[e.type] ?? "•"} {e.type}
+                          </span>
+                          <span className="text-foreground font-semibold shrink-0 max-w-[140px] truncate">{e.userTag}</span>
+                          <span className="text-muted-foreground">
+                            {e.type === "move"
+                              ? `${e.fromChannelName ?? e.fromChannelId} → ${e.channelName ?? e.channelId}`
+                              : `# ${e.channelName ?? e.channelId}`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Fiche Membre ──────────────────────────────────────────────────── */}
+        <TabsContent value="member-profile" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">👤 Fiche Complète d'un Membre</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={profileId} onChange={(e) => setProfileId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" />
+                <Button onClick={fetchProfile} disabled={profileLoading || !profileId.trim()} className="gap-1.5 shrink-0">
+                  {profileLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Rechercher
+                </Button>
+              </div>
+              {profileData && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/40 border border-border">
+                    {profileData.avatarURL && <img src={profileData.avatarURL} className="h-14 w-14 rounded-full border border-border" alt="" />}
+                    <div>
+                      <p className="font-bold text-lg">{profileData.displayName ?? profileData.userTag ?? profileData.userId}</p>
+                      <p className="text-sm text-muted-foreground font-mono">{profileData.userTag} · {profileData.userId}</p>
+                      {profileData.joinedAt && <p className="text-xs text-muted-foreground">Rejoint : {new Date(profileData.joinedAt).toLocaleDateString("fr-FR")}</p>}
+                      {profileData.timed_out_until && <Badge variant="destructive" className="mt-1">Timeout jusqu'au {new Date(profileData.timed_out_until).toLocaleString("fr-FR")}</Badge>}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <div className="rounded-lg border border-border p-3 text-center"><p className="text-2xl font-bold font-mono">{profileData.warns.length}</p><p className="text-xs text-muted-foreground uppercase">Warns</p></div>
+                    <div className="rounded-lg border border-border p-3 text-center"><p className="text-2xl font-bold font-mono">{profileData.notes.length}</p><p className="text-xs text-muted-foreground uppercase">Notes</p></div>
+                    <div className={`rounded-lg border p-3 text-center ${profileData.tempban ? "border-destructive bg-destructive/10" : "border-border"}`}><p className="text-xs text-muted-foreground uppercase">{profileData.tempban ? "🔨 Tempban Actif" : "Tempban"}</p>{profileData.tempban && <p className="text-xs font-mono mt-1">Exp : {new Date(profileData.tempban.expiresAt).toLocaleDateString("fr-FR")}</p>}</div>
+                    <div className={`rounded-lg border p-3 text-center col-span-2 md:col-span-1 ${profileData.quarantine ? "border-yellow-500/50 bg-yellow-500/10" : "border-border"}`}><p className="text-xs text-muted-foreground uppercase">{profileData.quarantine ? "🔒 Quarantaine" : "Quarantaine"}</p>{profileData.quarantine && <p className="text-xs font-mono mt-1">{profileData.quarantine.reason}</p>}</div>
+                  </div>
+                  {profileData.roles.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Rôles</p>
+                      <div className="flex flex-wrap gap-1">{profileData.roles.map(r => <Badge key={r.id} variant="outline" style={{ borderColor: r.color !== "#000000" ? r.color : undefined }} className="text-xs font-mono">{r.name}</Badge>)}</div>
+                    </div>
+                  )}
+                  {profileData.warns.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Avertissements</p>
+                      <div className="space-y-1">{profileData.warns.map(w => (
+                        <div key={w.caseId} className="flex items-start gap-2 text-xs rounded bg-muted/30 px-3 py-2">
+                          <span className="font-mono text-muted-foreground shrink-0">#{w.caseId}</span>
+                          <span className="flex-1">{w.reason}</span>
+                          <span className="text-muted-foreground shrink-0">{w.moderatorTag}</span>
+                          <span className="text-muted-foreground shrink-0">{new Date(w.timestamp).toLocaleDateString("fr-FR")}</span>
+                        </div>
+                      ))}</div>
+                    </div>
+                  )}
+                  {profileData.notes.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Notes</p>
+                      <div className="space-y-1">{profileData.notes.map((n, i) => (
+                        <div key={i} className="text-xs rounded bg-muted/30 px-3 py-2"><p>{n.content}</p><p className="text-muted-foreground mt-0.5">{n.moderator} · {new Date(n.timestamp).toLocaleDateString("fr-FR")}</p></div>
+                      ))}</div>
+                    </div>
+                  )}
+                  {profileData.voiceEvents.length > 0 && (
+                    <div><p className="text-xs font-semibold uppercase text-muted-foreground mb-2">Derniers événements vocaux</p>
+                      <div className="space-y-0.5 font-mono text-xs max-h-40 overflow-y-auto">{profileData.voiceEvents.map((e, i) => (
+                        <div key={i} className="flex gap-2 px-2 py-1 rounded hover:bg-muted/40">
+                          <span className="text-muted-foreground shrink-0">{new Date(e.timestamp).toLocaleTimeString("fr-FR")}</span>
+                          <span className="text-primary shrink-0">{e.type}</span>
+                          <span className="text-muted-foreground">{e.channelName ?? e.channelId}</span>
+                        </div>
+                      ))}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Warns ─────────────────────────────────────────────────────────── */}
+        <TabsContent value="warns" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">⚠️ Gestion des Avertissements</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={warnsUserId} onChange={(e) => setWarnsUserId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" />
+                <Button onClick={fetchWarns} disabled={warnsLoading || !warnsUserId.trim()} className="gap-1.5 shrink-0">
+                  {warnsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />} Charger
+                </Button>
+              </div>
+              {warnsData !== null && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">{warnsData.length} avertissement(s) pour {warnsUserId}</p>
+                    {warnsData.length > 0 && (
+                      <Button size="sm" variant="destructive" className="gap-1.5 text-xs" onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/warns/${warnsUserId}`, { method: "DELETE" });
+                        const d = await r.json() as { count?: number };
+                        if (r.ok) { setWarnsData([]); toast({ title: `${d.count} warn(s) effacé(s) ✓` }); }
+                      }}>
+                        <Trash2 className="h-3.5 w-3.5" /> Tout effacer
+                      </Button>
+                    )}
+                  </div>
+                  {warnsData.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-6">Aucun avertissement.</p>
+                  ) : (
+                    <div className="space-y-1">{warnsData.map((w) => (
+                      <div key={w.caseId} className="flex items-center gap-2 text-xs rounded bg-muted/30 px-3 py-2">
+                        <span className="font-mono text-muted-foreground shrink-0">#{w.caseId}</span>
+                        <span className="flex-1">{w.reason}</span>
+                        <span className="text-muted-foreground shrink-0">{w.moderatorTag}</span>
+                        <span className="text-muted-foreground shrink-0">{new Date(w.timestamp).toLocaleDateString("fr-FR")}</span>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10" onClick={async () => {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/warns/${warnsUserId}/${w.caseId}`, { method: "DELETE" });
+                          if (r.ok) { setWarnsData(prev => (prev ?? []).filter(x => x.caseId !== w.caseId)); toast({ title: `Warn #${w.caseId} supprimé` }); }
+                        }}><X className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    ))}</div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Tempbans ──────────────────────────────────────────────────────── */}
+        <TabsContent value="tempbans" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🔨 Bannissements Temporaires ({tempbans.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchTempbans} disabled={tempbansLoading} className="gap-1.5">
+                  {tempbansLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {tempbansLoading ? <Skeleton className="h-40 w-full" /> : tempbans.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun tempban actif.</p>
+              ) : (
+                <div className="space-y-2">{tempbans.map((b) => (
+                  <div key={b.userId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm font-mono truncate">{b.userTag}</p>
+                      <p className="text-xs text-muted-foreground">{b.reason} · par {b.moderatorTag}</p>
+                      <p className="text-xs text-muted-foreground font-mono">Expire : {new Date(b.expiresAt).toLocaleString("fr-FR")}</p>
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0 hover:bg-green-500/10 hover:border-green-500 hover:text-green-400" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/tempbans/${b.userId}`, { method: "DELETE" });
+                      if (r.ok) { setTempbans(prev => prev.filter(x => x.userId !== b.userId)); toast({ title: "Tempban annulé ✓" }); }
+                    }}>
+                      <Unlock className="h-3.5 w-3.5" /> Annuler
+                    </Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Timeouts ──────────────────────────────────────────────────────── */}
+        <TabsContent value="timeouts" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">⏱️ Timeouts Actifs ({timeouts.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchTimeouts} disabled={timeoutsLoading} className="gap-1.5">
+                  {timeoutsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {timeoutsLoading ? <Skeleton className="h-40 w-full" /> : timeouts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun membre en timeout.</p>
+              ) : (
+                <div className="space-y-2">{timeouts.map((t) => (
+                  <div key={t.userId} className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 px-4 py-3">
+                    {t.avatarURL && <img src={t.avatarURL} className="h-8 w-8 rounded-full border border-border shrink-0" alt="" />}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm font-mono">{t.displayName} <span className="text-muted-foreground font-normal text-xs">({t.userTag})</span></p>
+                      {t.until && <p className="text-xs text-muted-foreground font-mono">Jusqu'au : {new Date(t.until).toLocaleString("fr-FR")}</p>}
+                    </div>
+                    <Button size="sm" variant="outline" className="gap-1.5 text-xs shrink-0 hover:bg-green-500/10 hover:border-green-500 hover:text-green-400" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/timeouts/${t.userId}`, { method: "DELETE" });
+                      if (r.ok) { setTimeouts(prev => prev.filter(x => x.userId !== t.userId)); toast({ title: "Timeout levé ✓" }); }
+                      else { const d = await r.json() as { error?: string }; toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    }}>
+                      <Unlock className="h-3.5 w-3.5" /> Lever
+                    </Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Maintenance ───────────────────────────────────────────────────── */}
+        <TabsContent value="maintenance" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">🔧 Mode Maintenance</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              {maintenanceLoading ? <Skeleton className="h-32 w-full" /> : !maintenanceState ? (
+                <Button onClick={fetchMaintenance}>Charger</Button>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between rounded-lg border border-border p-4">
+                    <div>
+                      <p className="font-semibold">Mode Maintenance</p>
+                      <p className="text-sm text-muted-foreground">Bloque toutes les commandes (owner du serveur exclu)</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge variant={maintenanceState.active ? "destructive" : "secondary"}>{maintenanceState.active ? "ACTIF" : "INACTIF"}</Badge>
+                      <Button size="sm" variant={maintenanceState.active ? "destructive" : "outline"} className="gap-1.5" onClick={async () => {
+                        const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`, { method: "PATCH", body: JSON.stringify({ active: !maintenanceState.active }) });
+                        if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); toast({ title: d.active ? "Maintenance activée 🔧" : "Maintenance désactivée ✓" }); }
+                      }}>
+                        <Pause className="h-3.5 w-3.5" /> {maintenanceState.active ? "Désactiver" : "Activer"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Message affiché aux utilisateurs</label>
+                    <Textarea value={maintenanceMsgDraft} onChange={(e) => setMaintenanceMsgDraft(e.target.value)} rows={3} className="font-mono text-sm resize-none" />
+                    <Button size="sm" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/maintenance`, { method: "PATCH", body: JSON.stringify({ active: maintenanceState.active, message: maintenanceMsgDraft }) });
+                      if (r.ok) { const d = await r.json() as { active: boolean; message: string }; setMaintenanceState(d); toast({ title: "Message mis à jour ✓" }); }
+                    }}>Sauvegarder le message</Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Masse-Action ──────────────────────────────────────────────────── */}
+        <TabsContent value="mass-action" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">⚡ Masse-Action par Rôle</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <Alert><AlertCircle className="h-4 w-4" /><AlertDescription className="text-sm">Action irréversible sur tous les membres ayant le rôle spécifié. Les bots et membres protégés sont ignorés.</AlertDescription></Alert>
+              <div className="grid md:grid-cols-2 gap-4">
+                <div className="space-y-2"><label className="text-sm font-medium">ID du Rôle cible</label><Input value={massRoleId} onChange={(e) => setMassRoleId(e.target.value)} placeholder="ID du rôle Discord…" className="font-mono text-sm" /></div>
+                <div className="space-y-2"><label className="text-sm font-medium">Action</label>
+                  <Select value={massAction} onValueChange={(v) => setMassAction(v as typeof massAction)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kick">👢 Expulser</SelectItem>
+                      <SelectItem value="ban">🔨 Bannir</SelectItem>
+                      <SelectItem value="timeout">⏱️ Timeout</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {massAction === "timeout" && <div className="space-y-2"><label className="text-sm font-medium">Durée (minutes)</label><Input type="number" min={1} value={massTimeoutMins} onChange={(e) => setMassTimeoutMins(Number(e.target.value))} className="font-mono text-sm" /></div>}
+                <div className="space-y-2 md:col-span-2"><label className="text-sm font-medium">Raison</label><Input value={massReason} onChange={(e) => setMassReason(e.target.value)} placeholder="Raison (optionnel)…" className="text-sm" /></div>
+              </div>
+              <Button variant="destructive" disabled={massLoading || !massRoleId.trim()} className="gap-1.5 w-full" onClick={async () => {
+                if (!confirm(`Confirmer la masse-action "${massAction}" sur tous les membres du rôle ${massRoleId} ?`)) return;
+                setMassLoading(true);
+                try {
+                  const r = await apiFetch(`/api/owner/guilds/${guildId}/mass-action`, { method: "POST", body: JSON.stringify({ action: massAction, roleId: massRoleId.trim(), reason: massReason, timeoutMinutes: massTimeoutMins }) });
+                  const d = await r.json() as { count?: number; error?: string };
+                  if (r.ok) toast({ title: `✓ ${d.count} membre(s) traité(s)` });
+                  else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                } finally { setMassLoading(false); }
+              }}>
+                {massLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />} Exécuter la masse-action
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Membres Serveur (Spy) ─────────────────────────────────────────── */}
+        <TabsContent value="spy-members" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Users className="h-4 w-4 text-orange-400" /> Membres d'un Serveur
+              </CardTitle>
+              <CardDescription>
+                Entre un ID de compte pour voir sur quels serveurs du bot il est présent, puis choisis n'importe quel serveur du bot pour récupérer ses membres.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+
+              {/* ── Étape 1 : trouver les serveurs d'un compte ─────────────── */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold">Étape 1 — Trouver les serveurs d'un compte</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Le bot scanne tous ses serveurs et indique lesquels ont ce membre. Utilise ça pour savoir où cibler.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={spyUserId}
+                    onChange={(e) => setSpyUserId(e.target.value.trim())}
+                    placeholder="ID du compte Discord à rechercher…"
+                    className="font-mono text-sm flex-1"
+                  />
+                  <Button
+                    disabled={spyLoading || !spyUserId.trim()}
+                    className="gap-2 shrink-0"
+                    onClick={async () => {
+                      setSpyLoading(true);
+                      setSpyUserResult(null);
+                      try {
+                        const r = await apiFetch(`/api/owner/user-servers?userId=${encodeURIComponent(spyUserId)}`);
+                        if (r.ok) { setSpyUserResult(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setSpyLoading(false); }
+                    }}
+                  >
+                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                    Chercher
+                  </Button>
+                </div>
+                {spyUserResult && (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Compte présent dans <span className="text-orange-400 font-semibold">{spyUserResult.serverCount}</span> serveur(s) du bot
+                    </p>
+                    {spyUserResult.serverCount === 0 ? (
+                      <div className="text-center text-muted-foreground py-4 text-xs">Compte introuvable sur aucun serveur du bot.</div>
+                    ) : (
+                      <div className="rounded-lg border border-border bg-muted/10 divide-y divide-border/50 max-h-48 overflow-y-auto">
+                        {spyUserResult.servers.map((s) => (
+                          <div key={s.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <span className="font-mono text-muted-foreground w-36 shrink-0 select-all">{s.id}</span>
+                            <span className="flex-1 truncate font-medium">{s.name}</span>
+                            <span className="text-muted-foreground shrink-0">{s.memberCount} mbr</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Étape 2 : choisir un serveur du bot et récupérer ses membres ── */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div>
+                  <p className="text-sm font-semibold">Étape 2 — Récupérer les membres d'un serveur</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Choisis n'importe quel serveur où le bot est présent, même si tu n'en fais pas partie.</p>
+                </div>
+                <div className="flex gap-2">
+                  <Select value={spyGuildId} onValueChange={setSpyGuildId}>
+                    <SelectTrigger className="font-mono text-sm flex-1">
+                      <SelectValue placeholder="Choisir un serveur du bot…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {allGuilds.map((g) => (
+                        <SelectItem key={g.id} value={g.id}>
+                          <span className="font-medium">{g.name}</span>
+                          <span className="ml-2 text-muted-foreground text-xs font-mono">{g.id}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    disabled={spyLoading || !spyGuildId}
+                    className="gap-2 shrink-0"
+                    onClick={async () => {
+                      setSpyLoading(true);
+                      setSpyResult(null);
+                      setSpyFilter("");
+                      try {
+                        const r = await apiFetch(`/api/owner/server-members?guildId=${encodeURIComponent(spyGuildId)}`);
+                        if (r.ok) { setSpyResult(await r.json()); }
+                        else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                      } finally { setSpyLoading(false); }
+                    }}
+                  >
+                    {spyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Users className="h-4 w-4" />}
+                    Récupérer
+                  </Button>
+                </div>
+              </div>
+
+              {/* Résultats */}
+              {spyResult && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold">
+                      <span className="text-orange-400 font-mono">{spyResult.guildName}</span> — {spyResult.memberCount} membre(s) humain(s)
+                    </p>
+                    <Button
+                      size="sm" variant="outline"
+                      className="gap-1.5 text-xs"
+                      onClick={() => {
+                        const txt = spyResult.members.map((m) => m.id).join("\n");
+                        navigator.clipboard.writeText(txt).then(() => toast({ title: "IDs copiés ✓" })).catch(() => {
+                          const a = document.createElement("a");
+                          a.href = URL.createObjectURL(new Blob([txt], { type: "text/plain" }));
+                          a.download = `membres-${spyGuildId}.txt`; a.click();
+                        });
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" /> Copier les IDs
+                    </Button>
+                  </div>
+
+                  {/* Filtre */}
+                  <Input
+                    value={spyFilter}
+                    onChange={(e) => setSpyFilter(e.target.value)}
+                    placeholder="Filtrer par pseudo ou ID…"
+                    className="text-sm"
+                  />
+
+                  {/* Liste scrollable */}
+                  <div className="rounded-lg border border-border bg-muted/10 max-h-64 overflow-y-auto divide-y divide-border/50">
+                    {spyResult.members
+                      .filter((m) => !spyFilter || m.id.includes(spyFilter) || m.username.toLowerCase().includes(spyFilter.toLowerCase()) || m.tag.toLowerCase().includes(spyFilter.toLowerCase()))
+                      .slice(0, 200)
+                      .map((m) => (
+                        <div key={m.id} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                          <span className="font-mono text-muted-foreground w-32 shrink-0">{m.id}</span>
+                          <span className="flex-1 truncate">{m.tag}</span>
+                          {m.joinedAt && <span className="text-muted-foreground shrink-0">{new Date(m.joinedAt).toLocaleDateString("fr-FR")}</span>}
+                        </div>
+                      ))}
+                    {spyResult.members.filter((m) => !spyFilter || m.id.includes(spyFilter) || m.username.toLowerCase().includes(spyFilter.toLowerCase()) || m.tag.toLowerCase().includes(spyFilter.toLowerCase())).length > 200 && (
+                      <div className="px-3 py-2 text-xs text-muted-foreground text-center">… et plus. Utilisez le filtre pour affiner.</div>
+                    )}
+                  </div>
+
+                  {/* Ban la liste */}
+                  <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4 space-y-3">
+                    <p className="text-sm font-semibold text-red-400 flex items-center gap-2">
+                      <Gavel className="h-4 w-4" /> Bannir toute la liste
+                    </p>
+                    <div className="grid md:grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Serveur où appliquer les bans</label>
+                        <Select value={spyBanGuildId} onValueChange={setSpyBanGuildId}>
+                          <SelectTrigger className="text-sm font-mono">
+                            <SelectValue placeholder="Choisir un serveur…" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {allGuilds.map((g) => (
+                              <SelectItem key={g.id} value={g.id}>{g.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Raison du ban (optionnel)</label>
+                        <Input
+                          value={spyBanReason}
+                          onChange={(e) => setSpyBanReason(e.target.value)}
+                          placeholder="Raison…"
+                          className="text-sm"
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      variant="destructive"
+                      className="gap-2 w-full"
+                      disabled={spyBanning || !spyBanGuildId || spyResult.memberCount === 0}
+                      onClick={async () => {
+                        if (!confirm(`Bannir ${spyResult.memberCount} membre(s) du serveur "${spyResult.guildName}" depuis "${allGuilds.find(g => g.id === spyBanGuildId)?.name ?? spyBanGuildId}" ?`)) return;
+                        setSpyBanning(true);
+                        try {
+                          const r = await apiFetch(`/api/owner/guilds/${spyBanGuildId}/ban-list`, {
+                            method: "POST",
+                            body: JSON.stringify({
+                              userIds: spyResult.members.map((m) => m.id),
+                              reason: spyBanReason || `Banni via Dashboard Owner — Membre de ${spyResult.guildName} (${spyGuildId})`,
+                            }),
+                          });
+                          const d = await r.json() as { banned?: number; skipped?: number; error?: string };
+                          if (r.ok) toast({ title: `✓ ${d.banned} banni(s), ${d.skipped} ignoré(s)` });
+                          else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                        } finally { setSpyBanning(false); }
+                      }}
+                    >
+                      {spyBanning ? <Loader2 className="h-4 w-4 animate-spin" /> : <Gavel className="h-4 w-4" />}
+                      Bannir {spyResult.memberCount} membre(s)
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Vérif Utilisateur ────────────────────────────────────────────── */}
+        <TabsContent value="verif-check" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-indigo-400" /> Vérification Utilisateur
+              </CardTitle>
+              <CardDescription>
+                Vérifie si un utilisateur est présent dans un serveur précis ou dans tous les serveurs blacklistés.
+                Le bot doit être présent dans le serveur cible.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">ID de l'utilisateur <span className="text-red-400">*</span></label>
+                    <Input value={verifUserId} onChange={(e) => setVerifUserId(e.target.value.trim())} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">ID du serveur <span className="text-muted-foreground">(optionnel — vide = vérifie toute la blacklist)</span></label>
+                    <Input value={verifGuildId} onChange={(e) => setVerifGuildId(e.target.value.trim())} placeholder="Laisser vide pour vérifier la blacklist…" className="font-mono text-sm" />
+                  </div>
+                </div>
+                <Button
+                  disabled={verifLoading || !verifUserId.trim()}
+                  className="gap-2 w-full"
+                  onClick={async () => {
+                    setVerifLoading(true); setVerifResult(null);
+                    try {
+                      const url = verifGuildId.trim()
+                        ? `/api/owner/verif?userId=${encodeURIComponent(verifUserId)}&guildId=${encodeURIComponent(verifGuildId)}`
+                        : `/api/owner/verif?userId=${encodeURIComponent(verifUserId)}`;
+                      const r = await apiFetch(url);
+                      if (r.ok) setVerifResult(await r.json());
+                      else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                    } finally { setVerifLoading(false); }
+                  }}
+                >
+                  {verifLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Vérifier
+                </Button>
+              </div>
+
+              {/* Résultat */}
+              {verifResult && (
+                <div className="space-y-3">
+                  {/* En-tête utilisateur */}
+                  <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/20 p-3">
+                    <img src={verifResult.avatar} alt="" className="h-10 w-10 rounded-full flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{verifResult.tag}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{verifResult.userId}</p>
+                    </div>
+                    {verifResult.account && (
+                      <div className={`text-xs font-semibold px-2 py-1 rounded-full border ${
+                        verifResult.account.riskScore >= 60 ? "border-red-500/40 bg-red-500/10 text-red-400" :
+                        verifResult.account.riskScore >= 35 ? "border-orange-500/40 bg-orange-500/10 text-orange-400" :
+                        verifResult.account.riskScore >= 15 ? "border-yellow-500/40 bg-yellow-500/10 text-yellow-400" :
+                        "border-green-500/40 bg-green-500/10 text-green-400"
+                      }`}>
+                        {verifResult.account.riskScore >= 60 ? "🔴" : verifResult.account.riskScore >= 35 ? "🟠" : verifResult.account.riskScore >= 15 ? "🟡" : "✅"} {verifResult.account.riskLevel}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Infos compte enrichies */}
+                  {verifResult.account && (() => {
+                    const acc = verifResult.account;
+                    const ageLabel = acc.ageDays < 1 ? "< 1 jour" : acc.ageDays < 30 ? `${acc.ageDays}j` : acc.ageDays < 365 ? `${Math.floor(acc.ageDays / 30)} mois` : `${Math.floor(acc.ageDays / 365)} an(s)`;
+                    const ageColor = acc.ageDays < 7 ? "text-red-400" : acc.ageDays < 30 ? "text-orange-400" : acc.ageDays < 90 ? "text-yellow-400" : "text-green-400";
+                    const BADGE_LABELS: Record<string, string> = {
+                      Staff: "👑 Discord Staff", Partner: "🤝 Partner", BugHunterLevel1: "🐛 Bug Hunter",
+                      BugHunterLevel2: "🏆 Bug Hunter Gold", PremiumEarlySupporter: "💎 Early Supporter",
+                      VerifiedDeveloper: "🔧 Verified Dev", CertifiedModerator: "🛡️ Certified Mod", ActiveDeveloper: "⚙️ Active Dev",
+                      HypeSquadOnlineHouse1: "🏠 Bravery", HypeSquadOnlineHouse2: "🏠 Brilliance", HypeSquadOnlineHouse3: "🏠 Balance",
+                    };
+                    return (
+                      <div className="rounded-lg border border-border bg-muted/10 p-3 space-y-2 text-xs">
+                        <p className="text-sm font-semibold">Profil Discord</p>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Âge du compte</p>
+                            <p className={`font-semibold ${ageColor}`}>{ageLabel}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Créé le</p>
+                            <p className="font-mono">{new Date(acc.createdTimestamp).toLocaleDateString("fr-FR")}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Avatar</p>
+                            <p>{acc.hasAvatar ? "✅ Personnalisé" : "⚠️ Défaut"}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Score risque</p>
+                            <p className="font-semibold">{acc.riskScore}/100</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">Signalé sur</p>
+                            <p>{acc.guildsSeenCount > 1 ? <span className="text-orange-400 font-semibold">{acc.guildsSeenCount} serveurs ⚠️</span> : `${acc.guildsSeenCount} serveur`}</p>
+                          </div>
+                          <div className="space-y-0.5">
+                            <p className="text-muted-foreground">VPN / Proxy</p>
+                            <p>{acc.vpnFlagged ? <span className="text-red-400 font-semibold">🔴 Détecté</span> : "—"}</p>
+                          </div>
+                        </div>
+                        {acc.flags.length > 0 && (
+                          <div className="space-y-0.5 pt-1 border-t border-border/50">
+                            <p className="text-muted-foreground">Badges Discord</p>
+                            <p className="flex flex-wrap gap-1">{acc.flags.map((f) => <span key={f} className={`px-1.5 py-0.5 rounded bg-muted/50 ${acc.trustFlags.includes(f) ? "text-indigo-300" : "text-muted-foreground"}`}>{BADGE_LABELS[f] ?? f}</span>)}</p>
+                          </div>
+                        )}
+                        {acc.suspectHistory.length > 0 && (
+                          <div className="space-y-1 pt-1 border-t border-border/50">
+                            <p className="text-muted-foreground font-semibold">Historique suspect ({acc.suspectHistory.length})</p>
+                            {acc.suspectHistory.map((h, i) => (
+                              <div key={i} className="flex items-start gap-1.5 text-xs">
+                                <span className="text-red-400 shrink-0">•</span>
+                                <span className="text-muted-foreground shrink-0">{h.detectedAt ? new Date(h.detectedAt).toLocaleDateString("fr-FR") : "?"}</span>
+                                <span className="font-medium shrink-0">{h.guildName}</span>
+                                <span className="text-muted-foreground truncate">{h.reasons.slice(0, 2).join(", ")}</span>
+                                {h.vpnSuspicion && <span className="text-orange-400 shrink-0">🌐VPN</span>}
+                                <span className="shrink-0 font-mono bg-muted/50 px-1 rounded">{h.actionTaken}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Mode serveur précis */}
+                  {verifResult.mode === "specific" && (
+                    verifResult.error
+                      ? <div className="rounded-lg border border-orange-500/30 bg-orange-500/10 p-3 text-sm text-orange-300">{verifResult.error}</div>
+                      : verifResult.found
+                        ? (
+                          <div className="rounded-lg border border-green-500/40 bg-green-500/5 p-4 space-y-2">
+                            <p className="text-sm font-semibold text-green-400 flex items-center gap-2">
+                              <ShieldCheck className="h-4 w-4" /> Présent dans {verifResult.guildName}
+                            </p>
+                            {verifResult.joinedAt && <p className="text-xs text-muted-foreground">Rejoint le {new Date(verifResult.joinedAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}</p>}
+                            {verifResult.roles && verifResult.roles.length > 0 && (
+                              <div className="flex flex-wrap gap-1 pt-1">
+                                {verifResult.roles.slice(0, 12).map(r => (
+                                  <span key={r.id} className="text-xs bg-muted/50 px-1.5 py-0.5 rounded font-mono">{r.name}</span>
+                                ))}
+                                {verifResult.roles.length > 12 && <span className="text-xs text-muted-foreground">+{verifResult.roles.length - 12}</span>}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+                            ✅ Pas présent dans <span className="text-foreground font-medium">{verifResult.guildName}</span>
+                          </div>
+                        )
+                  )}
+
+                  {/* Mode blacklist */}
+                  {verifResult.mode === "blacklist" && (
+                    <div className="space-y-2">
+                      <div className={`rounded-lg border p-3 text-sm font-medium flex items-center gap-2 ${verifResult.foundCount > 0 ? "border-red-500/40 bg-red-500/5 text-red-400" : "border-green-500/40 bg-green-500/5 text-green-400"}`}>
+                        {verifResult.foundCount > 0
+                          ? <><ShieldAlert className="h-4 w-4" /> Présent dans {verifResult.foundCount} serveur(s) blacklisté(s) !</>
+                          : <><ShieldCheck className="h-4 w-4" /> Absent de tous les serveurs blacklistés vérifiables</>
+                        }
+                      </div>
+                      <div className="rounded-lg border border-border divide-y divide-border/50">
+                        {verifResult.results.map((r) => (
+                          <div key={r.guildId} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            <span className={`h-2 w-2 rounded-full flex-shrink-0 ${r.found ? "bg-red-500" : r.botPresent ? "bg-green-500" : "bg-muted-foreground/30"}`} />
+                            <span className="flex-1 truncate font-medium">{r.label !== r.guildId ? r.label : "—"}</span>
+                            <span className="font-mono text-muted-foreground shrink-0">{r.guildId}</span>
+                            <span className={`shrink-0 font-medium ${r.found ? "text-red-400" : r.botPresent ? "text-green-400" : "text-muted-foreground"}`}>
+                              {r.found ? "🔴 Présent" : r.botPresent ? "✅ Absent" : "⬛ Bot absent"}
+                            </span>
+                          </div>
+                        ))}
+                        {verifResult.results.length === 0 && <p className="px-3 py-4 text-xs text-muted-foreground text-center">Aucun serveur dans la blacklist.</p>}
+                      </div>
+                      <p className="text-xs text-muted-foreground">⬛ Bot absent = serveur blacklisté sans bot — présence non vérifiable automatiquement.</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invitations ───────────────────────────────────────────────────── */}
+        <TabsContent value="invitations" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🔗 Invitations ({invites.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchInvites} disabled={invitesLoading} className="gap-1.5">
+                  {invitesLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Générer une invitation</p>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">ID Salon (optionnel)</label><Input value={newInviteChannelId} onChange={(e) => setNewInviteChannelId(e.target.value)} placeholder="ID salon…" className="font-mono text-xs" /></div>
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">Durée (0=∞, en secondes)</label><Input type="number" min={0} value={newInviteMaxAge} onChange={(e) => setNewInviteMaxAge(Number(e.target.value))} className="font-mono text-xs" /></div>
+                  <div className="space-y-1"><label className="text-xs text-muted-foreground">Utilisations max (0=∞)</label><Input type="number" min={0} value={newInviteMaxUses} onChange={(e) => setNewInviteMaxUses(Number(e.target.value))} className="font-mono text-xs" /></div>
+                </div>
+                <Button size="sm" className="gap-1.5" onClick={async () => {
+                  const r = await apiFetch(`/api/owner/guilds/${guildId}/invites/create`, { method: "POST", body: JSON.stringify({ channelId: newInviteChannelId || undefined, maxAge: newInviteMaxAge, maxUses: newInviteMaxUses, temporary: newInviteTemporary }) });
+                  const d = await r.json() as { url?: string; error?: string };
+                  if (r.ok && d.url) { navigator.clipboard.writeText(d.url).catch(() => null); toast({ title: "Invitation créée ✓", description: d.url }); fetchInvites(); }
+                  else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                }}><Plus className="h-4 w-4" /> Créer & Copier</Button>
+              </div>
+              {invitesLoading ? <Skeleton className="h-40 w-full" /> : invites.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucune invitation active.</p>
+              ) : (
+                <div className="space-y-1">{invites.map((inv) => (
+                  <div key={inv.code} className="flex items-center gap-3 text-xs font-mono rounded bg-muted/20 px-3 py-2">
+                    <span className="font-semibold text-primary w-20 shrink-0">{inv.code}</span>
+                    <span className="text-muted-foreground shrink-0">{inv.uses ?? 0}/{inv.maxUses ?? "∞"}</span>
+                    <span className="text-muted-foreground shrink-0 hidden md:block"># {inv.channelName ?? "?"}</span>
+                    <span className="flex-1 text-muted-foreground hidden lg:block">{inv.creatorTag ?? "?"}</span>
+                    <span className="text-muted-foreground shrink-0">{inv.expiresAt ? new Date(inv.expiresAt).toLocaleDateString("fr-FR") : "∞"}</span>
+                    <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 shrink-0" onClick={async () => {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/invites/${inv.code}`, { method: "DELETE" });
+                      if (r.ok) { setInvites(prev => prev.filter(i => i.code !== inv.code)); toast({ title: "Invitation révoquée" }); }
+                    }}><X className="h-3.5 w-3.5" /></Button>
+                  </div>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Audit Log ─────────────────────────────────────────────────────── */}
+        <TabsContent value="audit-log" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">📋 Audit Log Discord</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchAuditLog} disabled={auditLoading} className="gap-1.5">
+                  {auditLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {auditLoading ? <Skeleton className="h-48 w-full" /> : auditLog.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucune entrée d'audit.</p>
+              ) : (
+                <div className="space-y-1 max-h-[40rem] overflow-y-auto font-mono text-xs">
+                  {auditLog.map((e) => (
+                    <div key={e.id} className="flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/40">
+                      <span className="text-muted-foreground shrink-0 w-32">{new Date(e.createdAt).toLocaleString("fr-FR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</span>
+                      <Badge variant="outline" className="text-[10px] shrink-0 font-mono">{e.actionType.replace(/_/g, " ")}</Badge>
+                      <span className="text-primary shrink-0">{e.executorTag ?? e.executorId ?? "?"}</span>
+                      {e.targetId && <span className="text-muted-foreground">→ {e.targetId}</span>}
+                      {e.reason && <span className="text-muted-foreground italic truncate">"{e.reason}"</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Log Channels ──────────────────────────────────────────────────── */}
+        <TabsContent value="log-channels" className="space-y-4">
+          {/* Bouton setup automatique */}
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🛡️ Setup Automatique — NovaNGuard Protect</CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">Crée automatiquement la catégorie <strong>🛡️ novaguard protect</strong> avec 4 salons de logs sur ton serveur Discord, et enregistre leurs IDs dans la config.</p>
+            </CardHeader>
+            <CardContent>
+              <Button
+                onClick={async () => {
+                  if (!guildId) return;
+                  setSetupLogsLoading(true);
+                  try {
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/setup-logs`, { method: "POST" });
+                    const d = await r.json() as { ok?: boolean; error?: string; channels?: Record<string, { id: string; name: string }>; categoryName?: string };
+                    if (r.ok && d.ok) {
+                      toast({ title: `✅ Catégorie "${d.categoryName}" créée avec 4 salons !`, description: "Les IDs ont été sauvegardés automatiquement dans la config." });
+                      await fetchLogChannels();
+                    } else {
+                      toast({ title: "Erreur setup", description: d.error ?? "Erreur inconnue", variant: "destructive" });
+                    }
+                  } catch {
+                    toast({ title: "Erreur réseau", variant: "destructive" });
+                  } finally {
+                    setSetupLogsLoading(false);
+                  }
+                }}
+                disabled={setupLogsLoading || !guildId}
+                className="gap-2 w-full"
+              >
+                {setupLogsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <span>🛡️</span>}
+                Créer la catégorie NovaNGuard Protect + 4 salons
+              </Button>
+              <p className="text-xs text-muted-foreground mt-2">⚠️ Crée de nouveaux salons à chaque clic — utilise une seule fois puis ajuste manuellement si besoin.</p>
+            </CardContent>
+          </Card>
+
+          {/* Formulaire manuel */}
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">📡 Configuration Manuelle des Salons de Logs</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              {logChannelsLoading ? <Skeleton className="h-48 w-full" /> : !logChannels ? (
+                <Button onClick={fetchLogChannels}>Charger</Button>
+              ) : (
+                <>
+                  {([
+                    { key: "logChannelId" as const,      label: "Logs Modération (principal)",                   icon: "📋" },
+                    { key: "generalLogChannelId" as const, label: "Logs General (vocal, salons, rôles…)",          icon: "📊" },
+                    { key: "ticketLogChannelId" as const,  label: "Logs Ticket",                                   icon: "🎟️" },
+                    { key: "supportLogChannelId" as const, label: "Logs Support",                                  icon: "🎧" },
+                    { key: "banLogChannelId" as const,     label: "Logs Bans",                                     icon: "🔨" },
+                    { key: "inviteLogChannelId" as const,  label: "Logs Invitations",                              icon: "🔗" },
+                    { key: "messageLogChannelId" as const, label: "Logs Messages (éditions & suppressions)",       icon: "✏️" },
+                  ] as const).map(({ key, label, icon }) => (
+                    <div key={key} className="space-y-1">
+                      <label className="text-sm font-medium">{icon} {label}</label>
+                      <Input value={logChannelsDraft[key] ?? ""} onChange={(e) => setLogChannelsDraft(prev => ({ ...prev, [key]: e.target.value || null }))} placeholder="ID du salon Discord…" className="font-mono text-sm" />
+                    </div>
+                  ))}
+                  <Button onClick={saveLogChannels} disabled={logChannelsSaving} className="gap-1.5 w-full">
+                    {logChannelsSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />} Sauvegarder les salons
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Config JSON ───────────────────────────────────────────────────── */}
+        <TabsContent value="config-json" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">📦 Import / Export de Configuration</CardTitle></CardHeader>
+            <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <p className="text-sm font-semibold">Exporter la configuration</p>
+                <p className="text-xs text-muted-foreground">Télécharge un fichier JSON avec toute la config du serveur.</p>
+                <Button variant="outline" disabled={configExportLoading} className="gap-1.5" onClick={async () => {
+                  setConfigExportLoading(true);
+                  try {
+                    const token = getToken();
+                    const r = await fetch(`/api/owner/guilds/${guildId}/config/export`, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+                    if (!r.ok) { toast({ title: "Erreur export", variant: "destructive" }); return; }
+                    const blob = await r.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement("a"); a.href = url; a.download = `config-${guildId}.json`; a.click();
+                    URL.revokeObjectURL(url);
+                    toast({ title: "Config exportée ✓" });
+                  } finally { setConfigExportLoading(false); }
+                }}>
+                  {configExportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Télécharger le JSON
+                </Button>
+              </div>
+              <div className="border-t border-border pt-4 space-y-2">
+                <p className="text-sm font-semibold">Importer une configuration</p>
+                <p className="text-xs text-muted-foreground">Coller le JSON d'une configuration précédemment exportée.</p>
+                <Textarea value={configImportJson} onChange={(e) => setConfigImportJson(e.target.value)} rows={8} placeholder='{"guildId":"...","config":{...}}' className="font-mono text-xs resize-none" />
+                <Button variant="outline" disabled={configImportLoading || !configImportJson.trim()} className="gap-1.5" onClick={async () => {
+                  setConfigImportLoading(true);
+                  try {
+                    const parsed = JSON.parse(configImportJson);
+                    const config = parsed.config ?? parsed;
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/config/import`, { method: "POST", body: JSON.stringify({ config }) });
+                    const d = await r.json() as { ok?: boolean; error?: string };
+                    if (r.ok) { toast({ title: "Configuration importée ✓" }); setConfigImportJson(""); }
+                    else toast({ title: "Erreur import", description: d.error, variant: "destructive" });
+                  } catch { toast({ title: "JSON invalide", variant: "destructive" }); }
+                  finally { setConfigImportLoading(false); }
+                }}>
+                  {configImportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />} Importer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Serveurs Blacklistés ───────────────────────────────────────────── */}
+        <TabsContent value="server-bl" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Ban className="h-4 w-4 text-red-400" /> Serveurs Blacklistés
+              </CardTitle>
+              <CardDescription>
+                Ajoutez des IDs de serveurs suspects. La commande <span className="font-mono text-primary">/verif</span> ou <span className="font-mono text-primary">&verif @user</span> vérifie si un utilisateur est présent dans ces serveurs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Ajouter */}
+              <div className="rounded-lg border border-border p-4 space-y-3">
+                <p className="text-sm font-semibold">Ajouter un serveur</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">ID du serveur</label>
+                    <Input value={serverBlNewId} onChange={(e) => setServerBlNewId(e.target.value.trim())} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-muted-foreground mb-1 block">Nom / label (optionnel)</label>
+                    <Input value={serverBlNewLabel} onChange={(e) => setServerBlNewLabel(e.target.value)} placeholder="Serveur de raid…" className="text-sm" />
+                  </div>
+                  <div className="flex items-end">
+                    <Button
+                      className="gap-2 w-full"
+                      disabled={serverBlSaving || !serverBlNewId.trim()}
+                      onClick={async () => {
+                        setServerBlSaving(true);
+                        try {
+                          const r = await apiFetch("/api/owner/server-blacklist", {
+                            method: "POST",
+                            body: JSON.stringify({ guildId: serverBlNewId, label: serverBlNewLabel }),
+                          });
+                          if (r.ok) {
+                            const entry = await r.json();
+                            setServerBl((prev) => [entry, ...prev.filter((e) => e.guildId !== entry.guildId)]);
+                            setServerBlNewId(""); setServerBlNewLabel("");
+                            toast({ title: "Serveur ajouté à la blacklist ✓" });
+                          } else {
+                            const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                          }
+                        } finally { setServerBlSaving(false); }
+                      }}
+                    >
+                      {serverBlSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Liste */}
+              {serverBlLoading ? (
+                <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+              ) : serverBl.length === 0 ? (
+                <div className="text-center text-muted-foreground py-8 text-sm">Aucun serveur blacklisté.</div>
+              ) : (
+                <div className="space-y-2">
+                  {serverBl.map((entry) => (
+                    <div key={entry.guildId} className="flex items-center gap-3 p-3 rounded-lg border border-border bg-muted/20">
+                      <Ban className="h-4 w-4 text-red-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{entry.label !== entry.guildId ? entry.label : <span className="text-muted-foreground">Sans nom</span>}</p>
+                        <p className="text-xs text-muted-foreground font-mono">{entry.guildId} · ajouté le {new Date(entry.addedAt).toLocaleDateString("fr-FR")}</p>
+                      </div>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 flex-shrink-0"
+                        onClick={async () => {
+                          const r = await apiFetch(`/api/owner/server-blacklist/${entry.guildId}`, { method: "DELETE" });
+                          if (r.ok) { setServerBl((prev) => prev.filter((e) => e.guildId !== entry.guildId)); toast({ title: "Serveur retiré ✓" }); }
+                          else { const d = await r.json(); toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                        }}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                💡 Le bot doit être présent dans le serveur blacklisté pour détecter si un utilisateur y est membre.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Commandes Custom ──────────────────────────────────────────────── */}
+        <TabsContent value="custom-cmds" className="space-y-4">
+          {/* ── Nouvelle commande ── */}
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">➕ Nouvelle Commande Personnalisée</CardTitle>
+              <CardDescription className="text-xs">
+                Déclenché par <span className="font-mono text-primary">&amp;nom</span> dans le chat Discord.
+                Supporte texte simple, embed riche, action de modération ou gestion de rôle.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Nom + Type */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Nom de la commande</label>
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-mono text-muted-foreground">&amp;</span>
+                    <Input value={ccNewName} onChange={(e) => setCcNewName(e.target.value.replace(/\s+/g, "").toLowerCase())} placeholder="macommande" className="font-mono text-sm" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Type d'action</label>
+                  <Select value={ccActionType} onValueChange={(v) => setCcActionType(v as typeof ccActionType)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="text">💬 Texte simple</SelectItem>
+                      <SelectItem value="embed">🎨 Embed riche</SelectItem>
+                      <SelectItem value="moderation">🔨 Modération</SelectItem>
+                      <SelectItem value="role">🏷️ Rôle</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* ── Texte ── */}
+              {ccActionType === "text" && (
+                <div className="space-y-1.5">
+                  <label className="text-sm font-medium">Réponse du bot</label>
+                  <Input value={ccNewResponse} onChange={(e) => setCcNewResponse(e.target.value)} placeholder="Bonjour ! Voici le règlement…" className="text-sm" />
+                </div>
+              )}
+
+              {/* ── Embed ── */}
+              {ccActionType === "embed" && (
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Embed</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Titre</label>
+                      <Input value={ccEmbedTitle} onChange={(e) => setCcEmbedTitle(e.target.value)} placeholder="Titre de l'embed" className="text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Couleur</label>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={ccEmbedColor} onChange={(e) => setCcEmbedColor(e.target.value)} className="h-9 w-12 rounded border border-border cursor-pointer bg-transparent p-0.5" />
+                        <Input value={ccEmbedColor} onChange={(e) => setCcEmbedColor(e.target.value)} className="font-mono text-sm" maxLength={7} />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium">Description</label>
+                    <textarea value={ccEmbedDesc} onChange={(e) => setCcEmbedDesc(e.target.value)} placeholder="Description de l'embed…" rows={3} className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none" />
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Thumbnail URL</label>
+                      <Input value={ccEmbedThumbnail} onChange={(e) => setCcEmbedThumbnail(e.target.value)} placeholder="https://…" className="text-sm" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Image URL</label>
+                      <Input value={ccEmbedImage} onChange={(e) => setCcEmbedImage(e.target.value)} placeholder="https://…" className="text-sm" />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium">Footer</label>
+                    <Input value={ccEmbedFooter} onChange={(e) => setCcEmbedFooter(e.target.value)} placeholder="Texte du footer" className="text-sm" />
+                  </div>
+                  {/* Fields */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">Champs ({ccEmbedFields.length}/25)</label>
+                      <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={() => setCcEmbedFields(prev => [...prev, { name: "", value: "", inline: false }])}>
+                        <Plus className="h-3 w-3" /> Champ
+                      </Button>
+                    </div>
+                    {ccEmbedFields.map((f, i) => (
+                      <div key={i} className="flex gap-2 items-start">
+                        <div className="flex-1 space-y-1">
+                          <Input value={f.name} onChange={(e) => setCcEmbedFields(prev => prev.map((x, j) => j === i ? { ...x, name: e.target.value } : x))} placeholder="Nom du champ" className="text-xs h-8" />
+                          <Input value={f.value} onChange={(e) => setCcEmbedFields(prev => prev.map((x, j) => j === i ? { ...x, value: e.target.value } : x))} placeholder="Valeur" className="text-xs h-8" />
+                        </div>
+                        <div className="flex flex-col items-center gap-1 pt-1">
+                          <label className="text-[10px] text-muted-foreground">Inline</label>
+                          <input type="checkbox" checked={f.inline ?? false} onChange={(e) => setCcEmbedFields(prev => prev.map((x, j) => j === i ? { ...x, inline: e.target.checked } : x))} className="h-4 w-4" />
+                        </div>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive mt-0.5" onClick={() => setCcEmbedFields(prev => prev.filter((_, j) => j !== i))}><X className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Modération ── */}
+              {ccActionType === "moderation" && (
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Action de Modération</p>
+                  <p className="text-xs text-muted-foreground">⚠️ Le bot doit avoir les permissions nécessaires. La cible "mentionné" nécessite que l'utilisateur mentionne quelqu'un.</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Action</label>
+                      <Select value={ccModAction} onValueChange={(v) => setCcModAction(v as typeof ccModAction)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="warn">⚠️ Avertissement</SelectItem>
+                          <SelectItem value="timeout">⏱️ Timeout</SelectItem>
+                          <SelectItem value="kick">👢 Expulser</SelectItem>
+                          <SelectItem value="ban">🔨 Bannir</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Cible</label>
+                      <Select value={ccModTarget} onValueChange={(v) => setCcModTarget(v as typeof ccModTarget)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="mentioned">@mentionné dans la commande</SelectItem>
+                          <SelectItem value="author">L'auteur de la commande</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {ccModAction === "timeout" && (
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Durée (minutes)</label>
+                      <Input type="number" min={1} max={40320} value={ccModDuration} onChange={(e) => setCcModDuration(parseInt(e.target.value) || 10)} className="text-sm w-36" />
+                    </div>
+                  )}
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-medium">Raison (optionnelle)</label>
+                    <Input value={ccModReason} onChange={(e) => setCcModReason(e.target.value)} placeholder="Raison affichée dans les logs Discord" className="text-sm" />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Rôle ── */}
+              {ccActionType === "role" && (
+                <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Gestion de Rôle</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Action</label>
+                      <Select value={ccRoleAction} onValueChange={(v) => setCcRoleAction(v as typeof ccRoleAction)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="add">➕ Ajouter le rôle</SelectItem>
+                          <SelectItem value="remove">➖ Retirer le rôle</SelectItem>
+                          <SelectItem value="toggle">🔄 Toggle (ajouter/retirer)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-medium">Cible</label>
+                      <Select value={ccRoleTarget} onValueChange={(v) => setCcRoleTarget(v as typeof ccRoleTarget)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="author">L'auteur de la commande</SelectItem>
+                          <SelectItem value="mentioned">@mentionné dans la commande</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium">Rôle à appliquer</label>
+                      <Button variant="ghost" size="sm" className="h-6 text-xs gap-1" onClick={fetchGuildRoles} disabled={guildRolesLoading}>
+                        {guildRolesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />} Actualiser
+                      </Button>
+                    </div>
+                    <Select value={ccRoleId} onValueChange={setCcRoleId}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={guildRoles.length === 0 ? "Charge les rôles via Actualiser…" : "Sélectionne un rôle…"} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {guildRoles.map(r => (
+                          <SelectItem key={r.id} value={r.id}>
+                            <span className="flex items-center gap-2">
+                              <span className="inline-block h-3 w-3 rounded-full shrink-0" style={{ backgroundColor: r.color ? `#${r.color.toString(16).padStart(6, "0")}` : "#99aab5" }} />
+                              {r.name}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
+              <Button onClick={() => { void addCustomCmd(); }} disabled={customCmdSaving || !ccNewName.trim()} className="gap-2">
+                {customCmdSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Créer la commande
+              </Button>
+            </CardContent>
+          </Card>
+
+          {/* ── Liste des commandes ── */}
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">📋 Commandes Existantes ({customCmds.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchCustomCmds} disabled={customCmdsLoading} className="gap-1.5">
+                  {customCmdsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {customCmdsLoading ? <Skeleton className="h-32 w-full" /> : customCmds.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucune commande personnalisée.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {customCmds.map((cmd) => {
+                    const typeBadge: Record<string, { label: string; cls: string }> = {
+                      text:        { label: "texte",   cls: "bg-blue-500/10 text-blue-400 border-blue-500/30" },
+                      embed:       { label: "embed",   cls: "bg-purple-500/10 text-purple-400 border-purple-500/30" },
+                      moderation:  { label: "mod",     cls: "bg-red-500/10 text-red-400 border-red-500/30" },
+                      role:        { label: "rôle",    cls: "bg-green-500/10 text-green-400 border-green-500/30" },
+                    };
+                    const tb = typeBadge[cmd.actionType ?? "text"] ?? typeBadge.text!;
+                    const summary = (() => {
+                      if (!cmd.actionType || cmd.actionType === "text") return cmd.response ?? "";
+                      if (cmd.actionType === "embed") return cmd.embedTitle ? `Embed: "${cmd.embedTitle}"` : cmd.embedDescription ? `"${cmd.embedDescription.slice(0, 60)}…"` : "Embed sans titre";
+                      if (cmd.actionType === "moderation") return `${cmd.modAction ?? "?"} → ${cmd.modTarget === "author" ? "auteur" : "@mentionné"}${cmd.modAction === "timeout" ? ` (${cmd.modDuration}min)` : ""}`;
+                      if (cmd.actionType === "role") return `${cmd.roleAction ?? "?"} rôle → ${cmd.roleTarget === "author" ? "auteur" : "@mentionné"}`;
+                      return "";
+                    })();
+                    return (
+                      <div key={cmd.name} className="flex items-center gap-3 rounded-lg bg-muted/20 px-3 py-2.5 text-sm">
+                        <span className="font-mono text-primary font-bold shrink-0 w-32 truncate">&amp;{cmd.name}</span>
+                        <Badge variant="outline" className={`text-[10px] font-mono px-1.5 py-0 shrink-0 ${tb.cls}`}>{tb.label}</Badge>
+                        <span className="flex-1 truncate text-muted-foreground text-xs">{summary}</span>
+                        <span className="text-xs text-muted-foreground shrink-0 hidden lg:block">{cmd.createdBy}</span>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:bg-destructive/10 shrink-0" onClick={() => deleteCustomCmd(cmd.name)}><X className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Mots Globaux ──────────────────────────────────────────────────── */}
+        <TabsContent value="word-bl" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-mono uppercase">🌍 Blacklist de Mots Globale ({wordBl.length})</CardTitle>
+                <Button variant="outline" size="sm" onClick={fetchWordBl} disabled={wordBlLoading} className="gap-1.5">
+                  {wordBlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+              <CardDescription className="text-xs">Mots bloqués sur <strong>tous</strong> les serveurs gérés par le bot.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={newWord} onChange={(e) => setNewWord(e.target.value)} placeholder="Ajouter un mot…" className="font-mono text-sm" onKeyDown={(e) => e.key === "Enter" && addWord()} />
+                <Button onClick={addWord} disabled={wordBlSaving || !newWord.trim()} className="gap-1.5 shrink-0">
+                  {wordBlSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />} Ajouter
+                </Button>
+              </div>
+              {wordBlLoading ? <Skeleton className="h-32 w-full" /> : wordBl.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-6">Aucun mot dans la blacklist globale.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">{wordBl.map((w) => (
+                  <Badge key={w} variant="secondary" className="gap-1.5 font-mono text-sm pr-1">
+                    {w}
+                    <button onClick={() => removeWord(w)} className="ml-1 hover:text-destructive transition-colors"><X className="h-3 w-3" /></button>
+                  </Badge>
+                ))}</div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Recherche Globale ─────────────────────────────────────────────── */}
+        <TabsContent value="global-search" className="space-y-4">
+          <Card className="border-border bg-card">
+            <CardHeader><CardTitle className="text-base font-mono uppercase">🔍 Recherche Globale d'un Utilisateur</CardTitle></CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={searchId} onChange={(e) => setSearchId(e.target.value)} placeholder="ID utilisateur Discord…" className="font-mono text-sm" onKeyDown={(e) => e.key === "Enter" && doGlobalSearch()} />
+                <Button onClick={doGlobalSearch} disabled={searchLoading || !searchId.trim()} className="gap-1.5 shrink-0">
+                  {searchLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <SearchCode className="h-4 w-4" />} Rechercher
+                </Button>
+              </div>
+              {searchResults !== null && (
+                searchResults.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">Utilisateur introuvable sur tous les serveurs.</p>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-sm text-muted-foreground">Présent sur <strong>{searchResults.length}</strong> serveur(s)</p>
+                    {searchResults.map((r) => (
+                      <div key={r.guildId} className="rounded-lg border border-border bg-muted/20 p-4 space-y-2">
+                        <div className="flex items-center gap-3">
+                          {r.avatarURL && <img src={r.avatarURL} className="h-10 w-10 rounded-full border border-border shrink-0" alt="" />}
+                          <div className="flex-1 min-w-0">
+                            <p className="font-semibold">{r.displayName} <span className="text-muted-foreground font-normal text-xs">({r.userTag})</span></p>
+                            <p className="text-xs text-muted-foreground font-mono">{r.guildName}</p>
+                          </div>
+                          <div className="flex gap-2 shrink-0">
+                            {r.timedOut && <Badge variant="destructive" className="text-xs">Timeout</Badge>}
+                            {r.warnCount > 0 && <Badge variant="secondary" className="text-xs font-mono">{r.warnCount} warn(s)</Badge>}
+                          </div>
+                        </div>
+                        {r.roles.length > 0 && (
+                          <div className="flex flex-wrap gap-1">{r.roles.slice(0, 8).map(role => <Badge key={role.id} variant="outline" className="text-xs font-mono">{role.name}</Badge>)}</div>
+                        )}
+                        {r.joinedAt && <p className="text-xs text-muted-foreground">Rejoint le {new Date(r.joinedAt).toLocaleDateString("fr-FR")}</p>}
+                      </div>
+                    ))}
+                  </div>
+                )
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Logs Bot (bot_reply) ──────────────────────────────────────────── */}
+        <TabsContent value="bot-reply-logs" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">💬 Réponses du Bot ({botReplyLogs.length})</CardTitle>
+                  <CardDescription>Messages d'erreur ou d'information envoyés aux utilisateurs lors de l'exécution des commandes.</CardDescription>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={botReplyFilter}
+                    onChange={(e) => setBotReplyFilter(e.target.value as typeof botReplyFilter)}
+                    className="border border-border rounded px-2 py-1 text-xs bg-background"
+                  >
+                    <option value="all">Tous</option>
+                    <option value="error">Erreurs</option>
+                    <option value="warn">Avertissements</option>
+                    <option value="info">Info</option>
+                  </select>
+                  <Button variant="outline" size="sm" onClick={fetchBotReplyLogs} disabled={botReplyLoading} className="gap-1.5 shrink-0">
+                    {botReplyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Actualiser
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {botReplyLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : botReplyLogs.filter((l) => botReplyFilter === "all" || l.level === botReplyFilter).length === 0 ? (
+                <p className="text-muted-foreground text-sm text-center py-8">Aucun log de réponse pour ce filtre.</p>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                  {botReplyLogs
+                    .filter((l) => botReplyFilter === "all" || l.level === botReplyFilter)
+                    .map((l) => {
+                      const lvl = l.level ?? (l.errCode as typeof l.level) ?? "info";
+                      const text = l.replyText ?? l.errMessage ?? "";
+                      const badgeClass = lvl === "error"
+                        ? "bg-red-500/15 text-red-600 border-red-300"
+                        : lvl === "warn"
+                          ? "bg-yellow-500/15 text-yellow-600 border-yellow-300"
+                          : "bg-blue-500/15 text-blue-600 border-blue-300";
+                      const icon = lvl === "error" ? "🔴" : lvl === "warn" ? "🟡" : "🔵";
+                      return (
+                        <div key={l.id} className="flex items-start gap-3 rounded-md border border-border bg-muted/20 px-3 py-2">
+                          <span className="shrink-0 mt-0.5 text-sm">{icon}</span>
+                          <div className="flex-1 min-w-0 space-y-0.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${badgeClass}`}>{lvl}</Badge>
+                              {l.command && <span className="font-mono text-xs text-muted-foreground">/{l.command}</span>}
+                              {l.userTag && <span className="text-xs text-muted-foreground truncate">par {l.userTag}</span>}
+                              <span className="text-xs text-muted-foreground ml-auto shrink-0">{new Date(l.timestamp).toLocaleString("fr-FR")}</span>
+                            </div>
+                            <p className="text-sm break-words">{text}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── COMMANDES USERS ─────────────────────────────────────────────── */}
+        <TabsContent value="usercommands" className="space-y-4">
+          {/* Config support + rolerequest */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Settings2 className="h-4 w-4 text-indigo-500" />
+                Configuration des formulaires
+              </CardTitle>
+              <CardDescription>Définissez le salon de destination et les rôles à mentionner pour chaque type de formulaire.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Support */}
+              <div className="space-y-3 rounded-lg border border-border p-4">
+                <p className="text-sm font-semibold flex items-center gap-2">🎫 Support</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wide">Salon de destination (ID)</Label>
+                    <Input
+                      value={ucCfg.supportChannelId}
+                      onChange={(e) => setUcCfg((p) => ({ ...p, supportChannelId: e.target.value }))}
+                      placeholder="ID du salon…"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wide">Rôles à ping (IDs séparés par des virgules)</Label>
+                    <Input
+                      value={ucCfg.supportPingRoleIds}
+                      onChange={(e) => setUcCfg((p) => ({ ...p, supportPingRoleIds: e.target.value }))}
+                      placeholder="123456789, 987654321…"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+              {/* Demande de rôle */}
+              <div className="space-y-3 rounded-lg border border-border p-4">
+                <p className="text-sm font-semibold flex items-center gap-2">📋 Demande de rôle</p>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wide">Salon de destination (ID)</Label>
+                    <Input
+                      value={ucCfg.roleRequestChannelId}
+                      onChange={(e) => setUcCfg((p) => ({ ...p, roleRequestChannelId: e.target.value }))}
+                      placeholder="ID du salon…"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground uppercase tracking-wide">Rôles à ping (IDs séparés par des virgules)</Label>
+                    <Input
+                      value={ucCfg.roleRequestPingRoleIds}
+                      onChange={(e) => setUcCfg((p) => ({ ...p, roleRequestPingRoleIds: e.target.value }))}
+                      placeholder="123456789, 987654321…"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              </div>
+              <Button onClick={saveUcCfg} disabled={ucCfgSaving} size="sm" className="gap-2">
+                {ucCfgSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                Sauvegarder la configuration
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <MessageSquareWarning className="h-4 w-4 text-indigo-500" />
+                Commandes Utilisateurs
+              </CardTitle>
+              <CardDescription>Historique des demandes de rôle et suggestions reçues.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                <div className="flex gap-1 flex-wrap">
+                  {(["all", "rolerequest", "suggestion", "support"] as const).map((t) => (
+                    <Button key={t} size="sm" variant={ucTypeFilter === t ? "default" : "outline"} className="text-xs h-7"
+                      onClick={() => setUcTypeFilter(t)}>
+                      {t === "all" ? "Tout" : t === "rolerequest" ? "📋 Demandes rôle" : t === "suggestion" ? "💡 Suggestions" : "🎫 Support"}
+                    </Button>
+                  ))}
+                </div>
+                <Input placeholder="Rechercher un utilisateur…" value={ucSearch} onChange={(e) => setUcSearch(e.target.value)} className="h-7 text-xs max-w-48" />
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchUserCmds} disabled={ucLoading}>
+                  {ucLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Rafraîchir
+                </Button>
+              </div>
+
+              {ucLoading ? (
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
+              ) : userCmds.filter((c) =>
+                (ucTypeFilter === "all" || c.type === ucTypeFilter) &&
+                (!ucSearch || c.userTag.toLowerCase().includes(ucSearch.toLowerCase()) || c.userId.includes(ucSearch))
+              ).length === 0 ? (
+                <p className="text-sm text-center text-muted-foreground py-8">Aucune commande utilisateur enregistrée.</p>
+              ) : (
+                <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                  {userCmds
+                    .filter((c) =>
+                      (ucTypeFilter === "all" || c.type === ucTypeFilter) &&
+                      (!ucSearch || c.userTag.toLowerCase().includes(ucSearch.toLowerCase()) || c.userId.includes(ucSearch))
+                    )
+                    .map((c) => {
+                      const isRoleReq = c.type === "rolerequest";
+                      const isSupport = c.type === "support";
+                      const d = c.data;
+                      return (
+                        <div key={c.id} className="rounded-md border border-border bg-muted/20 px-3 py-2 space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className={`text-[10px] font-mono uppercase px-1.5 py-0 ${isRoleReq ? "bg-indigo-500/10 text-indigo-500 border-indigo-300" : isSupport ? "bg-violet-500/10 text-violet-600 border-violet-300" : "bg-amber-500/10 text-amber-600 border-amber-300"}`}>
+                              {isRoleReq ? "📋 rôle" : isSupport ? "🎫 support" : "💡 suggestion"}
+                            </Badge>
+                            <span className="text-xs font-medium">{c.userTag}</span>
+                            <span className="font-mono text-[10px] text-muted-foreground">{c.userId}</span>
+                            {c.guildName && <Badge variant="secondary" className="text-[10px]">{c.guildName}</Badge>}
+                            <span className="text-xs text-muted-foreground ml-auto">{new Date(c.createdAt).toLocaleString("fr-FR")}</span>
+                          </div>
+                          {isRoleReq ? (
+                            <div className="text-xs space-y-0.5">
+                              <p><span className="text-muted-foreground">Rôle demandé :</span> <span className="font-medium">{String(d.roleName ?? "")}</span></p>
+                              <p><span className="text-muted-foreground">Raison :</span> {String(d.reason ?? "")}</p>
+                              <p className="text-muted-foreground">Via : {String(d.via ?? "")}</p>
+                            </div>
+                          ) : isSupport ? (
+                            <div className="text-xs space-y-0.5">
+                              <p className="break-words"><span className="text-muted-foreground">Réponse :</span> {String(d.reponse ?? "")}</p>
+                            </div>
+                          ) : (
+                            <div className="text-xs space-y-0.5">
+                              <p><span className="text-muted-foreground">Catégorie :</span> {String(d.categorie ?? "")}</p>
+                              <p className="break-words">{String(d.texte ?? "")}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── RÔLES NOTIFICATIONS ─────────────────────────────────────────── */}
+        <TabsContent value="notif-roles" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Bell className="h-4 w-4 text-indigo-500" />
+                Rôles de notifications
+              </CardTitle>
+              <CardDescription>
+                Configurez les rôles que les membres peuvent s'attribuer eux-mêmes. Le bot enverra un message avec des boutons dans le salon choisi.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-5">
+
+              {/* Salon du panel */}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Salon où envoyer le panel</label>
+                <div className="flex gap-2">
+                  <Input
+                    value={notifPanelChannelId}
+                    onChange={e => setNotifPanelChannelId(e.target.value)}
+                    placeholder="ID du salon (ex : 123456789012345678)"
+                    className="font-mono text-sm"
+                  />
+                  <Button size="sm" disabled={notifSaving} onClick={async () => {
+                    setNotifSaving(true);
+                    await apiFetch(`/api/owner/guilds/${guildId}/notif-roles`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ notifPanelChannelId }),
+                    });
+                    setNotifSaving(false);
+                    toast({ title: "Salon sauvegardé." });
+                  }}>
+                    {notifSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Ajouter un rôle */}
+              <div className="rounded-lg border p-4 space-y-3 bg-muted/20">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ajouter un rôle</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <Input value={notifNewRoleId} onChange={e => setNotifNewRoleId(e.target.value)} placeholder="ID du rôle" className="font-mono text-sm" />
+                  <Input value={notifNewLabel} onChange={e => setNotifNewLabel(e.target.value)} placeholder="Label du bouton (ex : Annonces)" className="text-sm" />
+                  <Input value={notifNewEmoji} onChange={e => setNotifNewEmoji(e.target.value)} placeholder="Émoji (ex : 📢, optionnel)" className="text-sm" />
+                </div>
+                <Button size="sm" className="gap-1.5" disabled={!notifNewRoleId.trim() || !notifNewLabel.trim() || notifSaving}
+                  onClick={async () => {
+                    const updated = [...notifRoles, { roleId: notifNewRoleId.trim(), label: notifNewLabel.trim(), emoji: notifNewEmoji.trim() }];
+                    setNotifSaving(true);
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/notif-roles`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ notifRoles: updated }),
+                    });
+                    if (r.ok) {
+                      setNotifRoles(updated);
+                      setNotifNewRoleId(""); setNotifNewLabel(""); setNotifNewEmoji("");
+                      toast({ title: "Rôle ajouté." });
+                    }
+                    setNotifSaving(false);
+                  }}>
+                  <Plus className="h-3.5 w-3.5" /> Ajouter
+                </Button>
+              </div>
+
+              {/* Liste des rôles configurés */}
+              {notifRoles.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Rôles configurés ({notifRoles.length}/25)</p>
+                  <div className="space-y-1.5">
+                    {notifRoles.map((nr, i) => (
+                      <div key={nr.roleId} className="flex items-center gap-2 rounded-md border px-3 py-2 bg-muted/10">
+                        {nr.emoji && <span className="text-base">{nr.emoji}</span>}
+                        <span className="font-medium text-sm flex-1">{nr.label}</span>
+                        <span className="text-xs font-mono text-muted-foreground">{nr.roleId}</span>
+                        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive" onClick={async () => {
+                          const updated = notifRoles.filter((_, j) => j !== i);
+                          setNotifSaving(true);
+                          await apiFetch(`/api/owner/guilds/${guildId}/notif-roles`, {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ notifRoles: updated }),
+                          });
+                          setNotifRoles(updated);
+                          setNotifSaving(false);
+                          toast({ title: "Rôle retiré." });
+                        }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Aperçu du message */}
+              {notifRoles.length > 0 && (
+                <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/5 p-4 space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-400">Aperçu du message bot</p>
+                  <p className="text-sm font-semibold">🔔 Rôles de notifications</p>
+                  <p className="text-xs text-muted-foreground">Clique sur un bouton pour recevoir ou retirer un rôle de notification.</p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {notifRoles.map(nr => (
+                      <span key={nr.roleId} className="inline-flex items-center gap-1 rounded px-2.5 py-1 text-xs bg-muted border border-border font-medium">
+                        {nr.emoji && <span>{nr.emoji}</span>} {nr.label}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Envoyer le panel */}
+              <div className="pt-1">
+                <Button
+                  className="gap-2 w-full sm:w-auto"
+                  disabled={notifSending || notifRoles.length === 0 || !notifPanelChannelId.trim()}
+                  onClick={async () => {
+                    setNotifSending(true);
+                    const r = await apiFetch(`/api/owner/guilds/${guildId}/notif-panel`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ channelId: notifPanelChannelId }),
+                    });
+                    if (r.ok) {
+                      toast({ title: "✅ Panel envoyé !", description: `Envoyé dans <#${notifPanelChannelId}>` });
+                    } else {
+                      const err = await r.json().catch(() => ({})) as { error?: string };
+                      toast({ title: "❌ Erreur", description: err.error ?? "Impossible d'envoyer le panel.", variant: "destructive" });
+                    }
+                    setNotifSending(false);
+                  }}
+                >
+                  {notifSending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bell className="h-4 w-4" />}
+                  Envoyer le panel dans le salon
+                </Button>
+                {(!notifPanelChannelId.trim() || notifRoles.length === 0) && (
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    {notifRoles.length === 0 ? "Ajoutez au moins un rôle." : "Renseignez l'ID du salon."}
+                  </p>
+                )}
+              </div>
+
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── COMPTES SUSPECTS ────────────────────────────────────────────── */}
+        <TabsContent value="suspectaccounts" className="space-y-4">
+
+          {/* Mots-clés auto-suspects */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-amber-500" />
+                Mots-clés auto-suspects
+              </CardTitle>
+              <CardDescription>
+                Tout nouveau membre dont le nom d'utilisateur ou le pseudo contient l'un de ces mots-clés sera automatiquement signalé comme suspect.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Ajouter un mot-clé…"
+                  value={skNewWord}
+                  onChange={(e) => setSkNewWord(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSkWord(); } }}
+                  className="h-8 text-xs font-mono"
+                />
+                <Button size="sm" className="h-8 text-xs gap-1 shrink-0" onClick={addSkWord} disabled={skLoading || !skNewWord.trim()}>
+                  {skLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "＋"} Ajouter
+                </Button>
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1 shrink-0" onClick={fetchSuspectKeywords} disabled={skLoading}>
+                  {skLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"}
+                </Button>
+                <Button
+                  size="sm" variant="secondary"
+                  className="h-8 text-xs gap-1 shrink-0 border border-amber-300 text-amber-700 dark:text-amber-400 hover:bg-amber-500/10"
+                  disabled={skScanLoading || suspectKeywords.length === 0}
+                  onClick={async () => {
+                    if (!guildId) return;
+                    setSkScanLoading(true); setSkScanResult(null);
+                    try {
+                      const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords/scan`, { method: "POST" });
+                      const d = await r.json();
+                      if (r.ok) { setSkScanResult(d); fetchSuspectAccounts(); toast({ title: `Scan terminé — ${d.matched} suspect(s) trouvé(s) sur ${d.scanned} membres` }); }
+                      else toast({ title: "Erreur scan", description: d.error, variant: "destructive" });
+                    } finally { setSkScanLoading(false); }
+                  }}
+                >
+                  {skScanLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "🔍"} Scan membres actuels
+                </Button>
+              </div>
+              {skScanResult && (
+                <div className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-950/20 px-3 py-2 text-xs">
+                  <ShieldAlert className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                  <span>Scan terminé : <strong>{skScanResult.matched}</strong> suspect(s) trouvé(s) parmi <strong>{skScanResult.scanned}</strong> membres.</span>
+                  <button className="ml-auto text-muted-foreground hover:text-foreground" onClick={() => setSkScanResult(null)}>✕</button>
+                </div>
+              )}
+              {suspectKeywords.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-3">Aucun mot-clé configuré. Les arrivées ne seront pas filtrées par nom.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {suspectKeywords.map((kw) => (
+                    <Badge key={kw} variant="outline" className="text-xs font-mono gap-1.5 pr-1 bg-amber-500/10 text-amber-700 border-amber-300 dark:text-amber-400">
+                      {kw}
+                      <button
+                        className="ml-0.5 text-amber-500 hover:text-red-500 transition-colors"
+                        onClick={async () => {
+                          const r = await apiFetch(`/api/owner/guilds/${guildId}/suspect-keywords/${encodeURIComponent(kw)}`, { method: "DELETE" });
+                          if (r.ok) { const d = await r.json(); setSuspectKeywords(d.keywords ?? []); }
+                        }}
+                      >✕</button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Stats résumées */}
+          {suspectAccounts.length > 0 && (() => {
+            const guilds = [...new Set(suspectAccounts.map(s => s.guildId))];
+            const vpnCount = suspectAccounts.filter(s => s.vpnSuspicion).length;
+            const verifiedCount = suspectAccounts.filter(s => s.verified).length;
+            const actionCounts = suspectAccounts.reduce((acc, s) => { acc[s.actionTaken] = (acc[s.actionTaken] ?? 0) + 1; return acc; }, {} as Record<string, number>);
+            return (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { label: "Total suspects", value: suspectAccounts.length, color: "text-orange-600" },
+                  { label: "VPN suspicion", value: vpnCount, color: "text-red-600" },
+                  { label: "Vérifiés ✓", value: verifiedCount, color: "text-green-600" },
+                  { label: "Serveurs concernés", value: guilds.length, color: "text-blue-600" },
+                ].map(({ label, value, color }) => (
+                  <div key={label} className="rounded-md border bg-card px-3 py-2 text-center">
+                    <p className={`text-lg font-bold font-mono ${color}`}>{value}</p>
+                    <p className="text-[10px] text-muted-foreground">{label}</p>
+                  </div>
+                ))}
+                {Object.entries(actionCounts).map(([action, count]) => (
+                  <div key={action} className="rounded-md border bg-card px-3 py-2 text-center">
+                    <p className="text-lg font-bold font-mono text-muted-foreground">{count}</p>
+                    <p className="text-[10px] text-muted-foreground">Action: {action}</p>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-orange-500" />
+                Comptes Suspects
+              </CardTitle>
+              <CardDescription>
+                Historique des comptes signalés comme suspects à l'arrivée. Localisation, suspicion VPN, et actions disponibles.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Barre d'outils */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={fetchSuspectAccounts} disabled={saLoading}>
+                  {saLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Rafraîchir
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => exportSuspectsCsv(suspectAccounts)} disabled={suspectAccounts.length === 0}>
+                  ⬇️ CSV
+                </Button>
+                <span className="text-xs text-muted-foreground">{suspectAccounts.length} entrée(s)</span>
+              </div>
+
+              {/* Filtres */}
+              <div className="flex gap-2 flex-wrap items-center border rounded-md p-2 bg-muted/20">
+                <span className="text-xs font-medium text-muted-foreground">Filtres :</span>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterGuild} onChange={e => setSaFilterGuild(e.target.value)}>
+                  <option value="all">Tous les serveurs</option>
+                  {[...new Set(suspectAccounts.map(s => s.guildId))].map(gid => {
+                    const name = suspectAccounts.find(s => s.guildId === gid)?.guildName ?? gid;
+                    return <option key={gid} value={gid}>{name}</option>;
+                  })}
+                </select>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterAction} onChange={e => setSaFilterAction(e.target.value)}>
+                  <option value="all">Toutes actions</option>
+                  {[...new Set(suspectAccounts.map(s => s.actionTaken))].map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+                <select className="text-xs rounded border bg-background px-2 py-1 h-7"
+                  value={saFilterVerified} onChange={e => setSaFilterVerified(e.target.value as "all"|"verified"|"unverified")}>
+                  <option value="all">Tous statuts</option>
+                  <option value="unverified">Non vérifiés</option>
+                  <option value="verified">Vérifiés ✓</option>
+                </select>
+                <label className="flex items-center gap-1 text-xs cursor-pointer">
+                  <input type="checkbox" checked={saFilterVpn} onChange={e => setSaFilterVpn(e.target.checked)} className="rounded" />
+                  VPN uniquement
+                </label>
+                <input
+                  type="text"
+                  placeholder="Filtrer par tag…"
+                  className="text-xs rounded border bg-background px-2 py-1 h-7 w-36"
+                  value={saFilterTag}
+                  onChange={e => setSaFilterTag(e.target.value)}
+                />
+              </div>
+
+              {/* Durée timeout global */}
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground font-medium">Durée timeout :</span>
+                {[
+                  { label: "1h", ms: 3_600_000 }, { label: "6h", ms: 21_600_000 },
+                  { label: "24h", ms: 86_400_000 }, { label: "7j", ms: 604_800_000 },
+                ].map(({ label, ms }) => (
+                  <button key={ms} onClick={() => setSaTimeoutDuration(ms)}
+                    className={`px-2 py-0.5 rounded border text-[10px] font-mono transition-colors ${saTimeoutDuration === ms ? "bg-amber-500 text-white border-amber-500" : "border-border hover:bg-muted"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="rounded-md border border-orange-200 bg-orange-500/5 px-3 py-2 text-xs text-orange-700 dark:text-orange-400">
+                ⚠️ Les actions agissent <strong>immédiatement</strong> sur le membre dans son serveur. Assure-toi que le bot y est présent.
+              </div>
+
+              {saLoading ? (
+                <div className="space-y-2">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
+              ) : (() => {
+                const filtered = suspectAccounts.filter(sa =>
+                  (saFilterGuild === "all" || sa.guildId === saFilterGuild) &&
+                  (saFilterAction === "all" || sa.actionTaken === saFilterAction) &&
+                  (saFilterVerified === "all" || (saFilterVerified === "verified" ? sa.verified : !sa.verified)) &&
+                  (!saFilterVpn || sa.vpnSuspicion) &&
+                  (!saFilterTag.trim() || sa.tags.some(t => t.toLowerCase().includes(saFilterTag.trim().toLowerCase())))
+                );
+                if (filtered.length === 0) return (
+                  <p className="text-sm text-center text-muted-foreground py-8">
+                    {suspectAccounts.length === 0 ? "Aucun compte suspect enregistré. Les comptes sont détectés à l'arrivée (niveau sécurité ≥ 2 ou détection activée)." : "Aucun résultat avec ces filtres."}
+                  </p>
+                );
+
+                // Grouper par serveur pour l'action en masse
+                const byGuild = filtered.reduce((acc, sa) => {
+                  if (!acc[sa.guildId]) acc[sa.guildId] = { name: sa.guildName, accounts: [] };
+                  acc[sa.guildId]!.accounts.push(sa);
+                  return acc;
+                }, {} as Record<string, { name: string; accounts: SuspectAcc[] }>);
+
+                return (
+                  <div className="space-y-4">
+                    {Object.entries(byGuild).map(([gid, { name, accounts }]) => (
+                      <div key={gid} className="space-y-2">
+                        {/* En-tête serveur + action en masse */}
+                        {saFilterGuild === "all" && (
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="secondary" className="text-xs font-medium">{name || gid}</Badge>
+                            <span className="text-xs text-muted-foreground">{accounts.length} suspect(s)</span>
+                            <div className="ml-auto flex gap-1">
+                              <Button size="sm" variant="outline" className="h-5 text-[9px] gap-0.5 border-amber-300 text-amber-700"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "timeout")}>
+                                {saBulkLoading ? <Loader2 className="h-2 w-2 animate-spin" /> : <Clock className="h-2 w-2" />} Timeout tous
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-5 text-[9px] gap-0.5 border-orange-300 text-orange-700"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "kick")}>
+                                <UserX className="h-2 w-2" /> Kick tous
+                              </Button>
+                              <Button size="sm" variant="destructive" className="h-5 text-[9px] gap-0.5"
+                                disabled={saBulkLoading}
+                                onClick={() => doBulkSuspectAction(gid, accounts.filter(s => !s.verified).map(s => s.userId), "ban")}>
+                                <Ban className="h-2 w-2" /> Ban tous
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="space-y-2 max-h-[600px] overflow-y-auto pr-1">
+                          {accounts.map((sa) => (
+                            <div key={sa.id} className={`rounded-md border px-3 py-2 space-y-2 transition-opacity ${sa.verified ? "border-green-200 bg-green-500/5 opacity-60" : "border-border bg-muted/20"}`}>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {sa.verified
+                                  ? <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-green-500/10 text-green-700 border-green-300">✅ vérifié</Badge>
+                                  : <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-orange-500/10 text-orange-600 border-orange-300">🕵️ suspect</Badge>
+                                }
+                                {sa.vpnSuspicion && <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-red-500/10 text-red-600 border-red-300">🌐 VPN</Badge>}
+                                {sa.userLocale && <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-600 border-blue-300">🌍 {sa.userLocale}</Badge>}
+                                <a href={`https://discord.com/users/${sa.userId}`} target="_blank" rel="noreferrer"
+                                  className="text-xs font-medium hover:underline text-primary">{sa.userTag}</a>
+                                <span className="font-mono text-[10px] text-muted-foreground">{sa.userId}</span>
+                                {saFilterGuild === "all" && <Badge variant="secondary" className="text-[10px]">{sa.guildName || sa.guildId}</Badge>}
+                                <Badge variant="outline" className="text-[10px]">N{sa.securityLevel}</Badge>
+                                <span className="text-[10px] text-muted-foreground ml-auto">{new Date(sa.detectedAt).toLocaleString("fr-FR")}</span>
+                              </div>
+                              <div className="text-xs space-y-0.5">
+                                <div className="flex gap-3 flex-wrap">
+                                  <span><span className="text-muted-foreground">Âge :</span> <span className="font-medium">{sa.accountAgeDays < 1 ? "< 1 jour" : `${sa.accountAgeDays}j`}</span></span>
+                                  {sa.hasNoAvatar && <span className="text-amber-600">• Sans avatar</span>}
+                                  {sa.vpnSuspicion && <span className="text-red-600">• Suspicion VPN/proxy</span>}
+                                </div>
+                                {sa.reasons.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mt-1">
+                                    {sa.reasons.map((r, i) => <Badge key={i} variant="secondary" className="text-[9px] font-normal">{r}</Badge>)}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex gap-1 flex-wrap">
+                                {!sa.verified && <>
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-amber-300 text-amber-700 hover:bg-amber-50"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => doSuspectAction(sa, "timeout")}>
+                                    {saActionLoading === sa.id ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Clock className="h-2.5 w-2.5" />}
+                                    Timeout
+                                  </Button>
+                                  <Button size="sm" variant="outline" className="h-6 text-[10px] gap-1 border-orange-300 text-orange-700 hover:bg-orange-50"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => doSuspectAction(sa, "kick")}>
+                                    <UserX className="h-2.5 w-2.5" /> Kick
+                                  </Button>
+                                  <Button size="sm" variant="destructive" className="h-6 text-[10px] gap-1"
+                                    disabled={saActionLoading === sa.id}
+                                    onClick={() => { if (confirm(`Bannir ${sa.userTag} ?`)) doSuspectAction(sa, "ban"); }}>
+                                    <Ban className="h-2.5 w-2.5" /> Ban
+                                  </Button>
+                                </>}
+                                <Button size="sm" variant="outline" className={`h-6 text-[10px] gap-1 ${sa.verified ? "border-green-300 text-green-700" : "border-green-200 text-green-600"}`}
+                                  disabled={saActionLoading === sa.id}
+                                  onClick={() => toggleSuspectVerified(sa)}>
+                                  {sa.verified ? "↩ Réouvrir" : "✅ Vérifié"}
+                                </Button>
+                                <Button size="sm" variant="ghost" className="h-6 text-[10px] gap-1 text-muted-foreground hover:text-destructive"
+                                  disabled={saActionLoading === sa.id}
+                                  onClick={() => { if (confirm(`Supprimer cet enregistrement ?`)) deleteSuspect(sa); }}>
+                                  🗑️
+                                </Button>
+                                <a href={`https://discord.com/users/${sa.userId}`} target="_blank" rel="noreferrer"
+                                  className="flex items-center h-6 px-2 text-[10px] rounded border border-border text-muted-foreground hover:bg-muted gap-1">
+                                  🔗 Profil
+                                </a>
+                              </div>
+
+                              {/* ── Tags ── */}
+                              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                <Tag className="h-3 w-3 text-muted-foreground shrink-0" />
+                                {sa.tags.map(tag => (
+                                  <span key={tag} className="inline-flex items-center gap-0.5 bg-blue-500/10 text-blue-700 dark:text-blue-400 border border-blue-300/60 rounded px-1.5 py-0 text-[9px] font-medium">
+                                    {tag}
+                                    <button className="ml-0.5 hover:text-red-500" onClick={() => removeTagFromSuspect(sa, tag)}>×</button>
+                                  </span>
+                                ))}
+                                <div className="flex items-center gap-0.5">
+                                  <input
+                                    type="text"
+                                    placeholder="Ajouter tag…"
+                                    className="h-5 text-[10px] rounded border bg-background px-1.5 w-24"
+                                    value={saTagInputs[sa.id] ?? ""}
+                                    onChange={e => setSaTagInputs(prev => ({ ...prev, [sa.id]: e.target.value }))}
+                                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addTagToSuspect(sa); } }}
+                                  />
+                                  <button
+                                    className="h-5 px-1.5 text-[10px] rounded border border-blue-300 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                                    onClick={() => addTagToSuspect(sa)}>
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Rôles Mod ─────────────────────────────────────────────────────── */}
+        <TabsContent value="mod-roles" className="space-y-4">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base font-mono uppercase flex items-center gap-2">
+                <Shield className="h-4 w-4 text-violet-500" />
+                Rôles avec permissions de modération
+              </CardTitle>
+              <CardDescription>
+                Liste des rôles qui disposent d'au moins une permission de modération. Cliquez sur un rôle pour voir et modifier ses permissions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex justify-end">
+                <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={fetchModRoles} disabled={modRolesLoading}>
+                  {modRolesLoading ? <Loader2 className="h-3 w-3 animate-spin" /> : "↺"} Actualiser
+                </Button>
+              </div>
+              {modRolesLoading ? (
+                <div className="flex justify-center py-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+              ) : modRoles.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4">Aucun rôle avec permissions de modération trouvé, ou bot hors ligne.</p>
+              ) : (
+                <div className="space-y-2">
+                  {modRoles.map((role) => (
+                    <div key={role.id} className="rounded-md border bg-card">
+                      <button
+                        className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-muted/40 transition-colors rounded-md"
+                        onClick={() => {
+                          if (modRoleEditing !== role.id) {
+                            const snap = modRoles.find(r => r.id === role.id);
+                            if (snap) modRolesSnapshotRef.current.set(role.id, snap.permissions.map(p => ({ ...p })));
+                          }
+                          setModRoleEditing(modRoleEditing === role.id ? null : role.id);
+                        }}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="h-3 w-3 rounded-full shrink-0 border border-white/20" style={{ background: role.color === "#000000" ? "#6b7280" : role.color }} />
+                          <span className="text-sm font-medium truncate">{role.name}</span>
+                          <span className="text-[10px] text-muted-foreground font-mono">{role.memberCount} membre{role.memberCount !== 1 ? "s" : ""}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {role.permissions.filter((p) => p.has).map((p) => (
+                            <Badge key={p.key} variant="outline" className={`text-[10px] px-1 py-0 font-mono ${p.key === "Administrator" ? "border-red-300 text-red-600 dark:text-red-400 bg-red-500/10" : "border-violet-300 text-violet-600 dark:text-violet-400 bg-violet-500/10"}`}>
+                              {p.label}
+                            </Badge>
+                          ))}
+                          <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${modRoleEditing === role.id ? "rotate-180" : ""}`} />
+                        </div>
+                      </button>
+                      {modRoleEditing === role.id && (
+                        <div className="border-t px-4 py-3 space-y-3">
+                          <p className="text-xs text-muted-foreground">Cochez/décochez les permissions souhaitées, puis enregistrez.</p>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {role.permissions.map((perm) => (
+                              <label key={perm.key} className="flex items-center gap-2 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  className="h-3.5 w-3.5 rounded accent-violet-600"
+                                  checked={perm.has}
+                                  onChange={(e) => {
+                                    setModRoles((prev) => prev.map((r) => r.id !== role.id ? r : {
+                                      ...r,
+                                      permissions: r.permissions.map((p) => p.key === perm.key ? { ...p, has: e.target.checked } : p),
+                                    }));
+                                  }}
+                                />
+                                <span className={`text-xs ${perm.key === "Administrator" ? "text-red-600 dark:text-red-400 font-semibold" : ""}`}>{perm.label}</span>
+                              </label>
+                            ))}
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <Button
+                              size="sm"
+                              className="h-8 text-xs gap-1"
+                              disabled={modRoleSaving}
+                              onClick={async () => {
+                                setModRoleSaving(true);
+                                try {
+                                  const originalPerms = modRolesSnapshotRef.current.get(role.id) ?? [];
+                                  const origMap = new Map(originalPerms.map((p) => [p.key, p.has]));
+                                  const currentMap = new Map(role.permissions.map((p) => [p.key, p.has]));
+                                  const grant: string[] = [];
+                                  const revoke: string[] = [];
+                                  for (const [key, has] of currentMap) {
+                                    if (has && !origMap.get(key)) grant.push(key);
+                                    else if (!has && origMap.get(key)) revoke.push(key);
+                                  }
+                                  if (grant.length === 0 && revoke.length === 0) { toast({ title: "Aucune modification détectée" }); return; }
+                                  const r = await apiFetch(`/api/owner/guilds/${guildId}/roles/${role.id}/permissions`, {
+                                    method: "PATCH",
+                                    body: JSON.stringify({ grant, revoke }),
+                                  });
+                                  const d = await r.json();
+                                  if (r.ok) {
+                                    toast({ title: `Permissions de « ${role.name} » mises à jour ✓` });
+                                    fetchModRoles();
+                                    setModRoleEditing(null);
+                                  } else {
+                                    toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                                  }
+                                } finally { setModRoleSaving(false); }
+                              }}
+                            >
+                              {modRoleSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "💾"} Enregistrer
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => { fetchModRoles(); setModRoleEditing(null); }}>
+                              Annuler
+                            </Button>
+                            <Button
+                              size="sm" variant="destructive" className="h-8 text-xs gap-1 ml-auto"
+                              disabled={modRoleSaving}
+                              onClick={async () => {
+                                if (!confirm(`Retirer TOUTES les permissions de modération du rôle « ${role.name} » ?`)) return;
+                                setModRoleSaving(true);
+                                try {
+                                  const r = await apiFetch(`/api/owner/guilds/${guildId}/roles/${role.id}/strip-permissions`, { method: "POST" });
+                                  const d = await r.json();
+                                  if (r.ok) { toast({ title: `Toutes les permissions retirées de « ${role.name} » ✓` }); fetchModRoles(); setModRoleEditing(null); }
+                                  else toast({ title: "Erreur", description: d.error, variant: "destructive" });
+                                } finally { setModRoleSaving(false); }
+                              }}
+                            >
+                              {modRoleSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : "🗑️"} Tout retirer
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Sondage ───────────────────────────────────────────────────────── */}
+        <TabsContent value="sondage" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📊 Créer un Sondage</CardTitle>
+              <CardDescription>Publie un sondage avec réactions dans un salon textuel.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">ID du salon</label>
+                <Input value={pollChannelId} onChange={e => setPollChannelId(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Question</label>
+                <Input value={pollQuestion} onChange={e => setPollQuestion(e.target.value)} placeholder="Votre question…" className="text-sm" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Options (2 à 4)</label>
+                {pollOptions.map((opt, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span className="text-lg w-6 text-center shrink-0">{["🇦","🇧","🇨","🇩"][i]}</span>
+                    <Input value={opt} onChange={e => { const o=[...pollOptions]; o[i]=e.target.value; setPollOptions(o); }} placeholder={`Option ${i+1}${i < 2 ? " (requis)" : " (optionnel)"}`} className="text-sm" />
+                  </div>
+                ))}
+              </div>
+              <Button onClick={sendPoll} disabled={pollSending || !pollChannelId || !pollQuestion || pollOptions.filter(Boolean).length < 2} className="w-full gap-2 font-mono uppercase tracking-widest">
+                {pollSending ? <><Loader2 className="h-4 w-4 animate-spin" />Envoi…</> : <><Send className="h-4 w-4" />Envoyer le sondage</>}
+              </Button>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Assistant ─────────────────────────────────────────────────────── */}
+        <TabsContent value="assistant" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🤖 Assistant Bot</CardTitle>
+                <CardDescription>Configure les réponses automatiques, le compte Spotify lié et les réponses aux mentions.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchAssistantCfg} disabled={assistantLoading} className="gap-1.5 shrink-0">
+                {assistantLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Toggle assistant */}
+              <div className="flex items-center justify-between p-4 rounded-lg border bg-muted/30">
+                <div>
+                  <p className="text-sm font-semibold">Mode Assistant activé</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Le bot répond aux membres qui le mentionnent (@bot) avec des blagues, histoires ou salutations.</p>
+                </div>
+                <Button
+                  size="sm"
+                  variant={assistantCfg?.enabled ? "default" : "outline"}
+                  className="gap-1.5 shrink-0"
+                  disabled={assistantSaving || !assistantCfg}
+                  onClick={() => saveAssistantCfg({ enabled: !assistantCfg?.enabled })}
+                >
+                  {assistantSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Bot className="h-3.5 w-3.5" />}
+                  {assistantCfg?.enabled ? "Désactiver" : "Activer"}
+                </Button>
+              </div>
+
+              {!assistantCfg && !assistantLoading && (
+                <Button variant="outline" onClick={fetchAssistantCfg} className="w-full gap-2">
+                  <RefreshCw className="h-4 w-4" />Charger la configuration
+                </Button>
+              )}
+
+              {assistantCfg && (
+                <>
+                  {/* Statut */}
+                  <div className="flex items-center gap-2">
+                    <Badge variant={assistantCfg.enabled ? "default" : "secondary"} className="font-mono">
+                      {assistantCfg.enabled ? "✅ Assistant activé" : "❌ Assistant désactivé"}
+                    </Badge>
+                  </div>
+
+                  {/* Commandes blague */}
+                  <div className="space-y-2 p-4 rounded-lg border bg-muted/20">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Commande blague</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { cmd: "/blague", desc: "Blague aléatoire" },
+                        { cmd: "&blague", desc: "Préfixe : blague" },
+                      ].map(item => (
+                        <div key={item.cmd} className="flex items-center gap-2 p-2 rounded bg-card border">
+                          <code className="text-xs font-mono text-violet-400">{item.cmd}</code>
+                          <span className="text-xs text-muted-foreground">{item.desc}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      💡 Quand l'assistant est actif, mentionner le bot (<code className="font-mono">@NovaGuard blague</code>) déclenche une réponse automatique.
+                    </p>
+                  </div>
+
+                  {/* Histoires — panneau owner uniquement */}
+                  <div className="space-y-3 p-4 rounded-lg border">
+                    <div>
+                      <p className="text-sm font-semibold">📖 Histoires drôles</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">Envoyez une histoire dans un salon de votre choix. Les histoires ne sont pas des commandes publiques.</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        value={histoireChannelId}
+                        onChange={e => setHistoireChannelId(e.target.value)}
+                        placeholder="ID du salon Discord"
+                        className="font-mono text-sm flex-1"
+                      />
+                    </div>
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {HISTOIRES_DASHBOARD.map((h, i) => (
+                        <div key={i} className="flex items-start justify-between gap-3 p-3 rounded-md border bg-muted/20">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-violet-400">{h.titre}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{h.texte}</p>
+                          </div>
+                          <Button
+                            size="sm" variant="outline" className="shrink-0 gap-1 h-7 text-xs"
+                            disabled={histoirePosting === i || !histoireChannelId.trim() || !guildId}
+                            onClick={async () => {
+                              if (!guildId || !histoireChannelId.trim()) return;
+                              setHistoirePosting(i);
+                              try {
+                                const r = await apiFetch(`/api/owner/guilds/${guildId}/assistant/post-histoire`, {
+                                  method: "POST",
+                                  body: JSON.stringify({ channelId: histoireChannelId.trim(), titre: h.titre, texte: h.texte }),
+                                });
+                                if (r.ok) toast({ title: `✅ « ${h.titre} » envoyée dans le salon` });
+                                else { const d = await r.json() as { error?: string }; toast({ title: "Erreur", description: d.error, variant: "destructive" }); }
+                              } finally { setHistoirePosting(null); }
+                            }}
+                          >
+                            {histoirePosting === i ? <Loader2 className="h-3 w-3 animate-spin" /> : <Send className="h-3 w-3" />}
+                            Envoyer
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Auto-Rôle ─────────────────────────────────────────────────────── */}
+        <TabsContent value="auto-role" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🎖️ Auto-Rôle à l'arrivée</CardTitle>
+              <CardDescription>Attribue automatiquement un rôle à chaque nouveau membre qui rejoint le serveur.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {autoRoleLoading ? <Skeleton className="h-20 w-full" /> : (
+                <>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">ID du rôle (vide = désactivé)</label>
+                    <Input value={autoRoleDraft} onChange={e => setAutoRoleDraft(e.target.value)} placeholder="123456789012345678" className="font-mono text-sm" />
+                  </div>
+                  {autoRoleCfg?.autoRoleId && (
+                    <div className="flex items-center gap-2 p-3 rounded-md bg-green-500/10 border border-green-500/30">
+                      <ShieldCheck className="h-4 w-4 text-green-500 shrink-0" />
+                      <span className="text-sm">Auto-rôle actif : <code className="font-mono text-green-600 dark:text-green-400">{autoRoleCfg.autoRoleId}</code></span>
+                    </div>
+                  )}
+                  <div className="flex gap-2">
+                    <Button onClick={saveAutoRole} disabled={autoRoleSaving} className="gap-2 font-mono uppercase tracking-widest">
+                      {autoRoleSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                      Sauvegarder
+                    </Button>
+                    {autoRoleCfg?.autoRoleId && (
+                      <Button variant="outline" onClick={() => { setAutoRoleDraft(""); }} className="gap-2 text-destructive hover:text-destructive">
+                        <X className="h-4 w-4" /> Supprimer
+                      </Button>
+                    )}
+                  </div>
+                </>
+              )}
+              {!autoRoleCfg && !autoRoleLoading && (
+                <Button variant="outline" onClick={fetchAutoRole} className="gap-2"><RefreshCw className="h-4 w-4" />Charger</Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Anti-Spam ─────────────────────────────────────────────────────── */}
+        <TabsContent value="anti-spam" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">⚡ Anti-Spam</CardTitle>
+              <CardDescription>Détecte et sanctionne automatiquement les membres qui spamment.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {antiSpamLoading ? <Skeleton className="h-48 w-full" /> : antiSpamCfg ? (
+                <>
+                  <div className="flex items-center justify-between p-3 rounded-md border">
+                    <div>
+                      <p className="font-medium text-sm">Anti-Spam activé</p>
+                      <p className="text-xs text-muted-foreground">Active la détection de spam en temps réel.</p>
+                    </div>
+                    <button
+                      onClick={() => setAntiSpamCfg({ ...antiSpamCfg, antiSpamEnabled: !antiSpamCfg.antiSpamEnabled })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${antiSpamCfg.antiSpamEnabled ? "bg-green-500" : "bg-muted"}`}>
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${antiSpamCfg.antiSpamEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Messages max</label>
+                      <Input type="number" min={2} max={50} value={antiSpamCfg.antiSpamMessages} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamMessages: parseInt(e.target.value)||5 })} className="font-mono text-sm" />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Fenêtre (secondes)</label>
+                      <Input type="number" min={1} max={300} value={antiSpamCfg.antiSpamWindowSecs} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamWindowSecs: parseInt(e.target.value)||5 })} className="font-mono text-sm" />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Action</label>
+                    <div className="flex gap-2">
+                      {(["timeout","kick","ban"] as const).map(a => (
+                        <button key={a} onClick={() => setAntiSpamCfg({ ...antiSpamCfg, antiSpamAction: a })}
+                          className={`flex-1 py-2 rounded-md text-sm font-medium border transition-colors ${antiSpamCfg.antiSpamAction === a ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted"}`}>
+                          {a === "timeout" ? "⏱ Timeout" : a === "kick" ? "👟 Kick" : "🔨 Ban"}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  {antiSpamCfg.antiSpamAction === "timeout" && (
+                    <div className="space-y-1">
+                      <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Durée timeout (minutes)</label>
+                      <Input type="number" min={1} max={10080} value={antiSpamCfg.antiSpamTimeoutMins} onChange={e => setAntiSpamCfg({ ...antiSpamCfg, antiSpamTimeoutMins: parseInt(e.target.value)||10 })} className="font-mono text-sm" />
+                    </div>
+                  )}
+                  <Button onClick={saveAntiSpam} disabled={antiSpamSaving} className="w-full gap-2 font-mono uppercase tracking-widest">
+                    {antiSpamSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Settings className="h-4 w-4" />}
+                    Sauvegarder
+                  </Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={fetchAntiSpam} className="gap-2"><RefreshCw className="h-4 w-4" />Charger la configuration</Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Immune List ──────────────────────────────────────────────────── */}
+        <TabsContent value="immune-list" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🛡️ Liste des Immunisés</CardTitle>
+                <CardDescription>Ces utilisateurs sont exemptés de toutes les sanctions automatiques et manuelles du bot.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchImmuneList} disabled={immuneLoading} className="gap-1.5 shrink-0">
+                {immuneLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {immuneLoading && !immuneList ? <Skeleton className="h-48 w-full" /> : immuneList ? (
+                <>
+                  {/* Permanents */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Permanents (codés en dur)</p>
+                    {immuneList.permanent.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2">Aucun.</p>
+                    ) : immuneList.permanent.map(e => (
+                      <div key={e.userId} className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm">{e.label}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{e.userId}</p>
+                        </div>
+                        <Badge variant="secondary" className="shrink-0">Permanent</Badge>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Dynamiques */}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Dynamiques (modifiables)</p>
+                    {immuneList.dynamic.length === 0 ? (
+                      <p className="text-sm text-muted-foreground py-2">Aucun utilisateur ajouté manuellement.</p>
+                    ) : immuneList.dynamic.map(e => (
+                      <div key={e.userId} className="flex items-center justify-between p-3 rounded-md border bg-card">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm">{e.label}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{e.userId}</p>
+                          <p className="text-xs text-muted-foreground">Ajouté le {new Date(e.addedAt).toLocaleDateString("fr-FR")}</p>
+                        </div>
+                        <Button variant="ghost" size="sm" onClick={() => removeFromImmuneList(e.userId)} className="text-destructive hover:text-destructive shrink-0">
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Ajout */}
+                  <div className="pt-2 border-t space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">Ajouter un utilisateur</p>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="User ID Discord"
+                        value={newImmuneUserId}
+                        onChange={e => setNewImmuneUserId(e.target.value)}
+                        className="font-mono text-sm"
+                      />
+                      <Input
+                        placeholder="Label (optionnel)"
+                        value={newImmuneLabel}
+                        onChange={e => setNewImmuneLabel(e.target.value)}
+                        className="text-sm flex-1"
+                      />
+                      <Button onClick={addToImmuneList} disabled={addingImmune || !newImmuneUserId.trim()} className="gap-1.5 shrink-0">
+                        {addingImmune ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                        Ajouter
+                      </Button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <Button variant="outline" onClick={fetchImmuneList} className="gap-2"><RefreshCw className="h-4 w-4" />Charger la liste</Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Whitelist Membres ─────────────────────────────────────────────── */}
+        <TabsContent value="whitelist-members" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🛡️ Whitelist Membres</CardTitle>
+                <CardDescription>Ces membres sont exemptés de l'automod du serveur : anti-alt, anti-spam, anti-caps, anti-insultes, anti-lien.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchMemberWl} disabled={memberWlLoading} className="gap-1.5 shrink-0">
+                {memberWlLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* Ajouter un membre */}
+              <div className="flex gap-2">
+                <Input
+                  value={newMemberWlId}
+                  onChange={e => setNewMemberWlId(e.target.value)}
+                  placeholder="ID Discord du membre (ex: 123456789012345678)"
+                  className="font-mono text-sm flex-1"
+                  onKeyDown={e => e.key === "Enter" && void addToMemberWl()}
+                />
+                <Button size="sm" onClick={addToMemberWl} disabled={addingMemberWl || !newMemberWlId.trim()} className="gap-1.5 shrink-0">
+                  {addingMemberWl ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+                  Ajouter
+                </Button>
+              </div>
+
+              {memberWlLoading && !memberWlList ? (
+                <Skeleton className="h-32 w-full" />
+              ) : memberWlList ? (
+                memberWlList.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4 text-center">Aucun membre whitelisté sur ce serveur.</p>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest">{memberWlList.length} membre{memberWlList.length !== 1 ? "s" : ""} whitelisté{memberWlList.length !== 1 ? "s" : ""}</p>
+                    {memberWlList.map(userId => (
+                      <div key={userId} className="flex items-center justify-between p-3 rounded-md border bg-muted/30">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm">{userId}</p>
+                          <p className="text-xs text-muted-foreground">Exempté de l'automod</p>
+                        </div>
+                        <Button size="sm" variant="ghost" className="text-red-500 hover:text-red-600 shrink-0" onClick={() => removeFromMemberWl(userId)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : (
+                <Button variant="outline" onClick={fetchMemberWl} className="w-full gap-2">
+                  <RefreshCw className="h-4 w-4" />Charger la whitelist
+                </Button>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Global Tempbans ───────────────────────────────────────────────── */}
+        <TabsContent value="global-tempbans" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">⏳ Tempbans Globaux</CardTitle>
+                <CardDescription>Tous les bans temporaires actifs, tous serveurs confondus.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchGlobalTempbans} disabled={globalTbLoading} className="gap-1.5 shrink-0">
+                {globalTbLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {globalTbLoading ? <Skeleton className="h-48 w-full" /> : globalTempbans.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Aucun tempban actif.</p>
+              ) : (
+                <div className="space-y-2">
+                  {globalTempbans.map(tb => (
+                    <div key={`${tb.guildId}-${tb.userId}`} className="flex items-center justify-between p-3 rounded-md border bg-card">
+                      <div className="min-w-0">
+                        <p className="font-mono text-sm truncate">{tb.userId}</p>
+                        <p className="text-xs text-muted-foreground">Serveur : <code className="font-mono">{tb.guildId}</code></p>
+                        <p className="text-xs text-muted-foreground">Expire : {tb.expiresAt ? new Date(tb.expiresAt).toLocaleString("fr-FR") : "—"}</p>
+                        {tb.reason && <p className="text-xs text-muted-foreground truncate">Raison : {tb.reason}</p>}
+                      </div>
+                      <Ban className="h-4 w-4 text-destructive shrink-0 ml-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Historique Global ─────────────────────────────────────────────── */}
+        <TabsContent value="global-history" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔍 Historique Global d'un Utilisateur</CardTitle>
+              <CardDescription>Consultez les avertissements, notes et tempbans d'un membre sur tous les serveurs.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={historyUserId} onChange={e => setHistoryUserId(e.target.value)} placeholder="ID Discord (ex: 123456789012345678)" className="font-mono text-sm" onKeyDown={e => e.key === "Enter" && fetchHistory()} />
+                <Button onClick={fetchHistory} disabled={historyLoading || !historyUserId.trim()} className="gap-2 shrink-0">
+                  {historyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Chercher
+                </Button>
+              </div>
+              {historyData && (() => {
+                const totalWarns = historyData.warns.reduce((s, g) => s + g.warnings.length, 0);
+                const totalNotes = historyData.notes.reduce((s, g) => s + g.notes.length, 0);
+                return (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3 p-3 rounded-md border bg-card">
+                      {historyData.discordUser?.avatarURL && <img src={historyData.discordUser.avatarURL} className="h-10 w-10 rounded-full" />}
+                      <div>
+                        <p className="font-semibold text-sm">{historyData.discordUser?.tag ?? "Utilisateur inconnu"}</p>
+                        <p className="font-mono text-xs text-muted-foreground">{historyData.userId}</p>
+                        <div className="flex gap-3 mt-1">
+                          <span className="text-xs text-orange-600 dark:text-orange-400 font-medium">{totalWarns} warn(s)</span>
+                          <span className="text-xs text-blue-600 dark:text-blue-400 font-medium">{totalNotes} note(s)</span>
+                          {historyData.tempban && <span className="text-xs text-destructive font-medium">Tempban actif</span>}
+                        </div>
+                      </div>
+                    </div>
+                    {historyData.warns.filter(g => g.warnings.length > 0).map(g => (
+                      <div key={g.guildId} className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Warns — <code className="font-mono">{g.guildId}</code></p>
+                        {g.warnings.map(w => (
+                          <div key={w.caseId} className="p-2.5 rounded border bg-orange-500/5 border-orange-300/30">
+                            <p className="text-sm">{w.reason}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Par {w.moderatorTag} — {new Date(w.timestamp).toLocaleString("fr-FR")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {historyData.notes.filter(g => g.notes.length > 0).map(g => (
+                      <div key={g.guildId} className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Notes — <code className="font-mono">{g.guildId}</code></p>
+                        {g.notes.map(n => (
+                          <div key={n.id} className="p-2.5 rounded border bg-blue-500/5 border-blue-300/30">
+                            <p className="text-sm">{n.content}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">Par {n.moderator} — {new Date(n.timestamp).toLocaleString("fr-FR")}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                    {historyData.tempban && (
+                      <div className="p-3 rounded-md border border-destructive/30 bg-destructive/5">
+                        <p className="text-sm font-semibold text-destructive">Tempban actif</p>
+                        <p className="text-xs text-muted-foreground">Serveur : {historyData.tempban.guildId}</p>
+                        {historyData.tempban.expiresAt && <p className="text-xs text-muted-foreground">Expire : {new Date(historyData.tempban.expiresAt).toLocaleString("fr-FR")}</p>}
+                        {historyData.tempban.reason && <p className="text-xs text-muted-foreground">Raison : {historyData.tempban.reason}</p>}
+                      </div>
+                    )}
+                    {totalWarns === 0 && totalNotes === 0 && !historyData.tempban && (
+                      <p className="text-sm text-muted-foreground text-center py-4">Aucun antécédent trouvé pour cet utilisateur.</p>
+                    )}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Global Dashboard ──────────────────────────────────────────────── */}
+        <TabsContent value="global-dashboard" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🌐 Tableau de Bord Global</CardTitle>
+                <CardDescription>Vue d'ensemble de tous les serveurs gérés par le bot.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchGlobalDashboard} disabled={globalDashboardLoading} className="gap-1.5 shrink-0">
+                {globalDashboardLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {globalDashboardLoading ? <Skeleton className="h-64 w-full" /> : !globalDashboard ? (
+                <Button variant="outline" onClick={fetchGlobalDashboard} className="gap-2"><RefreshCw className="h-4 w-4" />Charger</Button>
+              ) : (
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[
+                      { label: "Serveurs", value: globalDashboard.guildCount, icon: "🏠" },
+                      { label: "Membres total", value: globalDashboard.totalMembers.toLocaleString("fr-FR"), icon: "👥" },
+                      { label: "Tempbans actifs", value: globalDashboard.totalTempBans, icon: "⏳" },
+                      { label: "Avertissements", value: globalDashboard.totalWarns, icon: "⚠️" },
+                      { label: "Notes", value: globalDashboard.totalNotes, icon: "📝" },
+                    ].map(({ label, value, icon }) => (
+                      <div key={label} className="p-3 rounded-lg border bg-card text-center">
+                        <div className="text-xl mb-1">{icon}</div>
+                        <div className="text-lg font-bold font-mono">{value}</div>
+                        <div className="text-xs text-muted-foreground">{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {globalDashboard.top5Cmds.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Top 5 commandes</p>
+                      {globalDashboard.top5Cmds.map(({ name, count }) => (
+                        <div key={name} className="flex items-center gap-3">
+                          <code className="font-mono text-sm text-primary w-32 truncate">{name}</code>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div className="bg-primary h-2 rounded-full" style={{ width: `${Math.min(100, (count / (globalDashboard.top5Cmds[0]?.count || 1)) * 100)}%` }} />
+                          </div>
+                          <span className="font-mono text-xs text-muted-foreground w-8 text-right">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Serveurs</p>
+                    {globalDashboard.guilds.map(g => (
+                      <div key={g.id} className="flex items-center gap-3 p-3 rounded-md border bg-card">
+                        {g.iconURL ? <img src={g.iconURL} className="h-8 w-8 rounded-full shrink-0" /> : <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0 text-xs font-bold">{g.name[0]}</div>}
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{g.name}</p>
+                          <p className="text-xs text-muted-foreground font-mono">{g.id}</p>
+                          <div className="flex gap-2 mt-0.5 flex-wrap">
+                            <span className="text-xs text-muted-foreground">{g.memberCount} membres</span>
+                            {g.warns > 0 && <span className="text-xs text-orange-500">{g.warns} warns</span>}
+                            {g.tempbans > 0 && <span className="text-xs text-destructive">{g.tempbans} tempbans</span>}
+                            {g.maintenanceActive && <span className="text-xs bg-orange-500/20 text-orange-600 dark:text-orange-400 px-1.5 rounded">maintenance</span>}
+                            {!g.logConfigured && <span className="text-xs bg-destructive/10 text-destructive px-1.5 rounded">sans logs</span>}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Invite Lookup ─────────────────────────────────────────────────── */}
+        <TabsContent value="invite-lookup" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔗 Qui a invité ce membre ?</CardTitle>
+              <CardDescription>Retrouve qui a invité un utilisateur et via quel code, sur tous les serveurs.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input
+                  value={inviteLookupId}
+                  onChange={e => setInviteLookupId(e.target.value)}
+                  placeholder="ID Discord du membre (ex: 123456789012345678)"
+                  className="font-mono text-sm"
+                  onKeyDown={e => e.key === "Enter" && fetchInviteLookup()}
+                />
+                <Button onClick={fetchInviteLookup} disabled={inviteLookupLoading || !inviteLookupId.trim()} className="gap-2 shrink-0">
+                  {inviteLookupLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Chercher
+                </Button>
+              </div>
+
+              {inviteLookupResult && (
+                inviteLookupResult.results.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <Users className="h-8 w-8 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Aucune invitation trouvée pour <code className="font-mono">{inviteLookupResult.memberId}</code>.</p>
+                    <p className="text-xs text-muted-foreground">Le membre a peut-être rejoint via un lien vanity, OAuth, ou avant l'activation du tracker.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground font-mono">
+                      {inviteLookupResult.results.length} résultat(s) pour <span className="text-foreground">{inviteLookupResult.memberId}</span>
+                    </p>
+                    {inviteLookupResult.results.map(r => {
+                      const active = Math.max(0, r.inviterStats.invited - r.inviterStats.left);
+                      return (
+                        <div key={r.guildId} className="p-4 rounded-lg border bg-card space-y-3">
+                          {/* Serveur */}
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground border-b border-border/50 pb-2">
+                            <span className="text-base">🏠</span>
+                            <span className="font-semibold text-foreground">{r.guildName}</span>
+                            <code className="font-mono ml-auto">{r.guildId}</code>
+                          </div>
+
+                          {/* Inviteur */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Invité par</p>
+                              <div className="flex items-center gap-2">
+                                <div className="h-7 w-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                                  <Users className="h-3.5 w-3.5 text-primary" />
+                                </div>
+                                <div>
+                                  <p className="font-mono text-sm font-semibold">{r.inviterId}</p>
+                                  <a
+                                    href={`https://discord.com/users/${r.inviterId}`}
+                                    target="_blank" rel="noreferrer"
+                                    className="text-[10px] text-primary hover:underline"
+                                  >
+                                    Voir le profil →
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Code d'invitation</p>
+                              <div className="flex items-center gap-2">
+                                <code className="font-mono text-sm bg-muted px-2 py-1 rounded">{r.inviteCode}</code>
+                                <a
+                                  href={`https://discord.gg/${r.inviteCode}`}
+                                  target="_blank" rel="noreferrer"
+                                  className="text-[10px] text-primary hover:underline"
+                                >
+                                  discord.gg/{r.inviteCode}
+                                </a>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Stats de l'inviteur */}
+                          <div className="grid grid-cols-3 gap-2 pt-1 border-t border-border/50">
+                            {[
+                              { label: "Total invités", value: r.inviterStats.invited, color: "text-blue-500" },
+                              { label: "Actifs", value: active, color: active > 0 ? "text-green-500" : "text-muted-foreground" },
+                              { label: "Partis", value: r.inviterStats.left, color: r.inviterStats.left > 0 ? "text-red-500" : "text-muted-foreground" },
+                            ].map(({ label, value, color }) => (
+                              <div key={label} className="text-center p-2 rounded-md bg-muted/40">
+                                <p className={`text-lg font-bold font-mono ${color}`}>{value}</p>
+                                <p className="text-[10px] text-muted-foreground uppercase">{label}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Stats Commandes ───────────────────────────────────────────────── */}
+        <TabsContent value="cmd-stats" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">📈 Statistiques des Commandes</CardTitle>
+                <CardDescription>Utilisation des commandes sur ce serveur.</CardDescription>
+              </div>
+              <div className="flex gap-2 shrink-0">
+                <Button variant="outline" size="sm" onClick={fetchCmdStats} disabled={cmdStatsLoading} className="gap-1.5">
+                  {cmdStatsLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+                <Button variant="destructive" size="sm" onClick={resetCmdStats} className="gap-1.5">
+                  <Trash2 className="h-4 w-4" />
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {cmdStatsLoading ? <Skeleton className="h-48 w-full" /> : cmdStats.length === 0 ? (
+                <div className="text-center py-8">
+                  <Activity className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune statistique disponible.</p>
+                  <Button variant="outline" size="sm" onClick={fetchCmdStats} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {cmdStats.map(({ name, count }, i) => (
+                    <div key={name} className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">#{i+1}</span>
+                      <code className="font-mono text-sm text-primary w-40 truncate">{name}</code>
+                      <div className="flex-1 bg-muted rounded-full h-2">
+                        <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / (cmdStats[0]?.count || 1)) * 100)}%` }} />
+                      </div>
+                      <span className="font-mono text-xs font-semibold w-12 text-right shrink-0">{count.toLocaleString("fr-FR")}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Activité — Classement Messages ───────────────────────────── */}
+        <TabsContent value="activity-ranking" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">📊 Classement Messages</CardTitle>
+                <CardDescription>Top membres par nombre de messages envoyés sur la période.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Select value={String(msgRankPeriod)} onValueChange={(v) => { setMsgRankPeriod(Number(v)); fetchMsgRanking(Number(v)); }}>
+                  <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 derniers jours</SelectItem>
+                    <SelectItem value="14">14 derniers jours</SelectItem>
+                    <SelectItem value="30">30 derniers jours</SelectItem>
+                    <SelectItem value="90">90 derniers jours</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={() => fetchMsgRanking()} disabled={msgRankingLoading} className="gap-1.5">
+                  {msgRankingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {msgRankingLoading ? <Skeleton className="h-48 w-full" /> : msgRanking.length === 0 ? (
+                <div className="text-center py-8">
+                  <BarChart2 className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune donnée disponible. Les messages seront tracés automatiquement.</p>
+                  <Button variant="outline" size="sm" onClick={() => fetchMsgRanking()} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {msgRanking.map(({ userId, count }, i) => (
+                    <div key={userId} className="flex items-center gap-3">
+                      <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">#{i + 1}</span>
+                      <code className="font-mono text-sm text-primary w-44 truncate">{userId}</code>
+                      <div className="flex-1 bg-muted rounded-full h-2">
+                        <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (count / (msgRanking[0]?.count || 1)) * 100)}%` }} />
+                      </div>
+                      <span className="font-mono text-xs font-semibold w-16 text-right shrink-0">{count.toLocaleString("fr-FR")} msgs</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Activité — Classement Vocal ───────────────────────────────── */}
+        <TabsContent value="activity-voice" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🎤 Classement Vocal</CardTitle>
+                <CardDescription>Top membres par temps passé en salon vocal sur la période.</CardDescription>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Select value={String(msgRankPeriod)} onValueChange={(v) => { setMsgRankPeriod(Number(v)); fetchVoiceRanking(Number(v)); }}>
+                  <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">7 derniers jours</SelectItem>
+                    <SelectItem value="14">14 derniers jours</SelectItem>
+                    <SelectItem value="30">30 derniers jours</SelectItem>
+                    <SelectItem value="90">90 derniers jours</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={() => fetchVoiceRanking()} disabled={voiceRankingLoading} className="gap-1.5">
+                  {voiceRankingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {voiceRankingLoading ? <Skeleton className="h-48 w-full" /> : voiceRanking.length === 0 ? (
+                <div className="text-center py-8">
+                  <Mic className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucune donnée disponible. Le temps vocal sera tracé automatiquement.</p>
+                  <Button variant="outline" size="sm" onClick={() => fetchVoiceRanking()} className="mt-3 gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {voiceRanking.map(({ userId, totalMs }, i) => {
+                    const totalMin = Math.floor(totalMs / 60_000);
+                    const hrs = Math.floor(totalMin / 60);
+                    const mins = totalMin % 60;
+                    const label = hrs > 0 ? `${hrs}h${mins.toString().padStart(2, "0")}` : `${mins}min`;
+                    return (
+                      <div key={userId} className="flex items-center gap-3">
+                        <span className="text-xs font-mono text-muted-foreground w-6 text-right shrink-0">#{i + 1}</span>
+                        <code className="font-mono text-sm text-primary w-44 truncate">{userId}</code>
+                        <div className="flex-1 bg-muted rounded-full h-2">
+                          <div className="bg-primary h-2 rounded-full transition-all" style={{ width: `${Math.min(100, (totalMs / (voiceRanking[0]?.totalMs || 1)) * 100)}%` }} />
+                        </div>
+                        <span className="font-mono text-xs font-semibold w-16 text-right shrink-0">{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── Activité — Tiers ──────────────────────────────────────────── */}
+        <TabsContent value="activity-tiers" className="space-y-4">
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-base font-mono uppercase">🏅 Tiers d'Activité</CardTitle>
+                <CardDescription>Configure les paliers d'activité et les rôles associés attribués automatiquement.</CardDescription>
+              </div>
+              <Button variant="outline" size="sm" onClick={fetchActivityTiers} disabled={activityTiersLoading} className="gap-1.5 shrink-0">
+                {activityTiersLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {activityTiersLoading && !activityTiersConfig ? (
+                <Skeleton className="h-48 w-full" />
+              ) : !activityTiersConfig ? (
+                <div className="text-center py-8">
+                  <Layers className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground mb-3">Configuration non chargée.</p>
+                  <Button variant="outline" size="sm" onClick={fetchActivityTiers} className="gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (<>
+                {/* Activation */}
+                <div className="flex items-center justify-between p-3 border rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium">Système de tiers actif</p>
+                    <p className="text-xs text-muted-foreground">Active la vérification et l'attribution des rôles de tier.</p>
+                  </div>
+                  <Button size="sm" variant={activityTiersConfig.activityTiersEnabled ? "default" : "outline"}
+                    onClick={() => saveActivityTiers({ activityTiersEnabled: !activityTiersConfig.activityTiersEnabled })}
+                    disabled={activityTiersSaving}>
+                    {activityTiersConfig.activityTiersEnabled ? <Power className="h-4 w-4 mr-1.5" /> : <PowerOff className="h-4 w-4 mr-1.5" />}
+                    {activityTiersConfig.activityTiersEnabled ? "Activé" : "Désactivé"}
+                  </Button>
+                </div>
+
+                {/* Période */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Période d'activité (jours)</label>
+                  <div className="flex gap-2">
+                    <Input type="number" min={1} max={365} value={activityTiersConfig.activityTierPeriodDays}
+                      onChange={(e) => setActivityTiersConfig({ ...activityTiersConfig, activityTierPeriodDays: Number(e.target.value) })}
+                      className="w-32 font-mono" />
+                    <Button size="sm" onClick={() => saveActivityTiers({ activityTierPeriodDays: activityTiersConfig.activityTierPeriodDays })} disabled={activityTiersSaving} className="gap-1.5">
+                      <Save className="h-4 w-4" />Sauvegarder
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Messages et temps vocal comptés sur les {activityTiersConfig.activityTierPeriodDays} derniers jours.</p>
+                </div>
+
+                {/* Tiers */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Paliers ({activityTiersConfig.activityTiers.length})</label>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => {
+                      const newTier = { name: "Nouveau Tier", minMessages: 100, minVoiceMinutes: 0, roleId: null };
+                      setActivityTiersConfig({ ...activityTiersConfig, activityTiers: [...activityTiersConfig.activityTiers, newTier] });
+                    }}>
+                      <Plus className="h-3.5 w-3.5" />Ajouter
+                    </Button>
+                  </div>
+                  {activityTiersConfig.activityTiers.length === 0 ? (
+                    <p className="text-sm text-muted-foreground text-center py-4">Aucun palier configuré. Cliquez sur "Ajouter" pour commencer.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {activityTiersConfig.activityTiers.map((tier, idx) => (
+                        <div key={idx} className="p-3 border rounded-lg space-y-3 bg-muted/30">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono text-muted-foreground w-6">#{idx + 1}</span>
+                            <Input value={tier.name} className="h-8 font-medium text-sm"
+                              onChange={(e) => {
+                                const updated = [...activityTiersConfig.activityTiers];
+                                updated[idx] = { ...tier, name: e.target.value };
+                                setActivityTiersConfig({ ...activityTiersConfig, activityTiers: updated });
+                              }} placeholder="Nom du tier" />
+                            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-8 w-8 p-0 shrink-0"
+                              onClick={() => {
+                                const updated = activityTiersConfig.activityTiers.filter((_, i) => i !== idx);
+                                setActivityTiersConfig({ ...activityTiersConfig, activityTiers: updated });
+                              }}>
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 pl-8">
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Msgs min.</label>
+                              <Input type="number" min={0} value={tier.minMessages} className="h-8 text-sm font-mono"
+                                onChange={(e) => {
+                                  const updated = [...activityTiersConfig.activityTiers];
+                                  updated[idx] = { ...tier, minMessages: Number(e.target.value) };
+                                  setActivityTiersConfig({ ...activityTiersConfig, activityTiers: updated });
+                                }} />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Vocal min. (min)</label>
+                              <Input type="number" min={0} value={tier.minVoiceMinutes} className="h-8 text-sm font-mono"
+                                onChange={(e) => {
+                                  const updated = [...activityTiersConfig.activityTiers];
+                                  updated[idx] = { ...tier, minVoiceMinutes: Number(e.target.value) };
+                                  setActivityTiersConfig({ ...activityTiersConfig, activityTiers: updated });
+                                }} />
+                            </div>
+                            <div>
+                              <label className="text-xs text-muted-foreground mb-1 block">Role ID</label>
+                              <Input value={tier.roleId ?? ""} className="h-8 text-sm font-mono"
+                                onChange={(e) => {
+                                  const updated = [...activityTiersConfig.activityTiers];
+                                  updated[idx] = { ...tier, roleId: e.target.value || null };
+                                  setActivityTiersConfig({ ...activityTiersConfig, activityTiers: updated });
+                                }} placeholder="Optionnel" />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {activityTiersConfig.activityTiers.length > 0 && (
+                    <Button onClick={() => saveActivityTiers({ activityTiers: activityTiersConfig.activityTiers })} disabled={activityTiersSaving} className="gap-1.5 w-full">
+                      {activityTiersSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Sauvegarder tous les tiers
+                    </Button>
+                  )}
+                </div>
+              </>)}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── IA Mod — Config ───────────────────────────────────────────── */}
+        <TabsContent value="ai-mod-config" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🤖 Configuration IA Mod</CardTitle>
+              <CardDescription>Active et configure les modules d'intelligence artificielle de modération.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {aiModLoading && !aiModDraft ? (
+                <Skeleton className="h-48 w-full" />
+              ) : !aiModDraft ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-muted-foreground mb-3">Config IA non chargée.</p>
+                  <Button variant="outline" size="sm" onClick={fetchAiModCfg} className="gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <>
+                  {/* Toxicité IA */}
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-sm">🔬 Toxicité IA</p>
+                        <p className="text-xs text-muted-foreground">Analyse chaque message et sanctionne selon le seuil configuré.</p>
+                      </div>
+                      <button
+                        onClick={() => setAiModDraft(d => d ? { ...d, aiToxicityEnabled: !d.aiToxicityEnabled } : d)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiModDraft.aiToxicityEnabled ? "bg-green-500" : "bg-muted"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiModDraft.aiToxicityEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                      </button>
+                    </div>
+                    {aiModDraft.aiToxicityEnabled && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="text-xs font-medium mb-1 block">Seuil (0-100)</label>
+                          <Input type="number" min={0} max={100} value={aiModDraft.aiToxicityThreshold}
+                            onChange={e => setAiModDraft(d => d ? { ...d, aiToxicityThreshold: Number(e.target.value) } : d)}
+                            className="text-sm h-8" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium mb-1 block">Action</label>
+                          <Select value={aiModDraft.aiToxicityAction} onValueChange={v => setAiModDraft(d => d ? { ...d, aiToxicityAction: v as AiModCfg["aiToxicityAction"] } : d)}>
+                            <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="warn">Avertissement</SelectItem>
+                              <SelectItem value="timeout">Timeout 24h</SelectItem>
+                              <SelectItem value="kick">Expulsion</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Raid Predict */}
+                  <div className="rounded-lg border border-border p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-sm">🛡️ Raid Predict</p>
+                        <p className="text-xs text-muted-foreground">Prédit les raids en analysant les arrivées sur une fenêtre de 5 min.</p>
+                      </div>
+                      <button
+                        onClick={() => setAiModDraft(d => d ? { ...d, aiRaidPredictEnabled: !d.aiRaidPredictEnabled } : d)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiModDraft.aiRaidPredictEnabled ? "bg-green-500" : "bg-muted"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiModDraft.aiRaidPredictEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                      </button>
+                    </div>
+                    {aiModDraft.aiRaidPredictEnabled && (
+                      <div className="grid grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="text-xs font-medium mb-1 block">Seuil joins/min</label>
+                          <Input type="number" min={1} max={50} value={aiModDraft.aiRaidPredictJoins}
+                            onChange={e => setAiModDraft(d => d ? { ...d, aiRaidPredictJoins: Number(e.target.value) } : d)}
+                            className="text-sm h-8" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium mb-1 block">Âge min suspect (jours)</label>
+                          <Input type="number" min={1} max={90} value={aiModDraft.aiRaidPredictMinAge}
+                            onChange={e => setAiModDraft(d => d ? { ...d, aiRaidPredictMinAge: Number(e.target.value) } : d)}
+                            className="text-sm h-8" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Auto-Lock */}
+                  <div className="rounded-lg border border-border p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-sm">🔒 Auto-Lock</p>
+                        <p className="text-xs text-muted-foreground">Verrouille automatiquement les salons texte si un raid est prédit (score ≥ 70).</p>
+                      </div>
+                      <button
+                        onClick={() => setAiModDraft(d => d ? { ...d, aiAutoLockEnabled: !d.aiAutoLockEnabled } : d)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiModDraft.aiAutoLockEnabled ? "bg-green-500" : "bg-muted"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiModDraft.aiAutoLockEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Auto-Punish */}
+                  <div className="rounded-lg border border-border p-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-semibold text-sm">⚙️ Auto-Punish</p>
+                        <p className="text-xs text-muted-foreground">Sanctions renforcées automatiques pour les membres avec un trust score &lt; 25.</p>
+                      </div>
+                      <button
+                        onClick={() => setAiModDraft(d => d ? { ...d, aiAutoPunishEnabled: !d.aiAutoPunishEnabled } : d)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${aiModDraft.aiAutoPunishEnabled ? "bg-green-500" : "bg-muted"}`}
+                      >
+                        <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${aiModDraft.aiAutoPunishEnabled ? "translate-x-6" : "translate-x-1"}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Config summary badges */}
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {aiModDraft.aiToxicityEnabled    && <Badge variant="secondary">🔬 Toxicité ON (seuil {aiModDraft.aiToxicityThreshold})</Badge>}
+                    {aiModDraft.aiRaidPredictEnabled  && <Badge variant="secondary">🛡️ Raid Predict ON</Badge>}
+                    {aiModDraft.aiAutoLockEnabled     && <Badge variant="secondary">🔒 Auto-Lock ON</Badge>}
+                    {aiModDraft.aiAutoPunishEnabled   && <Badge variant="secondary">⚙️ Auto-Punish ON</Badge>}
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <Button onClick={saveAiModCfg} disabled={aiModLoading} className="gap-1.5">
+                      {aiModLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      Sauvegarder
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={fetchAiModCfg} disabled={aiModLoading} className="gap-1.5">
+                      <RefreshCw className="h-4 w-4" />Recharger
+                    </Button>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── IA Mod — Trust Score ───────────────────────────────────────── */}
+        <TabsContent value="ai-trust-lookup" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">🔍 Trust Score — Analyse d'un Membre</CardTitle>
+              <CardDescription>Calcule le score de confiance IA d'un membre du serveur (0 = dangereux · 100 = fiable).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex gap-2">
+                <Input value={aiTrustId} onChange={e => setAiTrustId(e.target.value)}
+                  placeholder="ID Discord du membre…" className="font-mono text-sm"
+                  onKeyDown={e => { if (e.key === "Enter") void lookupAiTrust(); }} />
+                <Button onClick={lookupAiTrust} disabled={aiTrustLoading || !aiTrustId.trim()} className="gap-1.5 shrink-0">
+                  {aiTrustLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                  Analyser
+                </Button>
+              </div>
+              {aiTrustResult && (
+                <div className="space-y-3">
+                  {/* Score bar */}
+                  <div className="rounded-lg border border-border p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-sm">Score de confiance</span>
+                      <Badge variant={aiTrustResult.score >= 70 ? "default" : aiTrustResult.score >= 40 ? "secondary" : "destructive"}>
+                        {aiTrustResult.level?.toUpperCase()} — {aiTrustResult.score}/100
+                      </Badge>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-3">
+                      <div className="h-3 rounded-full transition-all"
+                        style={{
+                          width: `${Math.max(0, Math.min(100, aiTrustResult.score))}%`,
+                          backgroundColor: aiTrustResult.score >= 70 ? "#22c55e" : aiTrustResult.score >= 40 ? "#3b82f6" : aiTrustResult.score >= 20 ? "#f59e0b" : "#ef4444",
+                        }} />
+                    </div>
+                  </div>
+                  {/* Facteurs */}
+                  {aiTrustResult.reasons && aiTrustResult.reasons.length > 0 && (
+                    <div className="rounded-lg border border-border p-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Facteurs analysés</p>
+                      <div className="space-y-1">
+                        {aiTrustResult.reasons.map((r, i) => (
+                          <p key={i} className="text-xs font-mono">{r}</p>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {/* Comportement session */}
+                  {aiTrustResult.behavior && (
+                    <div className="rounded-lg border border-border p-4">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase mb-2">Comportement (session)</p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        {[
+                          ["Messages", aiTrustResult.behavior.messages],
+                          ["Liens", aiTrustResult.behavior.links],
+                          ["Mentions", aiTrustResult.behavior.mentions],
+                          ["Tentatives toxiques", aiTrustResult.behavior.toxicAttempts],
+                          ["Violations", aiTrustResult.behavior.violations],
+                        ].map(([label, val]) => (
+                          <div key={label as string} className="rounded bg-muted/40 px-2 py-1.5">
+                            <p className="text-xs text-muted-foreground">{label}</p>
+                            <p className="font-mono font-bold text-sm">{val}</p>
+                          </div>
+                        ))}
+                      </div>
+                      {aiTrustResult.risk && (
+                        <p className="text-xs mt-2 font-mono text-muted-foreground">
+                          Risque comportemental : <span className="font-bold text-foreground">{aiTrustResult.risk.level}</span> ({aiTrustResult.risk.score}/100)
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── IA Mod — Raid Predict ──────────────────────────────────────── */}
+        <TabsContent value="ai-raid-status" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">🛡️ Raid Predict — Statut en Temps Réel</CardTitle>
+                  <CardDescription>Analyse les arrivées récentes sur une fenêtre glissante de 5 minutes.</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchAiRaidStatus} disabled={aiRaidLoading} className="gap-1.5 shrink-0">
+                  {aiRaidLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {aiRaidLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : !aiRaidStatus ? (
+                <div className="text-center py-8">
+                  <ShieldAlert className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground mb-3">Aucune donnée disponible — cliquer sur Rafraîchir.</p>
+                  <Button variant="outline" size="sm" onClick={fetchAiRaidStatus} className="gap-1.5"><RefreshCw className="h-4 w-4" />Charger</Button>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {/* Niveau */}
+                  <div className="rounded-lg border border-border p-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs text-muted-foreground uppercase font-semibold mb-1">Niveau de menace</p>
+                      <p className="text-2xl font-bold font-mono">
+                        {aiRaidStatus.level === "calme" ? "🟢" : aiRaidStatus.level === "surveillance" ? "🟡" : aiRaidStatus.level === "alerte" ? "🟠" : "🔴"}{" "}
+                        {aiRaidStatus.level?.toUpperCase()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-muted-foreground">Score</p>
+                      <p className="text-3xl font-mono font-bold">{aiRaidStatus.score}</p>
+                    </div>
+                  </div>
+                  {/* Métriques */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {[
+                      ["Arrivées récentes", aiRaidStatus.recentJoins],
+                      ["Joins/min", aiRaidStatus.joinsPerMin?.toFixed(2)],
+                      ["Ratio nouveaux comptes", `${Math.round((aiRaidStatus.newAccountRatio ?? 0) * 100)}%`],
+                      ["Ratio sans avatar", `${Math.round((aiRaidStatus.noAvatarRatio ?? 0) * 100)}%`],
+                      ["Âge moyen (jours)", aiRaidStatus.avgAgeDays?.toFixed(1)],
+                    ].map(([label, val]) => (
+                      <div key={label as string} className="rounded-lg bg-muted/40 border border-border px-3 py-2 text-center">
+                        <p className="text-xs text-muted-foreground">{label}</p>
+                        <p className="font-mono font-bold text-base">{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Flags */}
+                  {aiRaidStatus.flags && aiRaidStatus.flags.length > 0 && (
+                    <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-1">
+                      <p className="text-xs font-semibold text-destructive uppercase">Alertes détectées</p>
+                      {aiRaidStatus.flags.map((f, i) => (
+                        <p key={i} className="text-xs font-mono text-foreground">{f}</p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── IA Mod — Membres Risqués ───────────────────────────────────── */}
+        <TabsContent value="ai-risky" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="text-base font-mono uppercase">⚠️ Membres Risqués (Comportement)</CardTitle>
+                  <CardDescription>Membres avec le score comportemental IA le plus élevé (session en cours, max 20).</CardDescription>
+                </div>
+                <Button variant="outline" size="sm" onClick={fetchAiRiskyMembers} disabled={aiRiskyLoading} className="gap-1.5 shrink-0">
+                  {aiRiskyLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {aiRiskyLoading ? (
+                <Skeleton className="h-48 w-full" />
+              ) : aiRiskyMembers.length === 0 ? (
+                <div className="text-center py-8">
+                  <ShieldCheck className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                  <p className="text-sm text-muted-foreground">Aucun membre à risque détecté en session.</p>
+                </div>
+              ) : (
+                <div className="space-y-0.5 font-mono text-xs">
+                  <div className="grid grid-cols-6 gap-2 px-3 py-1.5 text-muted-foreground uppercase text-[10px] font-semibold border-b border-border">
+                    <span className="col-span-2">Membre</span><span>Score</span><span>Msgs</span><span>Toxic</span><span>Viol.</span>
+                  </div>
+                  {aiRiskyMembers.map((m, i) => (
+                    <div key={i} className="grid grid-cols-6 gap-2 px-3 py-1.5 rounded hover:bg-muted/40 items-center">
+                      <span className="col-span-2 truncate text-primary font-semibold">{m.userId}</span>
+                      <span className={m.risk.score >= 70 ? "text-red-400 font-bold" : m.risk.score >= 40 ? "text-yellow-400" : "text-green-400"}>
+                        {m.risk.score}
+                      </span>
+                      <span>{m.stats.messages}</span>
+                      <span>{m.stats.toxicAttempts}</span>
+                      <span>{m.stats.violations}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── IA Mod — Commandes / ──────────────────────────────────────── */}
+        <TabsContent value="ai-commands" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-mono uppercase">📋 Commandes IA — Référence Complète</CardTitle>
+              <CardDescription>Toutes les commandes slash <code>/</code> et préfixe <code>&amp;</code> du système IA. Disponibles pour les modérateurs (ManageMessages).</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {([
+                {
+                  icon: "🛡️", title: "/trust-score @membre", alias: "&trust-score @m",
+                  desc: "Calcule et affiche le score de confiance IA d'un membre (0 = dangereux · 100 = fiable). Analyse l'âge du compte, avatar, ancienneté serveur, avertissements, rôles et pseudonyme.",
+                  badges: ["Admin", "Modérateur"],
+                },
+                {
+                  icon: "🔍", title: "/ai-scan [limite]", alias: "&ai-scan [n]",
+                  desc: "Scanne tous les membres du serveur et classe les plus suspects du plus dangereux au plus fiable. Limite par défaut : 10 membres.",
+                  badges: ["Admin"],
+                },
+                {
+                  icon: "🚫", title: "/smartban @membre [raison] [global] [messages]", alias: "&smartban @m",
+                  desc: "Ban intelligent : analyse le trust score avant de bannir, propose une blacklist globale automatique si le score est très bas. Option de suppression des messages (0-7 jours).",
+                  badges: ["Admin", "BanMembers"],
+                },
+                {
+                  icon: "📡", title: "/raid-predict", alias: "&raid-predict",
+                  desc: "Affiche le risque de raid en temps réel sur une fenêtre de 5 minutes : niveau (calme/surveillance/alerte/raid), joins/min, ratio nouveaux comptes, ratio sans avatar.",
+                  badges: ["Admin", "Modérateur"],
+                },
+                {
+                  icon: "🤖", title: "/ai-mod statut", alias: "&ai-mod statut",
+                  desc: "Vue d'ensemble de la configuration IA du serveur : état de chaque module (toxicité, raid predict, auto-lock, auto-punish) avec leurs paramètres actuels.",
+                  badges: ["Admin"],
+                },
+                {
+                  icon: "🔬", title: "/ai-mod toxicite [activer] [seuil] [action]", alias: "&ai-mod toxicite",
+                  desc: "Configure le module de détection de toxicité IA. Seuil : 0-100 (défaut 70). Action : warn (avertissement) · timeout (24h) · kick (expulsion).",
+                  badges: ["Admin"],
+                },
+                {
+                  icon: "🛡️", title: "/ai-mod raid [activer] [seuil] [age-min]", alias: "&ai-mod raid",
+                  desc: "Configure le Raid Predict. Seuil : nombre de joins/min déclenchant l'alerte (défaut 5). Age-min : âge en jours en dessous duquel un compte est suspect (défaut 7).",
+                  badges: ["Admin"],
+                },
+                {
+                  icon: "🔒", title: "/ai-mod autolock [activer]", alias: "&ai-mod autolock",
+                  desc: "Active/désactive le verrouillage automatique de tous les salons texte lorsqu'un raid est prédit avec un score ≥ 70.",
+                  badges: ["Admin"],
+                },
+                {
+                  icon: "⚙️", title: "/ai-mod punish [activer]", alias: "&ai-mod punish",
+                  desc: "Active/désactive les sanctions automatiques renforcées pour les membres dont le trust score est inférieur à 25 (avertissements plus sévères, mise en quarantaine prioritaire).",
+                  badges: ["Admin"],
+                },
+              ] as { icon: string; title: string; alias: string; desc: string; badges: string[] }[]).map((cmd) => (
+                <div key={cmd.title} className="rounded-lg border border-border p-4 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5 min-w-0">
+                      <p className="font-mono text-sm font-semibold text-primary break-all">
+                        {cmd.icon} {cmd.title}
+                      </p>
+                      <p className="font-mono text-xs text-muted-foreground">↳ {cmd.alias}</p>
+                    </div>
+                    <div className="flex gap-1 shrink-0">
+                      {cmd.badges.map(b => (
+                        <Badge key={b} variant="outline" className="text-[10px] px-1.5 py-0">{b}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">{cmd.desc}</p>
+                </div>
+              ))}
+
+              {/* Intégration automod */}
+              <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
+                <p className="text-sm font-semibold">🔗 Intégration avec l'Automod</p>
+                <ul className="text-xs text-muted-foreground space-y-1 list-disc list-inside">
+                  <li>Si <strong>Toxicité IA activée</strong> → remplace l'anti-insulte classique (plus complet, seuil configurable)</li>
+                  <li>Si <strong>Raid Predict activé</strong> → <code>recordRaidJoin</code> s'exécute à chaque arrivée de membre</li>
+                  <li>Si <strong>Auto-Lock activé</strong> → verrouillage immédiat de tous les salons texte sur raid détecté</li>
+                  <li>Si <strong>Auto-Punish activé</strong> → trust score &lt; 25 → sanctions automatiques renforcées</li>
+                  <li>Le <strong>Behavior Tracker</strong> s'active sur chaque message (si intent Message Content actif)</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+      </Tabs>
+    </div>
+  );
+}
